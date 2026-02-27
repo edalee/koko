@@ -54,4 +54,4 @@ docs/plans/            Implementation plans
 
 ## License
 
-MIT
+[Business Source License 1.1](LICENSE) — source available, non-competing production use allowed. Converts to GPL 2.0+ on 2030-02-27.
