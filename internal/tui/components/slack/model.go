@@ -9,10 +9,9 @@ import (
 )
 
 var (
-	activeBorderColor   = lipgloss.Color("62")
-	inactiveBorderColor = lipgloss.Color("240")
-	titleColor          = lipgloss.Color("62")
-	dimColor            = lipgloss.Color("240")
+	titleColor    = lipgloss.Color("62")
+	dimTitleColor = lipgloss.Color("240")
+	dimColor      = lipgloss.Color("240")
 )
 
 type Model struct {
@@ -34,21 +33,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	w := max(m.width-2, 0)
-	h := max(m.height-2, 0)
-
-	borderColor := inactiveBorderColor
+	tc := dimTitleColor
 	if m.focused {
-		borderColor = activeBorderColor
+		tc = titleColor
 	}
 
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(w).
-		Height(h)
-
-	title := lipgloss.NewStyle().Bold(true).Foreground(titleColor).Render(" Slack")
+	title := lipgloss.NewStyle().Bold(true).Foreground(tc).Render(" Slack")
 	dim := lipgloss.NewStyle().Foreground(dimColor)
 
 	lines := []string{
@@ -58,7 +48,10 @@ func (m Model) View() string {
 		fmt.Sprintf("  Mentions: %s", dim.Render("2 new")),
 	}
 
-	return style.Render(strings.Join(lines, "\n"))
+	return lipgloss.NewStyle().
+		Width(m.width).
+		Height(m.height).
+		Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) SetSize(width, height int) Model {
@@ -70,4 +63,8 @@ func (m Model) SetSize(width, height int) Model {
 func (m Model) SetFocus(focused bool) Model {
 	m.focused = focused
 	return m
+}
+
+func (m Model) Focused() bool {
+	return m.focused
 }

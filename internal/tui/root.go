@@ -42,6 +42,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.updateFocus()
 		return m, nil
 
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg), nil
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case KeyQuit:
@@ -113,6 +116,7 @@ func (m Model) View() tea.View {
 	statusBar := m.renderStatusBar()
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, content, statusBar))
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -147,5 +151,37 @@ func (m Model) updateFocus() Model {
 	m.sidebar.Slack = m.sidebar.Slack.SetFocus(m.focus == FocusSlack)
 	m.sidebar.GitHub = m.sidebar.GitHub.SetFocus(m.focus == FocusGitHub)
 	m.sidebar.Summary = m.sidebar.Summary.SetFocus(m.focus == FocusSummary)
+	return m
+}
+
+func (m Model) handleMouseClick(msg tea.MouseClickMsg) Model {
+	mouse := msg.Mouse()
+
+	// Ignore status bar clicks
+	if mouse.Y >= m.height-1 {
+		return m
+	}
+
+	termWidth := m.width
+	if m.sidebarVisible {
+		termWidth = m.width - sidebarWidth
+	}
+
+	if mouse.X < termWidth {
+		m.focus = FocusTerminal
+	} else if m.sidebarVisible {
+		contentH := max(m.height-1, 0)
+		third := contentH / 3
+		switch {
+		case mouse.Y < third:
+			m.focus = FocusSlack
+		case mouse.Y < third*2:
+			m.focus = FocusGitHub
+		default:
+			m.focus = FocusSummary
+		}
+	}
+
+	m = m.updateFocus()
 	return m
 }
