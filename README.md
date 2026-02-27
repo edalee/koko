@@ -2,7 +2,7 @@
 
 A terminal application that serves as a unified workspace for Claude Code sessions, with integrated GitHub and Slack awareness panels.
 
-Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Built with [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) and [Lip Gloss v2](https://github.com/charmbracelet/lipgloss).
 
 ## Features (planned)
 
@@ -14,14 +14,42 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.24+
 - macOS or Linux
 
 ## Getting Started
 
 ```bash
 make build
-./koko
+make run
+```
+
+## Key Bindings
+
+| Key | Action |
+|-----|--------|
+| `ctrl+\` | Toggle sidebar |
+| `ctrl+t` | Focus terminal |
+| `ctrl+s` | Focus Slack panel |
+| `ctrl+g` | Focus GitHub panel |
+| `ctrl+c` | Quit |
+
+## Project Structure
+
+```
+cmd/koko/              Entry point
+internal/tui/          TUI framework
+  root.go              Root model — layout and focus coordination
+  messages.go          Custom message types
+  styles.go            Shared lipgloss styles
+  keymap.go            Key binding constants
+  components/
+    terminal/          Terminal pane (placeholder → PTY)
+    sidebar/           Sidebar container
+    slack/             Slack awareness panel
+    github/            GitHub awareness panel
+    summary/           Aggregated summary panel
+docs/plans/            Implementation plans
 ```
 
 ## License

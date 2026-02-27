@@ -14,9 +14,9 @@ A terminal application (TUI) that serves as a unified workspace. Primary use: ru
 - **Keyboard-driven** - tmux-inspired keybindings
 
 ## Key Dependencies
-- `github.com/charmbracelet/bubbletea` - TUI framework
-- `github.com/charmbracelet/lipgloss` - styling
-- `github.com/charmbracelet/bubbles` - pre-built components
+- `charm.land/bubbletea/v2` - TUI framework (v2)
+- `charm.land/lipgloss/v2` - styling (v2)
+- `github.com/charmbracelet/bubbles` - pre-built components (when needed)
 - `github.com/creack/pty` - PTY for embedded terminal
 - Slack Web API - for DM/thread/mention counts
 - GitHub REST API (or `gh` CLI) - for PR data and actions
@@ -27,6 +27,18 @@ A terminal application (TUI) that serves as a unified workspace. Primary use: ru
 - Keep PRs small and focused
 - `make` targets: `build`, `test`, `lint`, `run`
 
+## Project Structure
+- `cmd/koko/` - entry point
+- `internal/tui/` - root model, messages, styles, keymap
+- `internal/tui/components/` - terminal, sidebar, slack, github, summary
+- `docs/plans/` - implementation plans
+
+## Component Pattern
+- Each component: `New()`, `Init() tea.Cmd`, `Update(msg) (Model, tea.Cmd)`, `View() string`, `SetSize()`, `SetFocus()`
+- Only root returns `tea.View` (v2 requirement); children return `string`
+- Root owns children as concrete struct fields (not interfaces)
+- No circular imports: components define their own styles inline
+
 ## Design Docs
-- Layout and panel specs are in Claude memory (`design.md`)
-- Architecture decisions tracked as ADRs in Claude memory (`decisions.md`)
+- Implementation plans in `docs/plans/`
+- Session memory in Claude memory files (`koko.md`)
