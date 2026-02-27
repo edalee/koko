@@ -1,4 +1,4 @@
-# kōkō OR (Tūī)
+# kōkō is a Tui (Tūī Bird)
 
 A terminal application that serves as a unified workspace for Claude Code sessions, with integrated GitHub and Slack awareness panels.
 
