@@ -1,4 +1,4 @@
-# Tūī (koko)
+# kōkō OR (Tūī)
 
 A terminal application that serves as a unified workspace for Claude Code sessions, with integrated GitHub and Slack awareness panels.
 
