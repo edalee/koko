@@ -33,9 +33,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	w := max(m.width-2, 0)
-	h := max(m.height-2, 0)
-
 	borderColor := inactiveBorderColor
 	if m.focused {
 		borderColor = activeBorderColor
@@ -44,8 +41,8 @@ func (m Model) View() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Width(w).
-		Height(h)
+		Width(m.width).
+		Height(m.height)
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(titleColor).Render(" Terminal")
 	hint := lipgloss.NewStyle().Foreground(dimColor).Render("  (placeholder)")

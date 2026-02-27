@@ -45,9 +45,9 @@ func (m Model) View() string {
 		borderColor = activeBorderColor
 	}
 
-	innerW := max(m.width-2, 0)
+	contentW := max(m.width-2, 0) // content width inside border
 	sep := lipgloss.NewStyle().Foreground(borderColor).
-		Render(strings.Repeat("─", innerW))
+		Render(strings.Repeat("─", contentW))
 
 	inner := lipgloss.JoinVertical(lipgloss.Left,
 		m.Slack.View(),
@@ -60,8 +60,8 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Width(innerW).
-		Height(max(m.height-2, 0)).
+		Width(m.width).
+		Height(m.height).
 		Render(inner)
 }
 
@@ -69,17 +69,17 @@ func (m Model) SetSize(width, height int) Model {
 	m.width = width
 	m.height = height
 
-	innerW := max(width-2, 0)
-	innerH := max(height-2, 0)
-	contentH := max(innerH-2, 0) // subtract 2 separator lines
+	contentW := max(width-2, 0)  // inside border
+	contentH := max(height-2, 0) // inside border
+	panelH := max(contentH-2, 0) // minus 2 separator lines
 
-	slackH := contentH / 3
-	githubH := contentH / 3
-	summaryH := contentH - slackH - githubH
+	slackH := panelH / 3
+	githubH := panelH / 3
+	summaryH := panelH - slackH - githubH
 
-	m.Slack = m.Slack.SetSize(innerW, slackH)
-	m.GitHub = m.GitHub.SetSize(innerW, githubH)
-	m.Summary = m.Summary.SetSize(innerW, summaryH)
+	m.Slack = m.Slack.SetSize(contentW, slackH)
+	m.GitHub = m.GitHub.SetSize(contentW, githubH)
+	m.Summary = m.Summary.SetSize(contentW, summaryH)
 
 	return m
 }
