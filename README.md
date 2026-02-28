@@ -4,13 +4,17 @@ A terminal application that serves as a unified workspace for Claude Code sessio
 
 Built with [Bubble Tea v2](https://github.com/charmbracelet/bubbletea) and [Lip Gloss v2](https://github.com/charmbracelet/lipgloss).
 
-## Features (planned)
+## Features
 
-- **Terminal pane** — Full PTY running zsh, Claude Code, vim, or any CLI tool
+- **Terminal pane** — Embedded PTY running zsh with full ANSI rendering (supports Claude Code, vim, etc.)
+- **Collapsible sidebar** — Stacked panels with click-to-focus and keyboard navigation
+- **Keyboard-driven** — tmux-inspired navigation
+
+### Planned
+
 - **Slack panel** — Unread DM, thread, and mention counts at a glance
 - **GitHub panel** — Open PR counts per repo with quick actions (merge, approve, label, view)
 - **Summary panel** — Aggregated digest of what needs attention
-- **Keyboard-driven** — tmux-inspired navigation, collapsible sidebar
 
 ## Requirements
 
@@ -44,7 +48,7 @@ internal/tui/          TUI framework
   styles.go            Shared lipgloss styles
   keymap.go            Key binding constants
   components/
-    terminal/          Terminal pane (placeholder → PTY)
+    terminal/          Embedded PTY terminal pane
     sidebar/           Sidebar container
     slack/             Slack awareness panel
     github/            GitHub awareness panel
