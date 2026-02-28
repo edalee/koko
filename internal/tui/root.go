@@ -30,7 +30,7 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.terminal.Init()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -45,9 +45,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		return m.handleMouseClick(msg), nil
 
+	case terminal.OutputMsg:
+		var cmd tea.Cmd
+		m.terminal, cmd = m.terminal.Update(msg)
+		return m, cmd
+
+	case terminal.ExitedMsg:
+		var cmd tea.Cmd
+		m.terminal, cmd = m.terminal.Update(msg)
+		return m, cmd
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case KeyQuit:
+			m.terminal.Close()
 			return m, tea.Quit
 		case KeyToggleSidebar:
 			m.sidebarVisible = !m.sidebarVisible
