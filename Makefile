@@ -1,10 +1,12 @@
-.PHONY: build run test lint clean
+.PHONY: dev build test lint clean install-fe
+
+WAILS := $(HOME)/go/bin/wails
+
+dev:
+	$(WAILS) dev
 
 build:
-	go build -o bin/koko ./cmd/koko
-
-run: build
-	./bin/koko
+	$(WAILS) build
 
 test:
 	go test ./...
@@ -13,4 +15,7 @@ lint:
 	golangci-lint run
 
 clean:
-	rm -rf bin/
+	rm -rf build/bin/ frontend/dist/ frontend/node_modules/
+
+install-fe:
+	cd frontend && npm install
