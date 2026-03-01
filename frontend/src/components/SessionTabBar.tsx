@@ -19,24 +19,29 @@ export default function SessionTabBar({
 }: SessionTabBarProps) {
   return (
     <div
-      className="flex h-9 shrink-0 items-center gap-0.5 bg-base px-2 overflow-x-auto"
+      className="flex h-9 shrink-0 items-center gap-1 px-2 overflow-x-auto"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
     >
       {tabs.map((tab) => (
         <button
           key={tab.id}
           className={cn(
-            "group flex h-7 items-center gap-1.5 rounded-md px-3 text-xs transition-colors",
+            "group relative flex h-8 min-w-32 items-center justify-center px-8 text-[13px] transition-colors",
             tab.id === activeTabId
-              ? "bg-tab-active text-foreground"
+              ? "text-foreground"
               : "text-muted-foreground hover:bg-tab-hover hover:text-foreground",
           )}
+          style={
+            tab.id === activeTabId
+              ? { background: 'linear-gradient(135deg, oklch(0.40 0.12 350), oklch(0.28 0.06 260))' }
+              : undefined
+          }
           onClick={() => onSwitch(tab.id)}
         >
           <span className="truncate max-w-32">{tab.title}</span>
           <span
             className={cn(
-              "flex h-4 w-4 items-center justify-center rounded-sm transition-opacity",
+              "absolute right-1.5 flex h-4 w-4 items-center justify-center transition-opacity",
               tab.id === activeTabId
                 ? "opacity-60 hover:opacity-100"
                 : "opacity-0 group-hover:opacity-60 hover:!opacity-100",

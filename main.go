@@ -26,10 +26,10 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 22, G: 22, B: 28, A: 1},
+		BackgroundColour: &options.RGBA{R: 14, G: 16, B: 24, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
-		Frameless:        true,
+		Frameless:        false,
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),
 			WebviewIsTransparent: true,

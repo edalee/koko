@@ -24,7 +24,7 @@ export default function GitHubPanel({ expanded, onToggle }: GitHubPanelProps) {
   const { prs, loading, refresh } = useGitHub();
 
   return (
-    <div className="rounded-lg bg-surface border border-border overflow-hidden">
+    <div className="bg-surface overflow-hidden">
       {/* Header */}
       <button
         className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-tab-hover transition-colors"
@@ -52,7 +52,7 @@ export default function GitHubPanel({ expanded, onToggle }: GitHubPanelProps) {
 
       {/* Expanded content */}
       {expanded && (
-        <div className="border-t border-border max-h-64 overflow-y-auto">
+        <div className="border-t border-border/30 max-h-64 overflow-y-auto">
           {prs.length === 0 && !loading && (
             <p className="px-3 py-2 text-xs text-muted-foreground">No open PRs</p>
           )}

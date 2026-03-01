@@ -15,7 +15,7 @@ export default function SlackPanel({ expanded, onToggle }: SlackPanelProps) {
   const total = mockItems.reduce((sum, i) => sum + i.count, 0);
 
   return (
-    <div className="rounded-lg bg-surface border border-border overflow-hidden">
+    <div className="bg-surface overflow-hidden">
       <button
         className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-tab-hover transition-colors"
         onClick={onToggle}
@@ -26,7 +26,7 @@ export default function SlackPanel({ expanded, onToggle }: SlackPanelProps) {
       </button>
 
       {expanded && (
-        <div className="border-t border-border">
+        <div className="border-t border-border/30">
           {mockItems.map((item) => (
             <div
               key={item.channel}

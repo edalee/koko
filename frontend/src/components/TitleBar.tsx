@@ -7,7 +7,7 @@ interface TitleBarProps {
 export default function TitleBar({ children }: TitleBarProps) {
   return (
     <div
-      className="flex h-10 shrink-0 items-center bg-titlebar border-b border-border select-none"
+      className="flex h-10 shrink-0 items-center bg-titlebar select-none"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       {/* macOS traffic light spacer (inset title bar) */}

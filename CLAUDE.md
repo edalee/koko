@@ -11,7 +11,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **Wails v2 desktop shell** — Go backend + embedded webview
 - **Terminal sessions** — xterm.js v5 + WebGL, one per tab, connected to PTY via Wails events
 - **Panel dock** (right) — draggable panels: GitHub, Slack, Summary
-- **Custom title bar** — frameless window with macOS traffic lights
+- **Custom title bar** — `Frameless: false` + `TitleBarHiddenInset()` for macOS traffic lights
 
 ## Key Dependencies
 **Go:**
@@ -57,7 +57,14 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - PanelDock: @dnd-kit SortableContext for drag-to-reorder panels
 - Panel order persisted to localStorage
 
+## Design System
+- **Theme**: OKLCH dark navy + plum palette in `frontend/src/globals.css`
+- **Elevation** (dark→light): base → titlebar → panel → surface
+- **Principles**: minimal borders, flat tabs, centered text, gradient accents, clean spacing
+- **Design memory**: `.claude/projects/.../memory/design.md` — full color reference + component conventions
+- **`/design` command**: screenshots running app + analyzes against design system
+
 ## Design Docs
-- Implementation plans in `docs/plans/`
-- Session memory in Claude memory files (`koko.md`)
+- Implementation plans in `docs/plans/` (001–006)
+- Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation

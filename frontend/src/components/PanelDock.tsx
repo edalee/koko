@@ -79,7 +79,7 @@ export default function PanelDock({
   }
 
   return (
-    <div className="w-72 shrink-0 bg-panel border-l border-border p-2 space-y-2 overflow-y-auto">
+    <div className="w-72 shrink-0 bg-panel p-3 space-y-3 overflow-y-auto">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

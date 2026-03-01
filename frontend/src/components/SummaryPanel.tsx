@@ -14,7 +14,7 @@ export default function SummaryPanel({
   slackCount,
 }: SummaryPanelProps) {
   return (
-    <div className="rounded-lg bg-surface border border-border overflow-hidden">
+    <div className="bg-surface overflow-hidden">
       <button
         className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-tab-hover transition-colors"
         onClick={onToggle}
@@ -24,7 +24,7 @@ export default function SummaryPanel({
       </button>
 
       {expanded && (
-        <div className="border-t border-border px-3 py-2 text-xs space-y-1">
+        <div className="border-t border-border/30 px-3 py-2 text-xs space-y-1">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Open PRs</span>
             <span className="text-foreground">{prCount}</span>

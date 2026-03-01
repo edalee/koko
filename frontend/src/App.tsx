@@ -28,7 +28,10 @@ export default function App() {
   const slackCount = 6;
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-base">
+    <div
+      className="flex h-screen w-screen flex-col"
+      style={{ background: 'linear-gradient(180deg, oklch(0.10 0.02 260), oklch(0.18 0.04 260))' }}
+    >
       <TitleBar>
         <SessionTabBar
           tabs={tabs}
@@ -41,7 +44,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {/* Terminal panes */}
-        <div className="flex-1 min-w-0 relative">
+        <div className="flex-1 min-w-0 relative p-2">
           {tabs.map((tab) => (
             <div
               key={tab.id}
