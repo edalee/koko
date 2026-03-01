@@ -28,8 +28,8 @@ export default function SessionTabBar({
           className={cn(
             "group relative flex h-8 min-w-32 items-center justify-center px-8 text-[13px] transition-colors",
             tab.id === activeTabId
-              ? "text-foreground"
-              : "text-muted-foreground hover:bg-tab-hover hover:text-foreground",
+              ? "text-foreground border-l-2 border-accent"
+              : "text-muted-foreground hover:bg-tab-hover hover:text-foreground border-l-2 border-transparent",
           )}
           style={
             tab.id === activeTabId

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useGitHub } from "./hooks/useGitHub";
 import { usePanelState } from "./hooks/usePanelState";
+import { TerminalSquare } from "lucide-react";
 import TitleBar from "./components/TitleBar";
 import SessionTabBar from "./components/SessionTabBar";
 import TerminalPane from "./components/TerminalPane";
@@ -32,7 +33,7 @@ export default function App() {
       className="flex h-screen w-screen flex-col"
       style={{ background: 'linear-gradient(180deg, oklch(0.10 0.02 260), oklch(0.18 0.04 260))' }}
     >
-      <TitleBar>
+      <TitleBar sessionCount={tabs.length}>
         <SessionTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -42,24 +43,41 @@ export default function App() {
         />
       </TitleBar>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 gap-0.5">
         {/* Terminal panes */}
-        <div className="flex-1 min-w-0 relative p-2">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className="absolute inset-0"
-              style={{ display: tab.id === activeTabId ? "block" : "none" }}
-            >
-              <TerminalPane
-                sessionId={tab.id}
-                active={tab.id === activeTabId}
-                onExit={() => handleSessionExit(tab.id)}
-              />
+        <div className="flex-1 min-w-0 flex flex-col p-3 gap-0">
+          {/* Terminal header */}
+          {tabs.length > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-surface rounded-t-lg border-b border-border/20">
+              <TerminalSquare className="h-3.5 w-3.5 text-accent" />
+              <span className="text-xs font-medium text-foreground">Terminal</span>
+              {activeTabId && (
+                <span className="text-xs text-muted-foreground">
+                  {tabs.find(t => t.id === activeTabId)?.title}
+                </span>
+              )}
             </div>
-          ))}
+          )}
+
+          {/* Terminal content */}
+          <div className="flex-1 min-h-0 relative bg-surface rounded-b-lg overflow-hidden">
+            {tabs.map((tab) => (
+              <div
+                key={tab.id}
+                className="absolute inset-0"
+                style={{ display: tab.id === activeTabId ? "block" : "none" }}
+              >
+                <TerminalPane
+                  sessionId={tab.id}
+                  active={tab.id === activeTabId}
+                  onExit={() => handleSessionExit(tab.id)}
+                />
+              </div>
+            ))}
+          </div>
+
           {tabs.length === 0 && (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
+            <div className="flex h-full items-center justify-center text-muted-foreground rounded-lg bg-surface">
               <p>No active sessions</p>
             </div>
           )}

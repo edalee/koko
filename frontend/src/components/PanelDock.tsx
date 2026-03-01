@@ -44,11 +44,11 @@ function SortablePanel({
       <div
         {...attributes}
         {...listeners}
-        className="absolute left-0 top-0 bottom-0 w-5 flex items-start pt-2 pl-0.5 cursor-grab opacity-0 group-hover/sortable:opacity-100 transition-opacity z-10"
+        className="absolute -left-1 top-0 bottom-0 w-4 flex items-start pt-2.5 cursor-grab opacity-0 group-hover/sortable:opacity-100 transition-opacity z-10"
       >
         <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
       </div>
-      <div className="pl-1">{children}</div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -79,7 +79,7 @@ export default function PanelDock({
   }
 
   return (
-    <div className="w-72 shrink-0 bg-panel p-3 space-y-3 overflow-y-auto">
+    <div className="w-80 shrink-0 bg-panel p-3 space-y-2 overflow-y-auto">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

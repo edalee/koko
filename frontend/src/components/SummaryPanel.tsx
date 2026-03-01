@@ -1,4 +1,5 @@
-import { BarChart3 } from "lucide-react";
+import { BarChart3, ChevronRight } from "lucide-react";
+import { cn } from "../lib/utils";
 
 interface SummaryPanelProps {
   expanded: boolean;
@@ -14,13 +15,14 @@ export default function SummaryPanel({
   slackCount,
 }: SummaryPanelProps) {
   return (
-    <div className="bg-surface overflow-hidden">
+    <div className="bg-surface overflow-hidden rounded-lg">
       <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-tab-hover transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-xs hover:bg-tab-hover transition-colors"
         onClick={onToggle}
       >
         <BarChart3 className="h-3.5 w-3.5 text-accent" />
         <span className="font-medium text-foreground">Summary</span>
+        <ChevronRight className={cn("ml-auto h-3 w-3 text-muted-foreground transition-transform", expanded && "rotate-90")} />
       </button>
 
       {expanded && (

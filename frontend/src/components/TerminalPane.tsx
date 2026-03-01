@@ -163,7 +163,7 @@ export default function TerminalPane({
   return (
     <div
       ref={containerRef}
-      className="h-full w-full"
+      className="h-full w-full p-1"
       style={{ display: active ? "block" : "none" }}
     />
   );

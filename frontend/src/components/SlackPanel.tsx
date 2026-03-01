@@ -1,4 +1,5 @@
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, ChevronRight } from "lucide-react";
+import { cn } from "../lib/utils";
 
 interface SlackPanelProps {
   expanded: boolean;
@@ -15,14 +16,15 @@ export default function SlackPanel({ expanded, onToggle }: SlackPanelProps) {
   const total = mockItems.reduce((sum, i) => sum + i.count, 0);
 
   return (
-    <div className="bg-surface overflow-hidden">
+    <div className="bg-surface overflow-hidden rounded-lg">
       <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-tab-hover transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-xs hover:bg-tab-hover transition-colors"
         onClick={onToggle}
       >
         <MessageSquare className="h-3.5 w-3.5 text-accent" />
         <span className="font-medium text-foreground">Slack</span>
-        <span className="ml-auto text-muted-foreground">{total} new</span>
+        <span className="ml-auto tabular-nums text-muted-foreground">{total} new</span>
+        <ChevronRight className={cn("h-3 w-3 text-muted-foreground transition-transform", expanded && "rotate-90")} />
       </button>
 
       {expanded && (
