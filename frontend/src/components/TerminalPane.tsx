@@ -36,25 +36,25 @@ export default function TerminalPane({
       fontFamily:
         'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
       theme: {
-        background: "#1F3860",
-        foreground: "#C2E3EA",
-        cursor: "#8A4460",
-        selectionBackground: "#72869C40",
-        black: "#1F3860",
-        red: "#c4544e",
-        green: "#57a86b",
-        yellow: "#c4a14e",
-        blue: "#5b8fc9",
-        magenta: "#a86bc4",
-        cyan: "#5bc4c4",
-        white: "#C2E3EA",
-        brightBlack: "#72869C",
-        brightRed: "#d4746e",
-        brightGreen: "#77c88b",
-        brightYellow: "#d4c16e",
-        brightBlue: "#7bafe9",
-        brightMagenta: "#c88be4",
-        brightCyan: "#7be4e4",
+        background: "#1e1e1e",
+        foreground: "#cccccc",
+        cursor: "#1FF2AB",
+        selectionBackground: "rgba(255, 255, 255, 0.1)",
+        black: "#1e1e1e",
+        red: "#f44747",
+        green: "#6a9955",
+        yellow: "#d7ba7d",
+        blue: "#569cd6",
+        magenta: "#c586c0",
+        cyan: "#4ec9b0",
+        white: "#cccccc",
+        brightBlack: "#808080",
+        brightRed: "#f44747",
+        brightGreen: "#6a9955",
+        brightYellow: "#d7ba7d",
+        brightBlue: "#569cd6",
+        brightMagenta: "#c586c0",
+        brightCyan: "#4ec9b0",
         brightWhite: "#ffffff",
       },
       allowProposedApi: true,
@@ -163,7 +163,7 @@ export default function TerminalPane({
   return (
     <div
       ref={containerRef}
-      className="h-full w-full p-1"
+      className="h-full w-full"
       style={{ display: active ? "block" : "none" }}
     />
   );
