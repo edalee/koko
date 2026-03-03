@@ -21,9 +21,9 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
   }
 
   return (
-    <div className="h-full flex bg-base border-l border-border relative">
+    <div className="h-full flex bg-surface border-l border-border relative overflow-hidden">
       {/* Module Icons */}
-      <div className="w-12 shrink-0 flex flex-col items-center pt-3 gap-2">
+      <div className="w-12 shrink-0 flex flex-col items-center py-3 gap-2">
         <button
           type="button"
           onClick={() => handleModuleClick("explorer")}
@@ -64,7 +64,7 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
 
       {/* Module Content */}
       {!isCollapsed && (
-        <div className="flex-1 flex flex-col overflow-hidden border-l border-border">
+        <div className="flex-1 flex flex-col overflow-hidden border-l border-border bg-base animate-fade-in">
           {activeModule === "explorer" && (
             <div className="h-full flex flex-col">
               <div className="border-b border-border px-4 py-3">

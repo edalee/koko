@@ -66,8 +66,8 @@ export default function App() {
           <ResizableHandle />
           <ResizablePanel
             defaultSize="19"
-            minSize={isRightSidebarCollapsed ? "4" : "15"}
-            maxSize={isRightSidebarCollapsed ? "4" : "35"}
+            minSize={isRightSidebarCollapsed ? "5" : "15"}
+            maxSize={isRightSidebarCollapsed ? "5" : "35"}
           >
             <RightSidebar
               isCollapsed={isRightSidebarCollapsed}

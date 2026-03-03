@@ -1,33 +1,59 @@
 @import "tailwindcss";
 
 @theme {
-  --color-base:              #1e1e1e;
-  --color-surface:           #252526;
-  --color-toolbar:           #4A1A33;
-  --color-foreground:        #cccccc;
-  --color-muted-foreground:  #888888;
-  --color-border:            rgba(255, 255, 255, 0.1);
-  --color-accent:            #1FF2AB;
-  --color-accent-dark:       #24A965;
-  --color-success:           oklch(0.65 0.15 155);
-  --color-warning:           oklch(0.75 0.15 80);
-  --color-error:             oklch(0.65 0.20 25);
+  --color-base: #1e1e1e;
+  --color-surface: #252526;
+  --color-toolbar: #4a1a33;
+  --color-foreground: #cccccc;
+  --color-muted-foreground: #888888;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-accent: #1ff2ab;
+  --color-accent-dark: #24a965;
+  --color-success: oklch(0.65 0.15 155);
+  --color-warning: oklch(0.75 0.15 80);
+  --color-error: oklch(0.65 0.2 25);
+
+  --animate-fade-in: fade-in 0.15s ease-out;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateX(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@layer base {
+  button,
+  [role="button"] {
+    outline: none;
+  }
 
-html,
-body,
-#root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  background-color: var(--color-base);
-  color: var(--color-foreground);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+    outline-offset: -1px;
+    border-radius: 4px;
+  }
+
+  input:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+    outline-offset: -1px;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background-color: var(--color-base);
+    color: var(--color-foreground);
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
 }

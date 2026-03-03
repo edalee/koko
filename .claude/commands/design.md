@@ -1,101 +1,32 @@
 ---
-description: Screenshot the running Koko app, analyze against the design system, and propose specific UI/UX fixes
+description: Screenshot the running Koko app, analyze the design, and iteratively fix issues until the UI is stunning
 argument-hint: [feedback or focus area]
-allowed-tools: [Bash, Read, Edit, Write, Glob, Grep, Task]
+allowed-tools: [Bash, Read, Write, Edit, Glob, Grep, WebSearch, ListMcpResourcesTool, ReadMcpResourceTool, mcp__MCP_DOCKER__browser_navigate, mcp__MCP_DOCKER__browser_snapshot, mcp__MCP_DOCKER__browser_take_screenshot, mcp__MCP_DOCKER__browser_console_messages, mcp__MCP_DOCKER__browser_network_requests, mcp__MCP_DOCKER__browser_click, mcp__MCP_DOCKER__browser_resize, mcp__MCP_DOCKER__browser_run_code, mcp__MCP_DOCKER__browser_press_key, mcp__MCP_DOCKER__browser_hover, mcp__MCP_DOCKER__browser_evaluate, mcp__MCP_DOCKER__browser_wait_for, mcp__MCP_DOCKER__resolve-library-id, mcp__MCP_DOCKER__get-library-docs]
 ---
 
-# /design — Design Iteration
+Read the agent definition at `.claude/agents/design-reviewer.md` and follow its instructions exactly.
 
-Spawn a subagent that screenshots the running Koko app, analyzes it against the design system, and returns a concrete list of proposed changes.
+You are an **autonomous design improver**. You iterate in cycles (capture → analyze → research → fix → verify) until the UI meets a high quality bar. You stop only when there are no critical or major issues remaining.
 
-## Arguments
+## Research Tools
 
-- `$ARGUMENTS` — optional feedback or focus area (e.g. "tabs look cramped", "panel spacing feels off", "check contrast")
+Use Context7 to look up latest documentation when making fixes:
+- `resolve-library-id` to find library IDs (e.g., "tailwindcss", "lucide-react", "react")
+- `get-library-docs` to fetch relevant docs (e.g., topic: "dark mode", "animations", "utilities")
+
+Use WebSearch for modern UI/UX patterns and dark theme inspiration.
+
+## Focus Area
+
+User feedback: $ARGUMENTS
+
+If a focus area is provided, prioritize that area but still do a full review. If no focus area, do a comprehensive review.
 
 ## Workflow
 
-Use the **Task** tool to launch a subagent with `subagent_type: "general-purpose"` and the following prompt:
-
----
-
-You are a design review agent for Koko, a Wails v2 desktop app (Go + React + Tailwind v4).
-
-**Your job:** Screenshot the running app, read the relevant component source, and return a structured list of proposed UI/UX changes.
-
-### Step 1 — Screenshot
-
-Run these bash commands:
-```bash
-# Verify running
-ps aux | grep "Koko.app/Contents/MacOS/Koko" | grep -v grep
-# Bring to front and capture
-osascript -e 'tell application "System Events" to tell process "Koko" to set frontmost to true' && sleep 1 && screencapture -o /tmp/koko-design.png
-```
-Then read `/tmp/koko-design.png` to view it.
-
-If Koko is not running, return: "Koko is not running. Start it with `make dev` from `/Users/edward/Projects/personal/koko`."
-
-### Step 2 — Read current source
-
-Read these files to understand current styling:
-- `/Users/edward/Projects/personal/koko/frontend/src/globals.css`
-- `/Users/edward/Projects/personal/koko/frontend/src/App.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/TitleBar.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/SessionTabBar.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/PanelDock.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/GitHubPanel.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/SlackPanel.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/SummaryPanel.tsx`
-- `/Users/edward/Projects/personal/koko/frontend/src/components/TerminalPane.tsx`
-
-Also read the design memory for context:
-- `/Users/edward/.claude/projects/-Users-edward-Projects-personal-koko/memory/design.md`
-
-### Step 3 — Analyze
-
-Compare the screenshot against the design system. Check:
-
-1. **Elevation**: base (darkest) → titlebar → panel → surface. Do the layers read correctly?
-2. **Spacing**: generous padding, no cramped elements, clean gaps between sections
-3. **Borders**: minimal — prefer bg-color elevation over border lines
-4. **Typography**: icy blue primary text readable? Steel blue secondary visible but subdued?
-5. **Tabs**: flat (no bevels), text centered in tab area, gradient on active tab
-6. **Terminal**: icy blue on navy, plum cursor visible, enough padding around terminal pane
-7. **Panels**: cards use bg-surface elevation on bg-panel, clean header layout, badges visible
-8. **Traffic lights**: macOS red/yellow/green visible in top-left
-9. **Overall polish**: does it feel like a cohesive dark dashboard? Any harsh edges?
-
-If user feedback was provided: "$ARGUMENTS" — focus analysis on that area first.
-
-### Step 4 — Propose changes
-
-Return a structured response:
-
-```
-## Screenshot Analysis
-
-[Brief description of what you see]
-
-## What looks good
-- [list items that match the design system]
-
-## Proposed changes
-
-### 1. [Component] — [issue]
-**File:** `frontend/src/components/Foo.tsx`
-**Current:** `className="..."`
-**Proposed:** `className="..."`
-**Why:** [reasoning]
-
-### 2. [Component] — [issue]
-...
-
-## Priority
-[Which change would have the biggest visual impact]
-```
-
-Only propose changes where there's a clear improvement. Don't suggest changes for things that already look correct. Be specific — include exact Tailwind classes, inline styles, or CSS values.
-
----
-
-After the subagent returns, present the proposed changes to the user and ask which ones to apply.
+1. Read the agent definition and follow the iterative cycle
+2. Make changes directly — don't just report, fix
+3. After each fix, verify with a new screenshot
+4. Continue until satisfied
+5. Present the final report to the user
+6. Update agent memory at `.claude/agent-memory/design-reviewer/MEMORY.md`
