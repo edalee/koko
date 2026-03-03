@@ -7,4 +7,5 @@ type GitHubPR struct {
 	Title          string `json:"title"`
 	Author         string `json:"author"`
 	ReviewDecision string `json:"reviewDecision"`
+	URL            string `json:"url"`
 }

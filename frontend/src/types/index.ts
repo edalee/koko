@@ -4,9 +4,11 @@ export interface GitHubPR {
   title: string;
   author: string;
   reviewDecision: string;
+  url: string;
 }
 
 export interface SessionTab {
   id: string;
   title: string;
+  createdAt: number;
 }

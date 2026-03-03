@@ -6,6 +6,7 @@ export namespace main {
 	    title: string;
 	    author: string;
 	    reviewDecision: string;
+	    url: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new GitHubPR(source);
@@ -18,6 +19,7 @@ export namespace main {
 	        this.title = source["title"];
 	        this.author = source["author"];
 	        this.reviewDecision = source["reviewDecision"];
+	        this.url = source["url"];
 	    }
 	}
 
