@@ -25,6 +25,7 @@ type ghPRJSON struct {
 		Login string `json:"login"`
 	} `json:"author"`
 	ReviewDecision string `json:"reviewDecision"`
+	URL            string `json:"url"`
 }
 
 func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
@@ -32,7 +33,7 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 	for _, repo := range trackedRepos {
 		out, err := exec.Command("gh", "pr", "list",
 			"--repo", "epidemicsound/"+repo,
-			"--json", "number,title,author,reviewDecision",
+			"--json", "number,title,author,reviewDecision,url",
 			"--limit", "10",
 		).Output()
 		if err != nil {
@@ -49,6 +50,7 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 				Title:          pr.Title,
 				Author:         pr.Author.Login,
 				ReviewDecision: pr.ReviewDecision,
+				URL:            pr.URL,
 			})
 		}
 	}

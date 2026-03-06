@@ -1,76 +1,80 @@
-import { GitPullRequest, RefreshCw, Loader2, ChevronRight } from "lucide-react";
+import { GitPullRequest, Loader2, RefreshCw } from "lucide-react";
+import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { useGitHub } from "../hooks/useGitHub";
 import { cn } from "../lib/utils";
-
-interface GitHubPanelProps {
-  expanded: boolean;
-  onToggle: () => void;
-}
 
 function reviewBadge(decision: string) {
   switch (decision) {
     case "APPROVED":
-      return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/15 text-success">approved</span>;
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/15 text-success">
+          approved
+        </span>
+      );
     case "CHANGES_REQUESTED":
-      return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-error/15 text-error">changes</span>;
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-error/15 text-error">
+          changes
+        </span>
+      );
     case "REVIEW_REQUIRED":
-      return <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning/15 text-warning">review</span>;
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning/15 text-warning">
+          review
+        </span>
+      );
     default:
       return null;
   }
 }
 
-export default function GitHubPanel({ expanded, onToggle }: GitHubPanelProps) {
+export default function GitHubPanel() {
   const { prs, loading, refresh } = useGitHub();
 
   return (
-    <div className="bg-surface overflow-hidden rounded-lg">
-      {/* Header */}
-      <button
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-xs hover:bg-tab-hover transition-colors"
-        onClick={onToggle}
-      >
-        <GitPullRequest className="h-3.5 w-3.5 text-accent" />
-        <span className="font-medium text-foreground">GitHub</span>
-        <span className="ml-auto tabular-nums text-muted-foreground">
-          {loading ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            `${prs.length} PRs`
-          )}
-        </span>
-        <span
-          className="p-0.5 rounded hover:bg-border transition-colors"
-          onClick={(e) => {
-            e.stopPropagation();
-            refresh();
-          }}
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <h3 className="text-white text-sm">Pull Requests</h3>
+        <button
+          type="button"
+          onClick={refresh}
+          className="p-1 rounded hover:bg-white/10 transition-colors"
         >
-          <RefreshCw className={cn("h-3 w-3 text-muted-foreground", loading && "animate-spin")} />
-        </span>
-        <ChevronRight className={cn("h-3 w-3 text-muted-foreground transition-transform", expanded && "rotate-90")} />
-      </button>
+          <RefreshCw className={cn("size-3.5 text-muted-foreground", loading && "animate-spin")} />
+        </button>
+      </div>
 
-      {/* Expanded content */}
-      {expanded && (
-        <div className="border-t border-border/30 max-h-64 overflow-y-auto">
-          {prs.length === 0 && !loading && (
-            <p className="px-3 py-2 text-xs text-muted-foreground">No open PRs</p>
-          )}
-          {prs.map((pr) => (
-            <div
-              key={`${pr.repo}-${pr.number}`}
-              className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-tab-hover transition-colors"
-            >
-              <span className="text-muted-foreground shrink-0">
-                {pr.repo}#{pr.number}
-              </span>
-              <span className="truncate text-foreground">{pr.title}</span>
-              <span className="ml-auto shrink-0">{reviewBadge(pr.reviewDecision)}</span>
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {loading && prs.length === 0 && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="size-5 text-accent animate-spin" />
+          </div>
+        )}
+        {prs.length === 0 && !loading && (
+          <p className="text-xs text-muted-foreground text-center py-4">No open PRs</p>
+        )}
+        {prs.map((pr) => (
+          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR card opens in browser
+          <div
+            key={`${pr.repo}-${pr.number}`}
+            className="p-3 bg-white/5 rounded-lg border border-border hover:bg-white/10 transition-colors cursor-pointer"
+            onClick={() => BrowserOpenURL(pr.url)}
+          >
+            <div className="flex items-start gap-3">
+              <GitPullRequest className="size-4 text-accent mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white truncate mb-1">{pr.title}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {pr.repo}#{pr.number}
+                  </span>
+                  {reviewBadge(pr.reviewDecision)}
+                </div>
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FetchPRs } from "../../wailsjs/go/main/GitHubService";
 import type { GitHubPR } from "../types";
 

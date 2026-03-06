@@ -1,8 +1,5 @@
-import { useState, useCallback } from "react";
-import {
-  CreateSession,
-  CloseSession,
-} from "../../wailsjs/go/main/TerminalManager";
+import { useCallback, useState } from "react";
+import { CloseSession, CreateSession } from "../../wailsjs/go/main/TerminalManager";
 import type { SessionTab } from "../types";
 
 export function useSessionTabs() {
@@ -14,6 +11,7 @@ export function useSessionTabs() {
     const newTab: SessionTab = {
       id: sessionId,
       title: `Session ${sessionId.replace("session-", "")}`,
+      createdAt: Date.now(),
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionId);

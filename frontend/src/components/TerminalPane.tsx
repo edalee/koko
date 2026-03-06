@@ -1,13 +1,10 @@
-import { useEffect, useRef, useCallback } from "react";
-import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Terminal } from "@xterm/xterm";
+import { useCallback, useEffect, useRef } from "react";
+import { Resize, Write } from "../../wailsjs/go/main/TerminalManager";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import {
-  Write,
-  Resize,
-} from "../../wailsjs/go/main/TerminalManager";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPaneProps {
@@ -16,11 +13,7 @@ interface TerminalPaneProps {
   onExit?: () => void;
 }
 
-export default function TerminalPane({
-  sessionId,
-  active,
-  onExit,
-}: TerminalPaneProps) {
+export default function TerminalPane({ sessionId, active, onExit }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -33,28 +26,27 @@ export default function TerminalPane({
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily:
-        'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+      fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
       theme: {
-        background: "#1F3860",
-        foreground: "#C2E3EA",
-        cursor: "#8A4460",
-        selectionBackground: "#72869C40",
-        black: "#1F3860",
-        red: "#c4544e",
-        green: "#57a86b",
-        yellow: "#c4a14e",
-        blue: "#5b8fc9",
-        magenta: "#a86bc4",
-        cyan: "#5bc4c4",
-        white: "#C2E3EA",
-        brightBlack: "#72869C",
-        brightRed: "#d4746e",
-        brightGreen: "#77c88b",
-        brightYellow: "#d4c16e",
-        brightBlue: "#7bafe9",
-        brightMagenta: "#c88be4",
-        brightCyan: "#7be4e4",
+        background: "#1e1e1e",
+        foreground: "#cccccc",
+        cursor: "#1FF2AB",
+        selectionBackground: "rgba(255, 255, 255, 0.1)",
+        black: "#1e1e1e",
+        red: "#f44747",
+        green: "#6a9955",
+        yellow: "#d7ba7d",
+        blue: "#569cd6",
+        magenta: "#c586c0",
+        cyan: "#4ec9b0",
+        white: "#cccccc",
+        brightBlack: "#808080",
+        brightRed: "#f44747",
+        brightGreen: "#6a9955",
+        brightYellow: "#d7ba7d",
+        brightBlue: "#569cd6",
+        brightMagenta: "#c586c0",
+        brightCyan: "#4ec9b0",
         brightWhite: "#ffffff",
       },
       allowProposedApi: true,
@@ -77,13 +69,10 @@ export default function TerminalPane({
     fitRef.current = fit;
 
     // PTY output → terminal
-    const cleanupData = EventsOn(
-      `pty:data:${sessionId}`,
-      (encoded: string) => {
-        const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
-        term.write(bytes);
-      },
-    );
+    const cleanupData = EventsOn(`pty:data:${sessionId}`, (encoded: string) => {
+      const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+      term.write(bytes);
+    });
 
     // PTY exit
     const cleanupExit = EventsOn(`pty:exit:${sessionId}`, () => {

@@ -1,6 +1,6 @@
 # Plan 004: Interactive Sidebar Panels with Bubbles v2
 
-**Status:** Proposed
+**Status:** Superseded by Plan 005 (Wails migration)
 **Branch:** `feat/bubbles-sidebar-panels`
 
 ## Context

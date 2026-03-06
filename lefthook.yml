@@ -1,0 +1,28 @@
+pre-commit:
+  parallel: true
+  commands:
+    go-lint:
+      glob: "*.go"
+      run: golangci-lint run
+    biome:
+      root: frontend/
+      glob: "*.{ts,tsx,js,jsx,json}"
+      run: export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && node_modules/.bin/biome check .
+    typecheck:
+      root: frontend/
+      glob: "*.{ts,tsx}"
+      run: export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && node_modules/.bin/tsc --noEmit
+
+commit-msg:
+  commands:
+    conventional-commit:
+      run: |
+        msg=$(head -1 {1})
+        if ! echo "$msg" | grep -qE '^(feat|fix|chore|docs|refactor|test|style|perf|ci|build|revert)(\(.+\))?!?: .+'; then
+          echo "❌ Commit message must follow Conventional Commits:"
+          echo "   <type>[optional scope]: <description>"
+          echo "   Types: feat, fix, chore, docs, refactor, test, style, perf, ci, build, revert"
+          echo ""
+          echo "   Got: $msg"
+          exit 1
+        fi
