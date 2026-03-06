@@ -1,13 +1,10 @@
-import { useEffect, useRef, useCallback } from "react";
-import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Terminal } from "@xterm/xterm";
+import { useCallback, useEffect, useRef } from "react";
+import { Resize, Write } from "../../wailsjs/go/main/TerminalManager";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
-import {
-  Write,
-  Resize,
-} from "../../wailsjs/go/main/TerminalManager";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPaneProps {
@@ -16,11 +13,7 @@ interface TerminalPaneProps {
   onExit?: () => void;
 }
 
-export default function TerminalPane({
-  sessionId,
-  active,
-  onExit,
-}: TerminalPaneProps) {
+export default function TerminalPane({ sessionId, active, onExit }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -33,8 +26,7 @@ export default function TerminalPane({
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily:
-        'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+      fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
       theme: {
         background: "#1e1e1e",
         foreground: "#cccccc",
@@ -77,13 +69,10 @@ export default function TerminalPane({
     fitRef.current = fit;
 
     // PTY output → terminal
-    const cleanupData = EventsOn(
-      `pty:data:${sessionId}`,
-      (encoded: string) => {
-        const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
-        term.write(bytes);
-      },
-    );
+    const cleanupData = EventsOn(`pty:data:${sessionId}`, (encoded: string) => {
+      const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+      term.write(bytes);
+    });
 
     // PTY exit
     const cleanupExit = EventsOn(`pty:exit:${sessionId}`, () => {
@@ -163,7 +152,7 @@ export default function TerminalPane({
   return (
     <div
       ref={containerRef}
-      className="h-full w-full"
+      className="h-full w-full p-1"
       style={{ display: active ? "block" : "none" }}
     />
   );

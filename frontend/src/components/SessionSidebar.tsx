@@ -37,10 +37,10 @@ export default function SessionSidebar({
             <button
               type="button"
               onClick={onNewSession}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-md bg-base text-white hover:bg-surface whitespace-nowrap relative overflow-hidden group transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-white whitespace-nowrap relative overflow-hidden group transition-colors border-2 border-transparent"
               style={{
-                border: "2px solid transparent",
-                borderImage: "linear-gradient(to right, #1FF2AB, #24A965) 1",
+                background:
+                  "linear-gradient(var(--color-base), var(--color-base)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box",
               }}
             >
               <div className="absolute inset-0 bg-gradient-to-r from-accent/10 to-accent-dark/10 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -98,10 +98,10 @@ export default function SessionSidebar({
           <button
             type="button"
             onClick={onNewSession}
-            className="p-2 rounded-lg bg-base hover:bg-surface text-muted-foreground hover:text-accent transition-colors"
+            className="p-2 rounded-lg text-muted-foreground hover:text-accent transition-colors border-2 border-transparent"
             style={{
-              border: "2px solid transparent",
-              borderImage: "linear-gradient(to right, #1FF2AB, #24A965) 1",
+              background:
+                "linear-gradient(var(--color-base), var(--color-base)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box",
             }}
           >
             <Plus className="size-4" />

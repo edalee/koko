@@ -1,6 +1,6 @@
 # Plan: IDE Layout Restructure
 
-**Status:** Proposed
+**Status:** Completed
 
 ## Context
 

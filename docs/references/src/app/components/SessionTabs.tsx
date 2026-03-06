@@ -1,17 +1,17 @@
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { useState } from "react";
-import type { SessionTab } from "../types";
+import { Session } from "../types";
 
-interface SessionTabsProps {
-  sessions: SessionTab[];
-  activeSessionId: string | null;
-  onSessionSelect: (sessionId: string) => void;
+type SessionTabsProps = {
+  sessions: Session[];
+  activeSession: Session | null;
+  onSessionSelect: (session: Session) => void;
   onSessionClose: (sessionId: string) => void;
-}
+};
 
-export default function SessionTabs({
+export function SessionTabs({
   sessions,
-  activeSessionId,
+  activeSession,
   onSessionSelect,
   onSessionClose,
 }: SessionTabsProps) {
@@ -20,7 +20,7 @@ export default function SessionTabs({
   if (sessions.length === 0) return null;
 
   return (
-    <div className="border-b border-border">
+    <div className="border-b border-white/10">
       <div className="flex items-center gap-2 px-4 py-2 bg-black/20">
         <button
           onClick={() => setIsExpanded(!isExpanded)}
@@ -32,7 +32,7 @@ export default function SessionTabs({
             <ChevronRight className="size-4 text-gray-400" />
           )}
         </button>
-        <span className="text-xs text-muted-foreground uppercase tracking-wider">
+        <span className="text-xs text-gray-400 uppercase tracking-wider">
           Open Sessions ({sessions.length})
         </span>
       </div>
@@ -40,19 +40,19 @@ export default function SessionTabs({
       {isExpanded && (
         <div className="flex overflow-x-auto">
           {sessions.map((session) => {
-            const isActive = activeSessionId === session.id;
+            const isActive = activeSession?.id === session.id;
             return (
               <div
                 key={session.id}
-                className={`relative flex items-center gap-2 px-4 py-3 min-w-0 cursor-pointer transition-all border-r border-border ${
+                className={`relative flex items-center gap-2 px-4 py-3 min-w-0 cursor-pointer transition-all border-r border-white/10 ${
                   isActive
-                    ? "bg-gradient-to-r from-accent/30 to-accent-dark/30"
+                    ? "bg-gradient-to-r from-[#1FF2AB]/30 to-[#24A965]/30"
                     : "hover:bg-white/5"
                 }`}
-                onClick={() => onSessionSelect(session.id)}
+                onClick={() => onSessionSelect(session)}
               >
                 {isActive && (
-                  <div className="absolute inset-0 bg-gradient-to-r from-accent/40 to-accent-dark/40 animate-pulse" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#1FF2AB]/40 to-[#24A965]/40 animate-pulse" />
                 )}
                 <span
                   className={`relative text-sm truncate max-w-[200px] ${

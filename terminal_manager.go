@@ -112,9 +112,9 @@ func (tm *TerminalManager) CloseSession(sessionID string) error {
 	delete(tm.sessions, sessionID)
 	tm.mu.Unlock()
 
-	s.ptmx.Close()
-	s.cmd.Process.Kill()
-	s.cmd.Wait()
+	_ = s.ptmx.Close()
+	_ = s.cmd.Process.Kill()
+	_ = s.cmd.Wait()
 	return nil
 }
 
