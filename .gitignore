@@ -38,6 +38,12 @@ build/bin/
 frontend/dist/
 frontend/node_modules/
 
+# OS
+.DS_Store
+
+# Claude
+.claude/
+
 # Editor/IDE
 # .idea/
 # .vscode/
