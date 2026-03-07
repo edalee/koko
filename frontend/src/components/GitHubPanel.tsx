@@ -1,7 +1,7 @@
 import { GitPullRequest, Loader2, RefreshCw } from "lucide-react";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
-import { useGitHub } from "../hooks/useGitHub";
 import { cn } from "../lib/utils";
+import type { GitHubPR } from "../types";
 
 function reviewBadge(decision: string) {
   switch (decision) {
@@ -28,13 +28,16 @@ function reviewBadge(decision: string) {
   }
 }
 
-export default function GitHubPanel() {
-  const { prs, loading, refresh } = useGitHub();
+interface GitHubPanelProps {
+  prs: GitHubPR[];
+  loading: boolean;
+  refresh: () => void;
+}
 
+export default function GitHubPanel({ prs, loading, refresh }: GitHubPanelProps) {
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <h3 className="text-white text-sm">Pull Requests</h3>
+    <div className="p-4 space-y-2">
+      <div className="flex items-center justify-end mb-2">
         <button
           type="button"
           onClick={refresh}
@@ -44,37 +47,35 @@ export default function GitHubPanel() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {loading && prs.length === 0 && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-5 text-accent animate-spin" />
-          </div>
-        )}
-        {prs.length === 0 && !loading && (
-          <p className="text-xs text-muted-foreground text-center py-4">No open PRs</p>
-        )}
-        {prs.map((pr) => (
-          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR card opens in browser
-          <div
-            key={`${pr.repo}-${pr.number}`}
-            className="p-3 bg-white/5 rounded-lg border border-border hover:bg-white/10 transition-colors cursor-pointer"
-            onClick={() => BrowserOpenURL(pr.url)}
-          >
-            <div className="flex items-start gap-3">
-              <GitPullRequest className="size-4 text-accent mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-white truncate mb-1">{pr.title}</p>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {pr.repo}#{pr.number}
-                  </span>
-                  {reviewBadge(pr.reviewDecision)}
-                </div>
+      {loading && prs.length === 0 && (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="size-5 text-accent animate-spin" />
+        </div>
+      )}
+      {prs.length === 0 && !loading && (
+        <p className="text-xs text-muted-foreground text-center py-4">No open PRs</p>
+      )}
+      {prs.map((pr) => (
+        // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR card opens in browser
+        <div
+          key={`${pr.repo}-${pr.number}`}
+          className="p-3 bg-white/5 rounded-lg border border-border hover:bg-white/10 transition-colors cursor-pointer"
+          onClick={() => BrowserOpenURL(pr.url)}
+        >
+          <div className="flex items-start gap-3">
+            <GitPullRequest className="size-4 text-accent mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-white truncate mb-1">{pr.title}</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {pr.repo}#{pr.number}
+                </span>
+                {reviewBadge(pr.reviewDecision)}
               </div>
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }

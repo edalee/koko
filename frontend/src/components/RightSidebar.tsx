@@ -1,9 +1,7 @@
-import { ChevronLeft, ChevronRight, FolderTree, GitPullRequest, MessageSquare } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, FileCode2 } from "lucide-react";
 import { useState } from "react";
-import GitHubPanel from "./GitHubPanel";
-import SlackPanel from "./SlackPanel";
 
-type SidebarModule = "explorer" | "github" | "slack";
+type SidebarModule = "files" | "agents";
 
 interface RightSidebarProps {
   isCollapsed: boolean;
@@ -11,7 +9,7 @@ interface RightSidebarProps {
 }
 
 export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSidebarProps) {
-  const [activeModule, setActiveModule] = useState<SidebarModule>("github");
+  const [activeModule, setActiveModule] = useState<SidebarModule>("files");
 
   function handleModuleClick(module: SidebarModule) {
     setActiveModule(module);
@@ -26,59 +24,57 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
       <div className="w-12 shrink-0 flex flex-col items-center py-3 gap-2">
         <button
           type="button"
-          onClick={() => handleModuleClick("explorer")}
+          onClick={() => handleModuleClick("files")}
           className={`p-2 rounded-lg transition-colors ${
-            activeModule === "explorer"
+            activeModule === "files"
               ? "bg-gradient-to-r from-accent/20 to-accent-dark/20 text-accent"
               : "text-muted-foreground hover:text-white hover:bg-white/5"
           }`}
-          title="Explorer"
+          title="File Changes"
         >
-          <FolderTree className="size-5" />
+          <FileCode2 className="size-5" />
         </button>
         <button
           type="button"
-          onClick={() => handleModuleClick("github")}
+          onClick={() => handleModuleClick("agents")}
           className={`p-2 rounded-lg transition-colors ${
-            activeModule === "github"
+            activeModule === "agents"
               ? "bg-gradient-to-r from-accent/20 to-accent-dark/20 text-accent"
               : "text-muted-foreground hover:text-white hover:bg-white/5"
           }`}
-          title="GitHub"
+          title="Subagents"
         >
-          <GitPullRequest className="size-5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => handleModuleClick("slack")}
-          className={`p-2 rounded-lg transition-colors ${
-            activeModule === "slack"
-              ? "bg-gradient-to-r from-accent/20 to-accent-dark/20 text-accent"
-              : "text-muted-foreground hover:text-white hover:bg-white/5"
-          }`}
-          title="Slack"
-        >
-          <MessageSquare className="size-5" />
+          <Bot className="size-5" />
         </button>
       </div>
 
       {/* Module Content */}
       {!isCollapsed && (
         <div className="flex-1 flex flex-col overflow-hidden border-l border-border bg-base animate-fade-in">
-          {activeModule === "explorer" && (
+          {activeModule === "files" && (
             <div className="h-full flex flex-col">
               <div className="border-b border-border px-4 py-3">
-                <h3 className="text-white text-sm">Files</h3>
+                <h3 className="text-white text-sm">File Changes</h3>
               </div>
               <div className="flex-1 p-4">
                 <p className="text-xs text-muted-foreground text-center py-4">
-                  No files in session
+                  No file changes in session
                 </p>
               </div>
             </div>
           )}
-          {activeModule === "github" && <GitHubPanel />}
-          {activeModule === "slack" && <SlackPanel />}
+          {activeModule === "agents" && (
+            <div className="h-full flex flex-col">
+              <div className="border-b border-border px-4 py-3">
+                <h3 className="text-white text-sm">Subagents</h3>
+              </div>
+              <div className="flex-1 p-4">
+                <p className="text-xs text-muted-foreground text-center py-4">
+                  No active subagents
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
