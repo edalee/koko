@@ -1,6 +1,10 @@
 package main
 
-import "context"
+import (
+	"context"
+
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+)
 
 const version = "0.1.0"
 
@@ -22,4 +26,10 @@ func (a *App) shutdown(ctx context.Context) {}
 
 func (a *App) GetVersion() string {
 	return version
+}
+
+func (a *App) PickDirectory() (string, error) {
+	return wailsRuntime.OpenDirectoryDialog(a.ctx, wailsRuntime.OpenDialogOptions{
+		Title: "Choose Project Directory",
+	})
 }

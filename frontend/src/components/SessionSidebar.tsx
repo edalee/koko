@@ -1,5 +1,12 @@
 import { ChevronLeft, ChevronRight, Plus, Search, SquareTerminal, X } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import type { SessionTab } from "../types";
+
+function shortenPath(path: string): string {
+  const home = path.match(/^\/Users\/[^/]+/)?.[0];
+  if (home) return path.replace(home, "~");
+  return path;
+}
 
 interface SessionSidebarProps {
   sessions: SessionTab[];
@@ -7,6 +14,7 @@ interface SessionSidebarProps {
   onSessionSelect: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
+  onRenameSession: (sessionId: string, newName: string) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -17,9 +25,27 @@ export default function SessionSidebar({
   onSessionSelect,
   onNewSession,
   onDeleteSession,
+  onRenameSession,
   isCollapsed,
   onToggleCollapse,
 }: SessionSidebarProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startRename = useCallback((session: SessionTab) => {
+    setEditingId(session.id);
+    setEditValue(session.name);
+    setTimeout(() => inputRef.current?.select(), 0);
+  }, []);
+
+  const commitRename = useCallback(() => {
+    if (editingId && editValue.trim()) {
+      onRenameSession(editingId, editValue.trim());
+    }
+    setEditingId(null);
+  }, [editingId, editValue, onRenameSession]);
+
   return (
     <div className="h-full bg-base flex flex-col border-r border-border relative">
       {!isCollapsed && (
@@ -54,6 +80,7 @@ export default function SessionSidebar({
             <div className="space-y-2">
               {sessions.map((session) => {
                 const isActive = activeSessionId === session.id;
+                const isEditing = editingId === session.id;
                 return (
                   // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: nested interactive elements require div wrapper
                   <div
@@ -71,8 +98,34 @@ export default function SessionSidebar({
                       }`}
                     />
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm text-white truncate mb-1">{session.title}</h3>
-                      <p className="text-xs text-muted-foreground truncate">Terminal session</p>
+                      {isEditing ? (
+                        <input
+                          ref={inputRef}
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") commitRename();
+                            if (e.key === "Escape") setEditingId(null);
+                            e.stopPropagation();
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-sm text-white bg-white/10 border border-accent/30 rounded px-1.5 py-0.5 w-full outline-none"
+                        />
+                      ) : (
+                        <h3
+                          className="text-sm text-white truncate mb-1"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            startRename(session);
+                          }}
+                        >
+                          {session.name}
+                        </h3>
+                      )}
+                      <p className="text-xs text-muted-foreground truncate">
+                        {shortenPath(session.directory)}
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -116,7 +169,7 @@ export default function SessionSidebar({
                   ? "bg-gradient-to-r from-accent/20 to-accent-dark/20"
                   : "hover:bg-white/5"
               }`}
-              title={session.title}
+              title={session.name}
             >
               <SquareTerminal
                 className={`size-5 transition-colors ${

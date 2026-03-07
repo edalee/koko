@@ -1,16 +1,19 @@
 import { useCallback, useState } from "react";
 import { CloseSession, CreateSession } from "../../wailsjs/go/main/TerminalManager";
+import { addRecentDir } from "../components/NewSessionDialog";
 import type { SessionTab } from "../types";
 
 export function useSessionTabs() {
   const [tabs, setTabs] = useState<SessionTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
-  const createTab = useCallback(async () => {
-    const sessionId = await CreateSession(80, 24);
+  const createTab = useCallback(async (name: string, directory: string) => {
+    const sessionId = await CreateSession(name, directory, 80, 24);
+    addRecentDir(directory);
     const newTab: SessionTab = {
       id: sessionId,
-      title: `Session ${sessionId.replace("session-", "")}`,
+      name,
+      directory,
       createdAt: Date.now(),
     };
     setTabs((prev) => [...prev, newTab]);
@@ -38,6 +41,10 @@ export function useSessionTabs() {
     setActiveTabId(tabId);
   }, []);
 
+  const renameTab = useCallback((tabId: string, newName: string) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, name: newName } : t)));
+  }, []);
+
   const handleSessionExit = useCallback(
     (tabId: string) => {
       setTabs((prev) => {
@@ -59,6 +66,7 @@ export function useSessionTabs() {
     createTab,
     closeTab,
     switchTab,
+    renameTab,
     handleSessionExit,
   };
 }

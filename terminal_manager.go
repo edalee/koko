@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
@@ -14,6 +15,8 @@ import (
 
 type session struct {
 	id   string
+	name string
+	dir  string
 	ptmx *os.File
 	cmd  *exec.Cmd
 	mu   sync.Mutex
@@ -37,17 +40,31 @@ func (tm *TerminalManager) setContext(ctx context.Context) {
 	tm.ctx = ctx
 }
 
-func (tm *TerminalManager) CreateSession(cols, rows int) (string, error) {
+func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int) (string, error) {
 	tm.mu.Lock()
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
 	tm.mu.Unlock()
 
-	cmd := exec.Command("zsh", "-l")
-	cmd.Env = append(os.Environ(),
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-	)
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/zsh"
+	}
+
+	// Filter out CLAUDECODE to avoid nested session detection.
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "CLAUDECODE=") {
+			env = append(env, e)
+		}
+	}
+	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+
+	// Login shell resolves PATH (GUI apps have minimal env),
+	// exec replaces shell with claude (no wrapper process).
+	cmd := exec.Command(shell, "-l", "-c", "exec claude")
+	cmd.Dir = dir
+	cmd.Env = env
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: uint16(rows),
@@ -59,6 +76,8 @@ func (tm *TerminalManager) CreateSession(cols, rows int) (string, error) {
 
 	s := &session{
 		id:   id,
+		name: name,
+		dir:  dir,
 		ptmx: ptmx,
 		cmd:  cmd,
 		done: make(chan struct{}),
@@ -135,6 +154,20 @@ func (tm *TerminalManager) readLoop(s *session) {
 			return
 		}
 	}
+}
+
+func (tm *TerminalManager) GetSessions() []SessionInfo {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	sessions := make([]SessionInfo, 0, len(tm.sessions))
+	for _, s := range tm.sessions {
+		sessions = append(sessions, SessionInfo{
+			ID:   s.id,
+			Name: s.name,
+			Dir:  s.dir,
+		})
+	}
+	return sessions
 }
 
 func (tm *TerminalManager) getSession(id string) (*session, error) {

@@ -1,5 +1,12 @@
 package main
 
+// SessionInfo represents metadata about a terminal session.
+type SessionInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+}
+
 // GitHubPR represents a pull request from a tracked repository.
 type GitHubPR struct {
 	Repo           string `json:"repo"`

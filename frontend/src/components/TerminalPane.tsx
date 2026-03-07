@@ -2,7 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Resize, Write } from "../../wailsjs/go/main/TerminalManager";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import "@xterm/xterm/css/xterm.css";
@@ -18,8 +18,12 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
 
-  const initTerminal = useCallback(() => {
+  // Initialize terminal once per sessionId — onExit is accessed via ref
+  // to avoid re-creating the terminal on every parent render.
+  useEffect(() => {
     const container = containerRef.current;
     if (!container || termRef.current) return;
 
@@ -59,9 +63,11 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     term.open(container);
 
     try {
-      term.loadAddon(new WebglAddon());
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
     } catch {
-      // WebGL not available
+      // WebGL not available, DOM renderer is fine
     }
 
     fit.fit();
@@ -70,19 +76,19 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
 
     // PTY output → terminal
     const cleanupData = EventsOn(`pty:data:${sessionId}`, (encoded: string) => {
-      const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+      const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
       term.write(bytes);
     });
 
     // PTY exit
     const cleanupExit = EventsOn(`pty:exit:${sessionId}`, () => {
-      onExit?.();
+      term.writeln("\r\n\x1b[31m[Session ended]\x1b[0m");
+      onExitRef.current?.();
     });
 
     // User input → PTY
     const onDataDisposable = term.onData((data: string) => {
-      const encoded = btoa(data);
-      Write(sessionId, encoded);
+      Write(sessionId, btoa(data));
     });
 
     // Binary data → PTY
@@ -122,20 +128,16 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [sessionId, onExit]);
 
-  useEffect(() => {
-    initTerminal();
     return () => {
       cleanupRef.current?.();
       cleanupRef.current = null;
     };
-  }, [initTerminal]);
+  }, [sessionId]);
 
   // Refit when becoming active
   useEffect(() => {
     if (active && fitRef.current) {
-      // Small delay to ensure container dimensions are settled
       requestAnimationFrame(() => {
         fitRef.current?.fit();
       });

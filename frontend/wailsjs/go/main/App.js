@@ -5,3 +5,7 @@
 export function GetVersion() {
   return window['go']['main']['App']['GetVersion']();
 }
+
+export function PickDirectory() {
+  return window['go']['main']['App']['PickDirectory']();
+}

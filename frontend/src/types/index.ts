@@ -9,6 +9,7 @@ export interface GitHubPR {
 
 export interface SessionTab {
   id: string;
-  title: string;
+  name: string;
+  directory: string;
   createdAt: number;
 }

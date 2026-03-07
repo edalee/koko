@@ -1,29 +1,42 @@
-import { useEffect, useRef, useState } from "react";
+import { GitPullRequest, Mail, MessageSquare } from "lucide-react";
+import { useState } from "react";
+import GitHubPanel from "./components/GitHubPanel";
+import MailPanel, { useMailCount } from "./components/MailPanel";
+import NewSessionDialog from "./components/NewSessionDialog";
+import OverlayPage from "./components/OverlayPage";
 import RightSidebar from "./components/RightSidebar";
 import SessionSidebar from "./components/SessionSidebar";
+import SlackPanel, { useSlackCount } from "./components/SlackPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
+import { useGitHub } from "./hooks/useGitHub";
+import { useOverlay } from "./hooks/useOverlay";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 
 export default function App() {
-  const { tabs, activeTabId, createTab, closeTab, switchTab, handleSessionExit } = useSessionTabs();
+  const { tabs, activeTabId, createTab, closeTab, switchTab, renameTab, handleSessionExit } =
+    useSessionTabs();
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
-  const initialized = useRef(false);
+  const [showNewSession, setShowNewSession] = useState(false);
 
-  useEffect(() => {
-    if (!initialized.current) {
-      initialized.current = true;
-      createTab();
-    }
-  }, [createTab]);
+  const { prs, loading, refresh } = useGitHub();
+  const { activeOverlay, toggleOverlay, closeOverlay } = useOverlay();
+  const slackCount = useSlackCount();
+  const mailCount = useMailCount();
 
   return (
     <div className="size-full flex flex-col bg-base">
-      <Toolbar />
+      <Toolbar
+        activeOverlay={activeOverlay}
+        onToggleOverlay={toggleOverlay}
+        githubCount={prs.length}
+        slackCount={slackCount}
+        mailCount={mailCount}
+      />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         <ResizablePanelGroup orientation="horizontal" className="flex-1">
           <ResizablePanel
             defaultSize="15"
@@ -34,8 +47,9 @@ export default function App() {
               sessions={tabs}
               activeSessionId={activeTabId}
               onSessionSelect={switchTab}
-              onNewSession={createTab}
+              onNewSession={() => setShowNewSession(true)}
               onDeleteSession={closeTab}
+              onRenameSession={renameTab}
               isCollapsed={isLeftSidebarCollapsed}
               onToggleCollapse={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
             />
@@ -75,6 +89,43 @@ export default function App() {
             />
           </ResizablePanel>
         </ResizablePanelGroup>
+
+        {/* Floating Overlays */}
+        <OverlayPage
+          open={activeOverlay === "github"}
+          onClose={closeOverlay}
+          title="Pull Requests"
+          icon={<GitPullRequest className="size-4" />}
+        >
+          <GitHubPanel prs={prs} loading={loading} refresh={refresh} />
+        </OverlayPage>
+
+        <OverlayPage
+          open={activeOverlay === "slack"}
+          onClose={closeOverlay}
+          title="Slack Messages"
+          icon={<MessageSquare className="size-4" />}
+        >
+          <SlackPanel />
+        </OverlayPage>
+
+        <OverlayPage
+          open={activeOverlay === "mail"}
+          onClose={closeOverlay}
+          title="Mail"
+          icon={<Mail className="size-4" />}
+        >
+          <MailPanel />
+        </OverlayPage>
+
+        <NewSessionDialog
+          open={showNewSession}
+          onClose={() => setShowNewSession(false)}
+          onCreate={(name, directory) => {
+            createTab(name, directory);
+            setShowNewSession(false);
+          }}
+        />
       </div>
     </div>
   );
