@@ -47,7 +47,12 @@ export default function SessionSidebar({
   }, [editingId, editValue, onRenameSession]);
 
   return (
-    <div className="h-full bg-white/[0.03] glass-panel flex flex-col border-r border-border relative">
+    <div
+      className="h-full bg-white/[0.03] glass-panel flex flex-col border-r relative"
+      style={{
+        borderImage: "linear-gradient(to bottom, rgba(255,255,255,0.15), rgba(255,255,255,0.04)) 1",
+      }}
+    >
       {!isCollapsed && (
         <>
           {/* Search + New Session */}

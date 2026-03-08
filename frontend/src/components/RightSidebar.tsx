@@ -19,7 +19,12 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
   }
 
   return (
-    <div className="h-full flex bg-white/[0.03] glass-panel border-l border-border relative overflow-hidden">
+    <div
+      className="h-full flex bg-white/[0.03] glass-panel border-l relative overflow-hidden"
+      style={{
+        borderImage: "linear-gradient(to bottom, rgba(255,255,255,0.15), rgba(255,255,255,0.04)) 1",
+      }}
+    >
       {/* Module Icons */}
       <div className="w-9 shrink-0 flex flex-col items-center py-3 gap-1.5">
         <button
