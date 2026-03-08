@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type OverlayModule = "github" | "slack" | "mail";
+export type OverlayModule = "github" | "slack" | "mail" | "settings";
 
 export function useOverlay() {
   const [activeOverlay, setActiveOverlay] = useState<OverlayModule | null>(null);

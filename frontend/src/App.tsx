@@ -1,4 +1,4 @@
-import { GitPullRequest, Mail, MessageSquare } from "lucide-react";
+import { GitPullRequest, Mail, MessageSquare, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import GitHubPanel from "./components/GitHubPanel";
 import MailPanel, { useMailCount } from "./components/MailPanel";
@@ -6,7 +6,8 @@ import NewSessionDialog from "./components/NewSessionDialog";
 import OverlayPage from "./components/OverlayPage";
 import RightSidebar from "./components/RightSidebar";
 import SessionSidebar from "./components/SessionSidebar";
-import SlackPanel, { useSlackCount } from "./components/SlackPanel";
+import SettingsPanel from "./components/SettingsPanel";
+import SlackPanel from "./components/SlackPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
@@ -15,6 +16,7 @@ import { useGitHub } from "./hooks/useGitHub";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSessionTabs } from "./hooks/useSessionTabs";
+import { useSlack } from "./hooks/useSlack";
 
 export default function App() {
   const { tabs, activeTabId, createTab, closeTab, switchTab, renameTab, handleSessionExit } =
@@ -32,7 +34,14 @@ export default function App() {
     refresh: refreshFileChanges,
   } = useFileChanges(activeTab?.directory ?? null);
   const { activeOverlay, toggleOverlay, closeOverlay } = useOverlay();
-  const slackCount = useSlackCount();
+  const {
+    messages: slackMessages,
+    loading: slackLoading,
+    configured: slackConfigured,
+    unreadCount: slackCount,
+    refresh: refreshSlack,
+    openMessage: openSlackMessage,
+  } = useSlack();
   const mailCount = useMailCount();
 
   const handleSwitchByIndex = useCallback(
@@ -99,8 +108,15 @@ export default function App() {
                 </div>
               ))}
               {tabs.length === 0 && (
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  <p>No active sessions</p>
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <p className="text-sm">No active sessions</p>
+                  <p className="text-xs text-tertiary">
+                    Press{" "}
+                    <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] text-[10px] font-mono text-white/70">
+                      ⌘N
+                    </kbd>{" "}
+                    to start a new session
+                  </p>
                 </div>
               )}
             </div>
@@ -138,7 +154,14 @@ export default function App() {
           title="Slack Messages"
           icon={<MessageSquare className="size-4" />}
         >
-          <SlackPanel />
+          <SlackPanel
+            messages={slackMessages}
+            loading={slackLoading}
+            configured={slackConfigured}
+            onRefresh={refreshSlack}
+            onOpenMessage={openSlackMessage}
+            onOpenSettings={() => toggleOverlay("settings")}
+          />
         </OverlayPage>
 
         <OverlayPage
@@ -148,6 +171,15 @@ export default function App() {
           icon={<Mail className="size-4" />}
         >
           <MailPanel />
+        </OverlayPage>
+
+        <OverlayPage
+          open={activeOverlay === "settings"}
+          onClose={closeOverlay}
+          title="Settings"
+          icon={<Settings className="size-4" />}
+        >
+          <SettingsPanel onTokenSaved={refreshSlack} />
         </OverlayPage>
 
         <NewSessionDialog
