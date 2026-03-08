@@ -1,5 +1,21 @@
 export namespace main {
 	
+	export class AppConfig {
+	    slackToken: string;
+	    githubRepos: string[];
+	    slackEnabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.slackToken = source["slackToken"];
+	        this.githubRepos = source["githubRepos"];
+	        this.slackEnabled = source["slackEnabled"];
+	    }
+	}
 	export class FileChange {
 	    path: string;
 	    status: string;
@@ -52,6 +68,34 @@ export namespace main {
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.dir = source["dir"];
+	    }
+	}
+	export class SlackMessage {
+	    type: string;
+	    channel: string;
+	    channelId: string;
+	    user: string;
+	    text: string;
+	    timestamp: string;
+	    teamId: string;
+	    unread: boolean;
+	    time: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SlackMessage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.channel = source["channel"];
+	        this.channelId = source["channelId"];
+	        this.user = source["user"];
+	        this.text = source["text"];
+	        this.timestamp = source["timestamp"];
+	        this.teamId = source["teamId"];
+	        this.unread = source["unread"];
+	        this.time = source["time"];
 	    }
 	}
 
