@@ -1,5 +1,21 @@
 export namespace main {
 	
+	export class FileChange {
+	    path: string;
+	    status: string;
+	    staged: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileChange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.status = source["status"];
+	        this.staged = source["staged"];
+	    }
+	}
 	export class GitHubPR {
 	    repo: string;
 	    number: number;

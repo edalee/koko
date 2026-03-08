@@ -4,7 +4,7 @@ import {main} from '../models';
 
 export function CloseSession(arg1:string):Promise<void>;
 
-export function CreateSession(arg1:string,arg2:string,arg3:number,arg4:number):Promise<string>;
+export function CreateSession(arg1:string,arg2:string,arg3:number,arg4:number,arg5:boolean):Promise<string>;
 
 export function GetSessions():Promise<Array<main.SessionInfo>>;
 

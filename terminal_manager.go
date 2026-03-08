@@ -40,7 +40,7 @@ func (tm *TerminalManager) setContext(ctx context.Context) {
 	tm.ctx = ctx
 }
 
-func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int) (string, error) {
+func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
 	tm.mu.Lock()
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
@@ -62,7 +62,11 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int) (stri
 
 	// Login shell resolves PATH (GUI apps have minimal env),
 	// exec replaces shell with claude (no wrapper process).
-	cmd := exec.Command(shell, "-l", "-c", "exec claude")
+	claudeCmd := "exec claude"
+	if resume {
+		claudeCmd = "exec claude --continue"
+	}
+	cmd := exec.Command(shell, "-l", "-c", claudeCmd)
 	cmd.Dir = dir
 	cmd.Env = env
 

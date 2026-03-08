@@ -31,7 +31,16 @@ export default function SessionSidebar({
 }: SessionSidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const filteredSessions = searchQuery
+    ? sessions.filter(
+        (s) =>
+          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.directory.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : sessions;
 
   const startRename = useCallback((session: SessionTab) => {
     setEditingId(session.id);
@@ -61,6 +70,8 @@ export default function SessionSidebar({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <input
                 placeholder="Search sessions..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
               />
             </div>
@@ -83,7 +94,7 @@ export default function SessionSidebar({
           {/* Session list */}
           <div className="flex-1 overflow-auto px-2 pt-2 pb-10">
             <div className="space-y-2">
-              {sessions.map((session) => {
+              {filteredSessions.map((session) => {
                 const isActive = activeSessionId === session.id;
                 const isEditing = editingId === session.id;
                 return (
@@ -99,7 +110,11 @@ export default function SessionSidebar({
                   >
                     <SquareTerminal
                       className={`size-5 mt-0.5 shrink-0 transition-colors ${
-                        isActive ? "text-accent" : "text-muted-foreground group-hover:text-accent"
+                        !session.connected
+                          ? "text-tertiary"
+                          : isActive
+                            ? "text-accent"
+                            : "text-muted-foreground group-hover:text-accent"
                       }`}
                     />
                     <div className="flex-1 min-w-0">
@@ -131,6 +146,9 @@ export default function SessionSidebar({
                       <p className="text-xs text-muted-foreground truncate">
                         {shortenPath(session.directory)}
                       </p>
+                      {!session.connected && (
+                        <p className="text-[10px] text-tertiary mt-0.5">Click to resume</p>
+                      )}
                     </div>
                     <button
                       type="button"

@@ -12,4 +12,5 @@ export interface SessionTab {
   name: string;
   directory: string;
   createdAt: number;
+  connected: boolean;
 }

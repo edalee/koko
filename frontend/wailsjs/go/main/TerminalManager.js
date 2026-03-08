@@ -6,8 +6,8 @@ export function CloseSession(arg1) {
   return window['go']['main']['TerminalManager']['CloseSession'](arg1);
 }
 
-export function CreateSession(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['TerminalManager']['CreateSession'](arg1, arg2, arg3, arg4);
+export function CreateSession(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['TerminalManager']['CreateSession'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function GetSessions() {
