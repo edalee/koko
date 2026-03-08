@@ -1,5 +1,5 @@
 import { GitPullRequest, Mail, MessageSquare } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import GitHubPanel from "./components/GitHubPanel";
 import MailPanel, { useMailCount } from "./components/MailPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
@@ -10,7 +10,9 @@ import SlackPanel, { useSlackCount } from "./components/SlackPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
+import { useFileChanges } from "./hooks/useFileChanges";
 import { useGitHub } from "./hooks/useGitHub";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 
@@ -22,9 +24,35 @@ export default function App() {
   const [showNewSession, setShowNewSession] = useState(false);
 
   const { prs, loading, refresh } = useGitHub();
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const {
+    changes: fileChanges,
+    branch,
+    loading: fileChangesLoading,
+    refresh: refreshFileChanges,
+  } = useFileChanges(activeTab?.directory ?? null);
   const { activeOverlay, toggleOverlay, closeOverlay } = useOverlay();
   const slackCount = useSlackCount();
   const mailCount = useMailCount();
+
+  const handleSwitchByIndex = useCallback(
+    (index: number) => {
+      if (index < tabs.length) {
+        switchTab(tabs[index].id);
+      }
+    },
+    [tabs, switchTab],
+  );
+
+  const handleCloseActive = useCallback(() => {
+    if (activeTabId) closeTab(activeTabId);
+  }, [activeTabId, closeTab]);
+
+  useKeyboardShortcuts({
+    onNewSession: () => setShowNewSession(true),
+    onSwitchSession: handleSwitchByIndex,
+    onCloseSession: handleCloseActive,
+  });
 
   return (
     <div className="size-full flex flex-col bg-base relative z-10">
@@ -86,6 +114,10 @@ export default function App() {
             <RightSidebar
               isCollapsed={isRightSidebarCollapsed}
               onToggleCollapse={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
+              fileChanges={fileChanges}
+              branch={branch}
+              fileChangesLoading={fileChangesLoading}
+              onRefreshFileChanges={refreshFileChanges}
             />
           </ResizablePanel>
         </ResizablePanelGroup>

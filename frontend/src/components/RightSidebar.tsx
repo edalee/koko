@@ -1,14 +1,85 @@
-import { Bot, ChevronLeft, ChevronRight, FileCode2 } from "lucide-react";
+import {
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  FileCode2,
+  FileMinus,
+  FilePlus,
+  FileText,
+  RefreshCw,
+} from "lucide-react";
 import { useState } from "react";
+import type { FileChange } from "../hooks/useFileChanges";
 
 type SidebarModule = "files" | "agents";
 
 interface RightSidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  fileChanges: FileChange[];
+  branch: string;
+  fileChangesLoading: boolean;
+  onRefreshFileChanges: () => void;
 }
 
-export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSidebarProps) {
+function changeColor(change: FileChange): string {
+  if (change.staged) return "text-green-400";
+  switch (change.status) {
+    case "added":
+      return "text-green-400";
+    case "deleted":
+      return "text-red-400";
+    case "renamed":
+      return "text-blue-400";
+    default:
+      return "text-yellow-400";
+  }
+}
+
+function statusIcon(change: FileChange) {
+  const color = changeColor(change);
+  switch (change.status) {
+    case "added":
+      return <FilePlus className={`size-3.5 ${color} shrink-0`} />;
+    case "deleted":
+      return <FileMinus className={`size-3.5 ${color} shrink-0`} />;
+    default:
+      return <FileText className={`size-3.5 ${color} shrink-0`} />;
+  }
+}
+
+function statusLabel(change: FileChange): string {
+  const prefix = change.staged ? "S" : "";
+  switch (change.status) {
+    case "added":
+      return `${prefix}A`;
+    case "deleted":
+      return `${prefix}D`;
+    case "renamed":
+      return `${prefix}R`;
+    default:
+      return `${prefix}M`;
+  }
+}
+
+function fileName(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
+function fileDir(path: string) {
+  const parts = path.split("/");
+  if (parts.length <= 1) return "";
+  return parts.slice(0, -1).join("/");
+}
+
+export default function RightSidebar({
+  isCollapsed,
+  onToggleCollapse,
+  fileChanges,
+  branch,
+  fileChangesLoading,
+  onRefreshFileChanges,
+}: RightSidebarProps) {
   const [activeModule, setActiveModule] = useState<SidebarModule>("files");
 
   function handleModuleClick(module: SidebarModule) {
@@ -58,13 +129,62 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
         <div className="flex-1 flex flex-col overflow-hidden border-l border-border bg-white/[0.02] animate-fade-in">
           {activeModule === "files" && (
             <div className="h-full flex flex-col">
-              <div className="border-b border-border px-4 py-3">
-                <h3 className="text-white text-sm">File Changes</h3>
+              <div className="border-b border-border px-4 py-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <h3 className="text-white text-sm">File Changes</h3>
+                  {branch && (
+                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                      {branch}
+                      <span className="text-tertiary ml-1.5">
+                        {fileChanges.length} file{fileChanges.length !== 1 ? "s" : ""}
+                      </span>
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={onRefreshFileChanges}
+                  className="p-1 hover:bg-white/10 rounded transition-colors shrink-0"
+                  title="Refresh"
+                >
+                  <RefreshCw
+                    className={`size-3.5 text-muted-foreground ${fileChangesLoading ? "animate-spin" : ""}`}
+                  />
+                </button>
               </div>
-              <div className="flex-1 p-4">
-                <p className="text-xs text-muted-foreground text-center py-4">
-                  No file changes in session
-                </p>
+              <div className="flex-1 overflow-auto">
+                {fileChanges.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-8">
+                    {branch ? "No changes on this branch" : "No active session"}
+                  </p>
+                ) : (
+                  <div className="py-1">
+                    {fileChanges.map((change) => (
+                      <div
+                        key={`${change.path}-${change.staged}`}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors group"
+                        title={`${change.path}${change.staged ? " (staged)" : ""}`}
+                      >
+                        {statusIcon(change)}
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs text-white truncate block">
+                            {fileName(change.path)}
+                          </span>
+                          {fileDir(change.path) && (
+                            <span className="text-[10px] text-tertiary truncate block">
+                              {fileDir(change.path)}
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className={`text-[10px] font-mono opacity-0 group-hover:opacity-100 transition-opacity ${changeColor(change)}`}
+                        >
+                          {statusLabel(change)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

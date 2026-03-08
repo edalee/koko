@@ -16,6 +16,7 @@ func main() {
 	tm := NewTerminalManager()
 	app := NewApp(tm)
 	gh := NewGitHubService()
+	git := NewGitService()
 
 	err := wails.Run(&options.App{
 		Title:     "Koko",
@@ -39,6 +40,7 @@ func main() {
 			app,
 			tm,
 			gh,
+			git,
 		},
 	})
 
