@@ -27,7 +27,7 @@ export default function App() {
   const mailCount = useMailCount();
 
   return (
-    <div className="size-full flex flex-col bg-base">
+    <div className="size-full flex flex-col bg-base relative z-10">
       <Toolbar
         activeOverlay={activeOverlay}
         onToggleOverlay={toggleOverlay}
@@ -80,8 +80,8 @@ export default function App() {
           <ResizableHandle />
           <ResizablePanel
             defaultSize="19"
-            minSize={isRightSidebarCollapsed ? "5" : "15"}
-            maxSize={isRightSidebarCollapsed ? "5" : "35"}
+            minSize={isRightSidebarCollapsed ? "3" : "15"}
+            maxSize={isRightSidebarCollapsed ? "3" : "35"}
           >
             <RightSidebar
               isCollapsed={isRightSidebarCollapsed}

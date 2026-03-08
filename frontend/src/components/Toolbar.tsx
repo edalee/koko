@@ -21,7 +21,7 @@ export default function Toolbar({
 }: ToolbarProps) {
   return (
     <div
-      className="flex items-center justify-between px-4 py-2 bg-toolbar border-b border-border select-none"
+      className="flex items-center justify-between px-4 py-2 bg-toolbar glass-toolbar border-b border-border select-none"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       {/* macOS traffic light spacer */}
@@ -44,7 +44,7 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("github")}
           className={cn(
-            "relative p-2 rounded-lg transition-colors",
+            "relative p-2 rounded-md transition-colors",
             activeOverlay === "github"
               ? "text-accent bg-white/10"
               : "text-muted-foreground hover:text-white hover:bg-white/5",
@@ -59,7 +59,7 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("slack")}
           className={cn(
-            "relative p-2 rounded-lg transition-colors",
+            "relative p-2 rounded-md transition-colors",
             activeOverlay === "slack"
               ? "text-white bg-white/10"
               : "text-muted-foreground hover:text-white hover:bg-white/5",
@@ -74,7 +74,7 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("mail")}
           className={cn(
-            "relative p-2 rounded-lg transition-colors",
+            "relative p-2 rounded-md transition-colors",
             activeOverlay === "mail"
               ? "text-white bg-white/10"
               : "text-muted-foreground hover:text-white hover:bg-white/5",

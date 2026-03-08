@@ -47,7 +47,7 @@ export default function SessionSidebar({
   }, [editingId, editValue, onRenameSession]);
 
   return (
-    <div className="h-full bg-base flex flex-col border-r border-border relative">
+    <div className="h-full bg-white/[0.03] glass-panel flex flex-col border-r border-border relative">
       {!isCollapsed && (
         <>
           {/* Search + New Session */}
@@ -56,17 +56,17 @@ export default function SessionSidebar({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <input
                 placeholder="Search sessions..."
-                className="w-full pl-9 pr-3 py-2 text-sm bg-white/5 border border-border rounded-md text-white placeholder:text-muted-foreground/60 outline-none focus:border-accent/50"
+                className="w-full pl-9 pr-3 py-2 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
               />
             </div>
 
             <button
               type="button"
               onClick={onNewSession}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-white whitespace-nowrap relative overflow-hidden group transition-colors border-2 border-transparent"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded text-white whitespace-nowrap relative overflow-hidden group transition-colors border-2 border-transparent"
               style={{
                 background:
-                  "linear-gradient(var(--color-base), var(--color-base)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box",
+                  "linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box",
               }}
             >
               <div className="absolute inset-0 bg-gradient-to-r from-accent/10 to-accent-dark/10 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -85,10 +85,10 @@ export default function SessionSidebar({
                   // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: nested interactive elements require div wrapper
                   <div
                     key={session.id}
-                    className={`group flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all ${
+                    className={`group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
                       isActive
-                        ? "bg-gradient-to-r from-accent/20 to-accent-dark/20 border border-accent/30"
-                        : "hover:bg-white/5 border border-transparent"
+                        ? "bg-white/[0.08] border border-accent/20 glow-accent"
+                        : "hover:bg-white/[0.05] border border-transparent"
                     }`}
                     onClick={() => onSessionSelect(session.id)}
                   >
@@ -110,7 +110,7 @@ export default function SessionSidebar({
                             e.stopPropagation();
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="text-sm text-white bg-white/10 border border-accent/30 rounded px-1.5 py-0.5 w-full outline-none"
+                          className="text-sm text-white bg-white/[0.08] border border-accent/20 rounded-lg px-1.5 py-0.5 w-full outline-none"
                         />
                       ) : (
                         <h3
@@ -151,10 +151,10 @@ export default function SessionSidebar({
           <button
             type="button"
             onClick={onNewSession}
-            className="p-2 rounded-lg text-muted-foreground hover:text-accent transition-colors border-2 border-transparent"
+            className="p-2 rounded-md text-muted-foreground hover:text-accent transition-colors border-2 border-transparent"
             style={{
               background:
-                "linear-gradient(var(--color-base), var(--color-base)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box",
+                "linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box",
             }}
           >
             <Plus className="size-4" />
@@ -164,10 +164,10 @@ export default function SessionSidebar({
               type="button"
               key={session.id}
               onClick={() => onSessionSelect(session.id)}
-              className={`p-2 rounded-lg transition-all ${
+              className={`p-2 rounded-xl transition-all ${
                 activeSessionId === session.id
-                  ? "bg-gradient-to-r from-accent/20 to-accent-dark/20"
-                  : "hover:bg-white/5"
+                  ? "bg-white/[0.08] glow-accent"
+                  : "hover:bg-white/[0.05]"
               }`}
               title={session.name}
             >

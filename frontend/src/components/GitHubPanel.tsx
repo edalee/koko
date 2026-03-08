@@ -59,7 +59,7 @@ export default function GitHubPanel({ prs, loading, refresh }: GitHubPanelProps)
         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR card opens in browser
         <div
           key={`${pr.repo}-${pr.number}`}
-          className="p-3 bg-white/5 rounded-lg border border-border hover:bg-white/10 transition-colors cursor-pointer"
+          className="p-3 bg-white/[0.06] glass-card rounded-xl border border-border inset-highlight hover:bg-white/[0.09] hover:border-white/[0.12] transition-all cursor-pointer"
           onClick={() => BrowserOpenURL(pr.url)}
         >
           <div className="flex items-start gap-3">

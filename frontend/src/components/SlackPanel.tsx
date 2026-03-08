@@ -10,10 +10,10 @@ export default function SlackPanel() {
       {mockItems.map((item) => (
         <div
           key={item.channel}
-          className="p-3 bg-white/5 rounded-lg border border-border hover:bg-white/10 transition-colors cursor-pointer"
+          className="p-3 bg-white/[0.06] glass-card rounded-xl border border-border inset-highlight hover:bg-white/[0.09] hover:border-white/[0.12] transition-all cursor-pointer"
         >
           <div className="flex items-start gap-3">
-            <div className="size-8 rounded bg-gradient-to-r from-accent to-accent-dark flex items-center justify-center text-toolbar text-xs font-bold shrink-0">
+            <div className="size-8 rounded bg-gradient-to-r from-accent to-accent-dark flex items-center justify-center text-base text-xs font-bold shrink-0">
               {item.user[0]}
             </div>
             <div className="flex-1 min-w-0">

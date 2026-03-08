@@ -19,38 +19,38 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
   }
 
   return (
-    <div className="h-full flex bg-surface border-l border-border relative overflow-hidden">
+    <div className="h-full flex bg-white/[0.03] glass-panel border-l border-border relative overflow-hidden">
       {/* Module Icons */}
-      <div className="w-12 shrink-0 flex flex-col items-center py-3 gap-2">
+      <div className="w-9 shrink-0 flex flex-col items-center py-3 gap-1.5">
         <button
           type="button"
           onClick={() => handleModuleClick("files")}
-          className={`p-2 rounded-lg transition-colors ${
+          className={`p-1.5 rounded-md transition-colors ${
             activeModule === "files"
-              ? "bg-gradient-to-r from-accent/20 to-accent-dark/20 text-accent"
+              ? "text-accent bg-white/[0.08]"
               : "text-muted-foreground hover:text-white hover:bg-white/5"
           }`}
           title="File Changes"
         >
-          <FileCode2 className="size-5" />
+          <FileCode2 className="size-4" />
         </button>
         <button
           type="button"
           onClick={() => handleModuleClick("agents")}
-          className={`p-2 rounded-lg transition-colors ${
+          className={`p-1.5 rounded-md transition-colors ${
             activeModule === "agents"
-              ? "bg-gradient-to-r from-accent/20 to-accent-dark/20 text-accent"
+              ? "text-accent bg-white/[0.08]"
               : "text-muted-foreground hover:text-white hover:bg-white/5"
           }`}
           title="Subagents"
         >
-          <Bot className="size-5" />
+          <Bot className="size-4" />
         </button>
       </div>
 
       {/* Module Content */}
       {!isCollapsed && (
-        <div className="flex-1 flex flex-col overflow-hidden border-l border-border bg-base animate-fade-in">
+        <div className="flex-1 flex flex-col overflow-hidden border-l border-border bg-white/[0.02] animate-fade-in">
           {activeModule === "files" && (
             <div className="h-full flex flex-col">
               <div className="border-b border-border px-4 py-3">
@@ -82,7 +82,7 @@ export default function RightSidebar({ isCollapsed, onToggleCollapse }: RightSid
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="absolute bottom-3 left-3 p-1.5 hover:bg-white/10 rounded transition-colors"
+        className="absolute bottom-3 left-1.5 p-1 hover:bg-white/10 rounded transition-colors"
         title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         {isCollapsed ? (

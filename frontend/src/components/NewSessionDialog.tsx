@@ -96,14 +96,12 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
       />
 
       <div
-        className={`relative w-[480px] flex flex-col rounded-2xl border shadow-2xl ${
+        className={`relative w-[480px] flex flex-col rounded-xl border shadow-2xl glass-overlay inset-highlight ${
           state === "closing" ? "animate-overlay-out" : "animate-overlay-in"
         }`}
         style={{
-          backgroundColor: "var(--color-glass)",
+          backgroundColor: "rgba(255, 255, 255, 0.08)",
           borderColor: "var(--color-glass-border)",
-          backdropFilter: "blur(40px)",
-          WebkitBackdropFilter: "blur(40px)",
         }}
         onAnimationEnd={handleAnimationEnd}
       >
@@ -118,7 +116,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-md text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="size-4" />
           </button>
@@ -140,7 +138,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={placeholder}
-              className="w-full px-3 py-2.5 text-sm bg-white/5 border border-border rounded-lg text-white placeholder:text-muted-foreground/40 outline-none focus:border-accent/50 transition-colors"
+              className="w-full px-3 py-2.5 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
             />
           </div>
 
@@ -154,7 +152,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
               <button
                 type="button"
                 onClick={handleBrowse}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm bg-accent/10 border border-accent/30 rounded-lg text-white hover:bg-accent/15 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm bg-accent/10 border border-accent/30 rounded-md text-white hover:bg-accent/15 transition-colors text-left"
               >
                 <FolderOpen className="size-4 text-accent shrink-0" />
                 <span className="truncate">{shortenPath(directory)}</span>
@@ -163,7 +161,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
               <button
                 type="button"
                 onClick={handleBrowse}
-                className="w-full flex items-center justify-center gap-2 px-3 py-3 text-sm bg-white/5 border border-border border-dashed rounded-lg text-muted-foreground hover:text-white hover:border-accent/30 hover:bg-white/[0.07] transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-3 py-3 text-sm bg-white/5 border border-border border-dashed rounded-md text-muted-foreground hover:text-white hover:border-accent/30 hover:bg-white/[0.07] transition-colors"
               >
                 <Folder className="size-4" />
                 <span>Browse...</span>
@@ -179,7 +177,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
                     type="button"
                     key={dir}
                     onClick={() => setDirectory(dir)}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg text-muted-foreground hover:text-white hover:bg-white/5 transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md text-muted-foreground hover:text-white hover:bg-white/5 transition-colors text-left"
                   >
                     <Folder className="size-3.5 shrink-0" />
                     <span className="truncate">{shortenPath(dir)}</span>
@@ -195,7 +193,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
+            className="px-4 py-2 text-sm rounded-md text-muted-foreground hover:text-white hover:bg-white/10 transition-colors"
           >
             Cancel
           </button>
@@ -203,10 +201,10 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
             type="button"
             onClick={handleCreate}
             disabled={!directory}
-            className="px-4 py-2 text-sm rounded-lg font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed text-white relative overflow-hidden border-2 border-transparent"
+            className="px-4 py-2 text-sm rounded-md font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed text-white relative overflow-hidden border-2 border-transparent"
             style={{
               background: directory
-                ? "linear-gradient(var(--color-surface), var(--color-surface)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box"
+                ? "linear-gradient(rgba(255,255,255,0.08), rgba(255,255,255,0.08)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box"
                 : undefined,
             }}
           >
