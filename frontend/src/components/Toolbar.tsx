@@ -61,7 +61,7 @@ export default function Toolbar({
           className={cn(
             "relative p-2 rounded-md transition-colors",
             activeOverlay === "slack"
-              ? "text-white bg-white/10"
+              ? "text-accent bg-white/10"
               : "text-muted-foreground hover:text-white hover:bg-white/5",
           )}
           title="Slack Messages"
@@ -76,7 +76,7 @@ export default function Toolbar({
           className={cn(
             "relative p-2 rounded-md transition-colors",
             activeOverlay === "mail"
-              ? "text-white bg-white/10"
+              ? "text-accent bg-white/10"
               : "text-muted-foreground hover:text-white hover:bg-white/5",
           )}
           title="Mail"
@@ -89,10 +89,16 @@ export default function Toolbar({
 
         <button
           type="button"
-          className="flex items-center gap-1.5 px-2.5 py-1 text-sm text-white/80 hover:bg-white/10 hover:text-white rounded transition-colors"
+          onClick={() => onToggleOverlay("settings")}
+          className={cn(
+            "relative p-2 rounded-md transition-colors",
+            activeOverlay === "settings"
+              ? "text-accent bg-white/10"
+              : "text-muted-foreground hover:text-white hover:bg-white/5",
+          )}
+          title="Settings"
         >
           <Settings className="size-4" />
-          Settings
         </button>
       </div>
     </div>
