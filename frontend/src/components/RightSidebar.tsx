@@ -69,7 +69,12 @@ function fileName(path: string) {
 function fileDir(path: string) {
   const parts = path.split("/");
   if (parts.length <= 1) return "";
-  return parts.slice(0, -1).join("/");
+  const dirParts = parts.slice(0, -1);
+  // Show last 3 segments max, prefix with ... if truncated
+  if (dirParts.length > 3) {
+    return `.../${dirParts.slice(-3).join("/")}`;
+  }
+  return dirParts.join("/");
 }
 
 export default function RightSidebar({
