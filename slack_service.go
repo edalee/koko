@@ -104,21 +104,6 @@ func (ss *SlackService) DebugFetch() (string, error) {
 		}
 	}
 
-	// Test search.messages
-	searchResp, err := ss.apiGet(token, "search.messages", map[string]string{
-		"query": "to:me",
-		"count": "3",
-		"sort":  "timestamp",
-	})
-	if err != nil {
-		out += fmt.Sprintf("search.messages error: %v\n", err)
-	} else {
-		msgsObj, _ := searchResp["messages"].(map[string]interface{})
-		matches, _ := msgsObj["matches"].([]interface{})
-		total, _ := msgsObj["total"].(float64)
-		out += fmt.Sprintf("search.messages: %d matches (total: %.0f)\n", len(matches), total)
-	}
-
 	return out, nil
 }
 
@@ -130,26 +115,13 @@ func (ss *SlackService) GetMessages() ([]SlackMessage, error) {
 	}
 
 	token := cfg.SlackToken
-	var messages []SlackMessage
-	var errs []string
-
 	// Fetch DMs
-	dms, err := ss.fetchDMs(token)
+	messages, err := ss.fetchDMs(token)
 	if err != nil {
-		errs = append(errs, "DMs: "+err.Error())
-	} else {
-		messages = append(messages, dms...)
+		return nil, fmt.Errorf("failed to fetch DMs: %w", err)
 	}
 
-	// Fetch @mentions via search
-	mentions, err := ss.fetchMentions(token)
-	if err != nil {
-		errs = append(errs, "mentions: "+err.Error())
-	} else {
-		messages = append(messages, mentions...)
-	}
-
-	fmt.Printf("[Slack] DMs: %d, Mentions: %d, Errors: %v\n", len(dms), len(mentions), errs)
+	fmt.Printf("[Slack] DMs: %d\n", len(messages))
 
 	// Sort by time, newest first
 	sort.Slice(messages, func(i, j int) bool {
@@ -159,11 +131,6 @@ func (ss *SlackService) GetMessages() ([]SlackMessage, error) {
 	// Limit to 20 most recent
 	if len(messages) > 20 {
 		messages = messages[:20]
-	}
-
-	// If we got no messages and had errors, surface the errors
-	if len(messages) == 0 && len(errs) > 0 {
-		return nil, fmt.Errorf("failed to fetch: %s", fmt.Sprintf("%v", errs))
 	}
 
 	return messages, nil
@@ -263,68 +230,6 @@ func (ss *SlackService) fetchDMs(token string) ([]SlackMessage, error) {
 				Time:      unixTime,
 			})
 		}
-	}
-
-	return messages, nil
-}
-
-func (ss *SlackService) fetchMentions(token string) ([]SlackMessage, error) {
-	resp, err := ss.apiGet(token, "search.messages", map[string]string{
-		"query": "to:me",
-		"count": "10",
-		"sort":  "timestamp",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	msgsObj, ok := resp["messages"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected search response")
-	}
-
-	matches, ok := msgsObj["matches"].([]interface{})
-	if !ok {
-		return nil, nil
-	}
-
-	teamID, _ := ss.getTeamID(token)
-	userCache := make(map[string]string)
-
-	var messages []SlackMessage
-	for _, m := range matches {
-		match, ok := m.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		text, _ := match["text"].(string)
-		ts, _ := match["ts"].(string)
-		userID, _ := match["user"].(string)
-
-		channelObj, _ := match["channel"].(map[string]interface{})
-		channelID, _ := channelObj["id"].(string)
-		channelName, _ := channelObj["name"].(string)
-
-		userName := ss.resolveUser(token, userID, userCache)
-
-		if len(text) > 120 {
-			text = text[:120] + "..."
-		}
-
-		unixTime := tsToUnix(ts)
-
-		messages = append(messages, SlackMessage{
-			Type:      "mention",
-			Channel:   "#" + channelName,
-			ChannelID: channelID,
-			User:      userName,
-			Text:      text,
-			Timestamp: ts,
-			TeamID:    teamID,
-			Unread:    true,
-			Time:      unixTime,
-		})
 	}
 
 	return messages, nil
