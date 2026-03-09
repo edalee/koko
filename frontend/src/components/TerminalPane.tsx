@@ -3,7 +3,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { Resize, Write } from "../../wailsjs/go/main/TerminalManager";
+import { ReplayBuffer, Resize, Write } from "../../wailsjs/go/main/TerminalManager";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import "@xterm/xterm/css/xterm.css";
 
@@ -117,6 +117,14 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     if (dims) {
       Resize(sessionId, dims.cols, dims.rows);
     }
+
+    // Replay any buffered output that arrived before we connected
+    ReplayBuffer(sessionId).then((encoded) => {
+      if (encoded) {
+        const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
+        term.write(bytes);
+      }
+    });
 
     cleanupRef.current = () => {
       cleanupData();

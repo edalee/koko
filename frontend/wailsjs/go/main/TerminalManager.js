@@ -10,8 +10,20 @@ export function CreateSession(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['TerminalManager']['CreateSession'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function CreateShellSession(arg1, arg2, arg3) {
+  return window['go']['main']['TerminalManager']['CreateShellSession'](arg1, arg2, arg3);
+}
+
+export function GetSessionPID(arg1) {
+  return window['go']['main']['TerminalManager']['GetSessionPID'](arg1);
+}
+
 export function GetSessions() {
   return window['go']['main']['TerminalManager']['GetSessions']();
+}
+
+export function ReplayBuffer(arg1) {
+  return window['go']['main']['TerminalManager']['ReplayBuffer'](arg1);
 }
 
 export function Resize(arg1, arg2, arg3) {

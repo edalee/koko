@@ -13,6 +13,38 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// ringBuffer stores recent PTY output so late-connecting frontends can replay it.
+type ringBuffer struct {
+	data []byte
+	size int
+	pos  int
+	full bool
+}
+
+func newRingBuffer(size int) *ringBuffer {
+	return &ringBuffer{data: make([]byte, size), size: size}
+}
+
+func (rb *ringBuffer) Write(p []byte) {
+	for _, b := range p {
+		rb.data[rb.pos] = b
+		rb.pos = (rb.pos + 1) % rb.size
+		if rb.pos == 0 {
+			rb.full = true
+		}
+	}
+}
+
+func (rb *ringBuffer) Bytes() []byte {
+	if !rb.full {
+		return rb.data[:rb.pos]
+	}
+	out := make([]byte, rb.size)
+	copy(out, rb.data[rb.pos:])
+	copy(out[rb.size-rb.pos:], rb.data[:rb.pos])
+	return out
+}
+
 type session struct {
 	id   string
 	name string
@@ -21,6 +53,7 @@ type session struct {
 	cmd  *exec.Cmd
 	mu   sync.Mutex
 	done chan struct{}
+	buf  *ringBuffer // buffered PTY output for late-connecting frontends
 }
 
 type TerminalManager struct {
@@ -96,6 +129,63 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 	return id, nil
 }
 
+func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (string, error) {
+	tm.mu.Lock()
+	tm.nextID++
+	id := fmt.Sprintf("shell-%d", tm.nextID)
+	tm.mu.Unlock()
+
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/zsh"
+	}
+
+	env := append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+
+	cmd := exec.Command(shell, "-l")
+	cmd.Dir = dir
+	cmd.Env = env
+
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
+		Rows: uint16(rows),
+		Cols: uint16(cols),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to start shell PTY: %w", err)
+	}
+
+	s := &session{
+		id:   id,
+		name: "Quick Terminal",
+		dir:  dir,
+		ptmx: ptmx,
+		cmd:  cmd,
+		done: make(chan struct{}),
+		buf:  newRingBuffer(64 * 1024),
+	}
+
+	tm.mu.Lock()
+	tm.sessions[id] = s
+	tm.mu.Unlock()
+
+	go tm.readLoop(s)
+
+	return id, nil
+}
+
+func (tm *TerminalManager) ReplayBuffer(sessionID string) (string, error) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.buf == nil {
+		return "", nil
+	}
+	return base64.StdEncoding.EncodeToString(s.buf.Bytes()), nil
+}
+
 func (tm *TerminalManager) Write(sessionID, data string) error {
 	s, err := tm.getSession(sessionID)
 	if err != nil {
@@ -147,11 +237,17 @@ func (tm *TerminalManager) readLoop(s *session) {
 		runtime.EventsEmit(tm.ctx, "pty:exit:"+s.id)
 	}()
 
-	buf := make([]byte, 32*1024)
+	readBuf := make([]byte, 32*1024)
 	for {
-		n, err := s.ptmx.Read(buf)
+		n, err := s.ptmx.Read(readBuf)
 		if n > 0 {
-			encoded := base64.StdEncoding.EncodeToString(buf[:n])
+			chunk := readBuf[:n]
+			if s.buf != nil {
+				s.mu.Lock()
+				s.buf.Write(chunk)
+				s.mu.Unlock()
+			}
+			encoded := base64.StdEncoding.EncodeToString(chunk)
 			runtime.EventsEmit(tm.ctx, "pty:data:"+s.id, encoded)
 		}
 		if err != nil {
@@ -172,6 +268,17 @@ func (tm *TerminalManager) GetSessions() []SessionInfo {
 		})
 	}
 	return sessions
+}
+
+func (tm *TerminalManager) GetSessionPID(sessionID string) (int, error) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	if s.cmd.Process == nil {
+		return 0, fmt.Errorf("session process not started")
+	}
+	return s.cmd.Process.Pid, nil
 }
 
 func (tm *TerminalManager) getSession(id string) (*session, error) {

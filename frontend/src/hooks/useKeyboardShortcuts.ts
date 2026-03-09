@@ -4,12 +4,14 @@ interface KeyboardShortcutActions {
   onNewSession: () => void;
   onSwitchSession: (index: number) => void;
   onCloseSession: () => void;
+  onToggleTerminal: () => void;
 }
 
 export function useKeyboardShortcuts({
   onNewSession,
   onSwitchSession,
   onCloseSession,
+  onToggleTerminal,
 }: KeyboardShortcutActions) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -30,6 +32,13 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      // Cmd+` — Toggle quick terminal
+      if (e.key === "`" && !e.shiftKey) {
+        e.preventDefault();
+        onToggleTerminal();
+        return;
+      }
+
       // Cmd+1 through Cmd+9 — Switch to session by index
       const num = Number.parseInt(e.key, 10);
       if (num >= 1 && num <= 9) {
@@ -40,5 +49,5 @@ export function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNewSession, onSwitchSession, onCloseSession]);
+  }, [onNewSession, onSwitchSession, onCloseSession, onToggleTerminal]);
 }
