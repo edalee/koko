@@ -1,7 +1,7 @@
 import { Check, Eye, EyeOff, Loader2, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { GetConfig, SetSlackToken } from "../../wailsjs/go/main/ConfigService";
-import { DebugFetch, TestConnection } from "../../wailsjs/go/main/SlackService";
+import { TestConnection } from "../../wailsjs/go/main/SlackService";
 
 interface SettingsPanelProps {
   onTokenSaved?: () => void;
@@ -76,7 +76,7 @@ export default function SettingsPanel({ onTokenSaved }: SettingsPanelProps) {
             </button>
           </div>
           <p className="text-[10px] text-tertiary">
-            Requires scopes: im:history, im:read, search:read, users:read
+            Requires scopes: im:history, im:read, users:read
           </p>
         </div>
 
@@ -124,29 +124,6 @@ export default function SettingsPanel({ onTokenSaved }: SettingsPanelProps) {
             {testResult}
           </pre>
         )}
-      </div>
-
-      {/* Debug */}
-      <div className="space-y-2">
-        <button
-          type="button"
-          onClick={async () => {
-            setTestResult(null);
-            setTesting(true);
-            try {
-              const debug = await DebugFetch();
-              setTestResult(debug);
-            } catch (err) {
-              setTestResult(`Error: ${err}`);
-            } finally {
-              setTesting(false);
-            }
-          }}
-          disabled={testing || !slackToken.trim()}
-          className="text-xs text-muted-foreground hover:text-white transition-colors"
-        >
-          Debug API responses
-        </button>
       </div>
 
       {/* Config file location */}
