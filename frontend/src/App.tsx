@@ -4,6 +4,7 @@ import GitHubPanel from "./components/GitHubPanel";
 import MailPanel, { useMailCount } from "./components/MailPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
 import OverlayPage from "./components/OverlayPage";
+import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsPanel from "./components/SettingsPanel";
@@ -17,6 +18,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
+import { useSubagents } from "./hooks/useSubagents";
 
 export default function App() {
   const { tabs, activeTabId, createTab, closeTab, switchTab, renameTab, handleSessionExit } =
@@ -24,6 +26,7 @@ export default function App() {
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
+  const [showQuickTerminal, setShowQuickTerminal] = useState(false);
 
   const { prs, loading, refresh } = useGitHub();
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -43,6 +46,12 @@ export default function App() {
     openMessage: openSlackMessage,
   } = useSlack();
   const mailCount = useMailCount();
+  const {
+    processes,
+    agentCount,
+    loading: processesLoading,
+    refresh: refreshProcesses,
+  } = useSubagents(activeTabId);
 
   const handleSwitchByIndex = useCallback(
     (index: number) => {
@@ -57,10 +66,15 @@ export default function App() {
     if (activeTabId) closeTab(activeTabId);
   }, [activeTabId, closeTab]);
 
+  const handleToggleTerminal = useCallback(() => {
+    setShowQuickTerminal((prev) => !prev);
+  }, []);
+
   useKeyboardShortcuts({
     onNewSession: () => setShowNewSession(true),
     onSwitchSession: handleSwitchByIndex,
     onCloseSession: handleCloseActive,
+    onToggleTerminal: handleToggleTerminal,
   });
 
   return (
@@ -77,7 +91,7 @@ export default function App() {
         <ResizablePanelGroup orientation="horizontal" className="flex-1">
           <ResizablePanel
             defaultSize="15"
-            minSize={isLeftSidebarCollapsed ? "4" : "12"}
+            minSize={isLeftSidebarCollapsed ? "4" : "14"}
             maxSize={isLeftSidebarCollapsed ? "4" : "25"}
           >
             <SessionSidebar
@@ -134,9 +148,21 @@ export default function App() {
               branch={branch}
               fileChangesLoading={fileChangesLoading}
               onRefreshFileChanges={refreshFileChanges}
+              processes={processes}
+              agentCount={agentCount}
+              processesLoading={processesLoading}
+              onRefreshProcesses={refreshProcesses}
+              hasActiveSession={!!activeTabId}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
+
+        {/* Quick Terminal */}
+        <QuickTerminal
+          open={showQuickTerminal}
+          onClose={() => setShowQuickTerminal(false)}
+          directory={activeTab?.directory ?? "."}
+        />
 
         {/* Floating Overlays */}
         <OverlayPage

@@ -19,6 +19,7 @@ func main() {
 	git := NewGitService()
 	cfg := NewConfigService()
 	slack := NewSlackService(cfg)
+	pm := NewProcessMonitor()
 
 	err := wails.Run(&options.App{
 		Title:     "Koko",
@@ -45,6 +46,7 @@ func main() {
 			git,
 			cfg,
 			slack,
+			pm,
 		},
 	})
 

@@ -44,10 +44,10 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("github")}
           className={cn(
-            "relative p-2 rounded-md transition-colors",
+            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
             activeOverlay === "github"
               ? "text-accent bg-white/10"
-              : "text-muted-foreground hover:text-white hover:bg-white/5",
+              : "text-white/70 hover:text-white hover:bg-white/5",
           )}
           title="GitHub PRs"
         >
@@ -59,10 +59,10 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("slack")}
           className={cn(
-            "relative p-2 rounded-md transition-colors",
+            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
             activeOverlay === "slack"
               ? "text-accent bg-white/10"
-              : "text-muted-foreground hover:text-white hover:bg-white/5",
+              : "text-white/70 hover:text-white hover:bg-white/5",
           )}
           title="Slack Messages"
         >
@@ -74,10 +74,10 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("mail")}
           className={cn(
-            "relative p-2 rounded-md transition-colors",
+            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
             activeOverlay === "mail"
               ? "text-accent bg-white/10"
-              : "text-muted-foreground hover:text-white hover:bg-white/5",
+              : "text-white/70 hover:text-white hover:bg-white/5",
           )}
           title="Mail"
         >
@@ -91,10 +91,10 @@ export default function Toolbar({
           type="button"
           onClick={() => onToggleOverlay("settings")}
           className={cn(
-            "relative p-2 rounded-md transition-colors",
+            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
             activeOverlay === "settings"
               ? "text-accent bg-white/10"
-              : "text-muted-foreground hover:text-white hover:bg-white/5",
+              : "text-white/70 hover:text-white hover:bg-white/5",
           )}
           title="Settings"
         >

@@ -1,15 +1,22 @@
 import {
   Bot,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Circle,
+  Cog,
   FileCode2,
   FileMinus,
   FilePlus,
   FileText,
+  Plug,
   RefreshCw,
+  Sparkles,
+  Wrench,
 } from "lucide-react";
 import { useState } from "react";
 import type { FileChange } from "../hooks/useFileChanges";
+import type { SubagentProcess } from "../hooks/useSubagents";
 
 type SidebarModule = "files" | "agents";
 
@@ -20,6 +27,11 @@ interface RightSidebarProps {
   branch: string;
   fileChangesLoading: boolean;
   onRefreshFileChanges: () => void;
+  processes: SubagentProcess[];
+  agentCount: number;
+  processesLoading: boolean;
+  onRefreshProcesses: () => void;
+  hasActiveSession: boolean;
 }
 
 function changeColor(change: FileChange): string {
@@ -70,11 +82,30 @@ function fileDir(path: string) {
   const parts = path.split("/");
   if (parts.length <= 1) return "";
   const dirParts = parts.slice(0, -1);
-  // Show last 3 segments max, prefix with ... if truncated
   if (dirParts.length > 3) {
     return `.../${dirParts.slice(-3).join("/")}`;
   }
   return dirParts.join("/");
+}
+
+function processIcon(type: string) {
+  switch (type) {
+    case "subagent":
+      return <Sparkles className="size-3.5 text-accent shrink-0" />;
+    case "mcp":
+      return <Plug className="size-3.5 text-blue-400 shrink-0" />;
+    case "infrastructure":
+      return <Cog className="size-3.5 text-tertiary shrink-0" />;
+    default:
+      return <Wrench className="size-3.5 text-muted-foreground shrink-0" />;
+  }
+}
+
+function processDot(type: string) {
+  if (type === "subagent") {
+    return <Circle className="size-2 fill-accent text-accent shrink-0" />;
+  }
+  return <Circle className="size-2 fill-tertiary text-tertiary shrink-0" />;
 }
 
 export default function RightSidebar({
@@ -84,8 +115,19 @@ export default function RightSidebar({
   branch,
   fileChangesLoading,
   onRefreshFileChanges,
+  processes,
+  agentCount,
+  processesLoading,
+  onRefreshProcesses,
+  hasActiveSession,
 }: RightSidebarProps) {
   const [activeModule, setActiveModule] = useState<SidebarModule>("files");
+  const [showInfra, setShowInfra] = useState(false);
+
+  const subagents = processes.filter((p) => p.type === "subagent");
+  const mcps = processes.filter((p) => p.type === "mcp");
+  const tools = processes.filter((p) => p.type === "tool");
+  const infra = processes.filter((p) => p.type === "infrastructure");
 
   function handleModuleClick(module: SidebarModule) {
     setActiveModule(module);
@@ -118,7 +160,7 @@ export default function RightSidebar({
         <button
           type="button"
           onClick={() => handleModuleClick("agents")}
-          className={`p-1.5 rounded-md transition-colors ${
+          className={`relative p-1.5 rounded-md transition-colors ${
             activeModule === "agents"
               ? "text-accent bg-white/[0.08]"
               : "text-muted-foreground hover:text-white hover:bg-white/5"
@@ -126,6 +168,9 @@ export default function RightSidebar({
           title="Subagents"
         >
           <Bot className="size-4" />
+          {agentCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-accent" />
+          )}
         </button>
       </div>
 
@@ -195,13 +240,151 @@ export default function RightSidebar({
           )}
           {activeModule === "agents" && (
             <div className="h-full flex flex-col">
-              <div className="border-b border-border px-4 py-3">
-                <h3 className="text-white text-sm">Subagents</h3>
+              <div className="border-b border-border px-4 py-3 flex items-center justify-between">
+                <div className="min-w-0">
+                  <h3 className="text-white text-sm">Subagents</h3>
+                  {hasActiveSession && processes.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {agentCount > 0 && (
+                        <span className="text-accent">
+                          {agentCount} agent{agentCount !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {agentCount > 0 && mcps.length > 0 && (
+                        <span className="text-tertiary"> · </span>
+                      )}
+                      {mcps.length > 0 && (
+                        <span className="text-blue-400">
+                          {mcps.length} MCP{mcps.length !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={onRefreshProcesses}
+                  className="p-1 hover:bg-white/10 rounded transition-colors shrink-0"
+                  title="Refresh"
+                >
+                  <RefreshCw
+                    className={`size-3.5 text-muted-foreground ${processesLoading ? "animate-spin" : ""}`}
+                  />
+                </button>
               </div>
-              <div className="flex-1 p-4">
-                <p className="text-xs text-muted-foreground text-center py-4">
-                  No active subagents
-                </p>
+              <div className="flex-1 overflow-auto">
+                {!hasActiveSession ? (
+                  <p className="text-xs text-muted-foreground text-center py-8">
+                    No active session
+                  </p>
+                ) : processes.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-8">
+                    No active subagents
+                  </p>
+                ) : (
+                  <div className="py-1">
+                    {/* Subagents */}
+                    {subagents.map((proc) => (
+                      <div
+                        key={proc.pid}
+                        className="flex items-start gap-2 px-3 py-2 hover:bg-white/[0.04] transition-colors"
+                        title={`PID ${proc.pid}`}
+                      >
+                        {processIcon(proc.type)}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {processDot(proc.type)}
+                            <span className="text-xs text-white">{proc.command}</span>
+                            <span className="text-[10px] text-accent font-mono ml-auto shrink-0">
+                              {proc.elapsed}
+                            </span>
+                          </div>
+                          {proc.children > 0 && (
+                            <p className="text-[10px] text-tertiary mt-0.5 ml-3.5">
+                              {proc.children} child process{proc.children !== 1 ? "es" : ""}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* MCP Servers */}
+                    {mcps.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-1.5 px-3 pt-3 pb-1">
+                          <Plug className="size-3 text-blue-400" />
+                          <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                            MCP Servers ({mcps.length})
+                          </span>
+                        </div>
+                        {mcps.map((proc) => (
+                          <div
+                            key={proc.pid}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors"
+                            title={`PID ${proc.pid}`}
+                          >
+                            <Circle className="size-2 fill-blue-400 text-blue-400 shrink-0" />
+                            <span className="text-xs text-white/80 truncate">{proc.command}</span>
+                            <span className="text-[10px] text-tertiary font-mono ml-auto shrink-0">
+                              {proc.elapsed}
+                            </span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Tools */}
+                    {tools.map((proc) => (
+                      <div
+                        key={proc.pid}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors"
+                        title={`PID ${proc.pid}`}
+                      >
+                        {processIcon(proc.type)}
+                        <span className="text-xs text-muted-foreground truncate">
+                          {proc.command}
+                        </span>
+                        <span className="text-[10px] text-tertiary font-mono ml-auto shrink-0">
+                          {proc.elapsed}
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Infrastructure (collapsible) */}
+                    {infra.length > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowInfra(!showInfra)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 w-full text-left hover:bg-white/[0.04] transition-colors mt-1"
+                        >
+                          <ChevronDown
+                            className={`size-3 text-tertiary transition-transform ${showInfra ? "" : "-rotate-90"}`}
+                          />
+                          <span className="text-[10px] text-tertiary">
+                            Infrastructure ({infra.length})
+                          </span>
+                        </button>
+                        {showInfra &&
+                          infra.map((proc) => (
+                            <div
+                              key={proc.pid}
+                              className="flex items-center gap-2 px-3 py-1 pl-7 hover:bg-white/[0.04] transition-colors"
+                              title={`PID ${proc.pid}`}
+                            >
+                              {processIcon(proc.type)}
+                              <span className="text-[10px] text-tertiary truncate">
+                                {proc.command}
+                              </span>
+                              <span className="text-[10px] text-tertiary/50 font-mono ml-auto shrink-0">
+                                {proc.elapsed}
+                              </span>
+                            </div>
+                          ))}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

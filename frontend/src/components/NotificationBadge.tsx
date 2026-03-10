@@ -10,11 +10,16 @@ export default function NotificationBadge({
   if (count === 0) return null;
 
   return (
-    <span
-      className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white animate-badge-pop"
-      style={{ backgroundColor: color }}
-    >
-      {count > 99 ? "99+" : count}
-    </span>
+    <>
+      {/* Inline count label */}
+      <span className="text-xs font-medium tabular-nums" style={{ color }}>
+        {count > 99 ? "99+" : count}
+      </span>
+      {/* Small dot indicator */}
+      <span
+        className="absolute top-1 right-1 size-1.5 rounded-full animate-badge-pop"
+        style={{ backgroundColor: color }}
+      />
+    </>
   );
 }

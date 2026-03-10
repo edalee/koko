@@ -6,7 +6,13 @@ export function CloseSession(arg1:string):Promise<void>;
 
 export function CreateSession(arg1:string,arg2:string,arg3:number,arg4:number,arg5:boolean):Promise<string>;
 
+export function CreateShellSession(arg1:string,arg2:number,arg3:number):Promise<string>;
+
+export function GetSessionPID(arg1:string):Promise<number>;
+
 export function GetSessions():Promise<Array<main.SessionInfo>>;
+
+export function ReplayBuffer(arg1:string):Promise<string>;
 
 export function Resize(arg1:string,arg2:number,arg3:number):Promise<void>;
 

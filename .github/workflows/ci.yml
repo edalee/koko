@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Stub frontend dist (for go:embed)
+        run: mkdir -p frontend/dist && touch frontend/dist/index.html
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

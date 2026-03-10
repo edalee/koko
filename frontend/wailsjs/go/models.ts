@@ -54,6 +54,30 @@ export namespace main {
 	        this.url = source["url"];
 	    }
 	}
+	export class ProcessInfo {
+	    pid: number;
+	    command: string;
+	    fullCmd: string;
+	    type: string;
+	    elapsed: string;
+	    elapsedMs: number;
+	    children: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProcessInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pid = source["pid"];
+	        this.command = source["command"];
+	        this.fullCmd = source["fullCmd"];
+	        this.type = source["type"];
+	        this.elapsed = source["elapsed"];
+	        this.elapsedMs = source["elapsedMs"];
+	        this.children = source["children"];
+	    }
+	}
 	export class SessionInfo {
 	    id: string;
 	    name: string;
