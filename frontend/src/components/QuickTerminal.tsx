@@ -1,4 +1,4 @@
-import { ChevronDown, Terminal, X } from "lucide-react";
+import { Terminal, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CloseSession, CreateShellSession } from "../../wailsjs/go/main/TerminalManager";
 import TerminalPane from "./TerminalPane";
@@ -67,17 +67,9 @@ export default function QuickTerminal({ open, onClose, directory }: QuickTermina
             type="button"
             onClick={handleClose}
             className="p-1 hover:bg-white/10 rounded transition-colors"
-            title="Minimize"
+            title="Close terminal (⌘`)"
           >
-            <ChevronDown className="size-3.5 text-muted-foreground" />
-          </button>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="p-1 hover:bg-white/10 rounded transition-colors"
-            title="Close terminal"
-          >
-            <X className="size-3.5 text-muted-foreground hover:text-red-400" />
+            <X className="size-3.5 text-muted-foreground hover:text-[#F14D4C]" />
           </button>
         </div>
       </div>
