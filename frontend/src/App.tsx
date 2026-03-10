@@ -1,8 +1,8 @@
-import { GitPullRequest, Mail, MessageSquare, Settings } from "lucide-react";
+import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import GitHubPanel from "./components/GitHubPanel";
-import MailPanel, { useMailCount } from "./components/MailPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
+import NotificationsPanel from "./components/NotificationsPanel";
 import OverlayPage from "./components/OverlayPage";
 import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
@@ -15,6 +15,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./componen
 import { useFileChanges } from "./hooks/useFileChanges";
 import { useGitHub } from "./hooks/useGitHub";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useNotifications } from "./hooks/useNotifications";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
@@ -45,7 +46,15 @@ export default function App() {
     refresh: refreshSlack,
     openMessage: openSlackMessage,
   } = useSlack();
-  const mailCount = useMailCount();
+  const {
+    notifications,
+    unreadCount: notifCount,
+    loading: notifLoading,
+    filter: notifFilter,
+    setFilter: setNotifFilter,
+    refresh: refreshNotifications,
+    markRead: markNotifRead,
+  } = useNotifications();
   const {
     processes,
     agentCount,
@@ -84,7 +93,7 @@ export default function App() {
         onToggleOverlay={toggleOverlay}
         githubCount={prs.length}
         slackCount={slackCount}
-        mailCount={mailCount}
+        notifCount={notifCount}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -191,12 +200,19 @@ export default function App() {
         </OverlayPage>
 
         <OverlayPage
-          open={activeOverlay === "mail"}
+          open={activeOverlay === "notifications"}
           onClose={closeOverlay}
-          title="Mail"
-          icon={<Mail className="size-4" />}
+          title="Notifications"
+          icon={<Bell className="size-4" />}
         >
-          <MailPanel />
+          <NotificationsPanel
+            notifications={notifications}
+            loading={notifLoading}
+            refresh={refreshNotifications}
+            filter={notifFilter}
+            onFilterChange={setNotifFilter}
+            onMarkRead={markNotifRead}
+          />
         </OverlayPage>
 
         <OverlayPage

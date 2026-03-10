@@ -32,6 +32,32 @@ export namespace main {
 	        this.staged = source["staged"];
 	    }
 	}
+	export class GitHubNotification {
+	    id: string;
+	    title: string;
+	    type: string;
+	    reason: string;
+	    repo: string;
+	    url: string;
+	    unread: boolean;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GitHubNotification(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.type = source["type"];
+	        this.reason = source["reason"];
+	        this.repo = source["repo"];
+	        this.url = source["url"];
+	        this.unread = source["unread"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class GitHubPR {
 	    repo: string;
 	    number: number;
