@@ -91,7 +91,7 @@ export default function App() {
         <ResizablePanelGroup orientation="horizontal" className="flex-1">
           <ResizablePanel
             defaultSize="15"
-            minSize={isLeftSidebarCollapsed ? "4" : "12"}
+            minSize={isLeftSidebarCollapsed ? "4" : "14"}
             maxSize={isLeftSidebarCollapsed ? "4" : "25"}
           >
             <SessionSidebar
