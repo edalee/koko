@@ -2,12 +2,26 @@ import { Check, Eye, EyeOff, Loader2, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { GetConfig, SetSlackToken } from "../../wailsjs/go/main/ConfigService";
 import { TestConnection } from "../../wailsjs/go/main/SlackService";
+import type { SafeWorkingConfig } from "../hooks/useSafeWorking";
+import { cn } from "../lib/utils";
 
 interface SettingsPanelProps {
   onTokenSaved?: () => void;
+  safeWorkingConfig: SafeWorkingConfig;
+  onSafeWorkingChange: (config: SafeWorkingConfig) => void;
 }
 
-export default function SettingsPanel({ onTokenSaved }: SettingsPanelProps) {
+const BREAK_PRESETS = [
+  { label: "90 / 15", work: 90, rest: 15 },
+  { label: "60 / 10", work: 60, rest: 10 },
+  { label: "45 / 5", work: 45, rest: 5 },
+];
+
+export default function SettingsPanel({
+  onTokenSaved,
+  safeWorkingConfig,
+  onSafeWorkingChange,
+}: SettingsPanelProps) {
   const [slackToken, setSlackToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -124,6 +138,166 @@ export default function SettingsPanel({ onTokenSaved }: SettingsPanelProps) {
             {testResult}
           </pre>
         )}
+      </div>
+
+      {/* Safe Working */}
+      <div className="space-y-4 pt-3 border-t border-white/[0.06]">
+        <div>
+          <h4 className="text-sm text-white font-medium">Safe Working</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            Set boundaries to protect your wellbeing.
+          </p>
+        </div>
+
+        {/* Quiet Hours */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor="quiet-toggle" className="text-xs text-white/80">
+              Quiet Hours
+            </label>
+            <button
+              id="quiet-toggle"
+              type="button"
+              onClick={() =>
+                onSafeWorkingChange({
+                  ...safeWorkingConfig,
+                  quietHoursEnabled: !safeWorkingConfig.quietHoursEnabled,
+                })
+              }
+              className={cn(
+                "w-8 h-[18px] rounded-full transition-colors relative",
+                safeWorkingConfig.quietHoursEnabled ? "bg-accent" : "bg-white/[0.12]",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
+                  safeWorkingConfig.quietHoursEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
+                )}
+              />
+            </button>
+          </div>
+          <p className="text-[10px] text-tertiary">Block access during set hours.</p>
+          {safeWorkingConfig.quietHoursEnabled && (
+            <div className="flex items-center gap-2">
+              <input
+                type="time"
+                value={safeWorkingConfig.quietHoursStart}
+                onChange={(e) =>
+                  onSafeWorkingChange({ ...safeWorkingConfig, quietHoursStart: e.target.value })
+                }
+                className="px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 [color-scheme:dark]"
+              />
+              <span className="text-xs text-muted-foreground">to</span>
+              <input
+                type="time"
+                value={safeWorkingConfig.quietHoursEnd}
+                onChange={(e) =>
+                  onSafeWorkingChange({ ...safeWorkingConfig, quietHoursEnd: e.target.value })
+                }
+                className="px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 [color-scheme:dark]"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Break Reminders */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor="break-toggle" className="text-xs text-white/80">
+              Break Reminders
+            </label>
+            <button
+              id="break-toggle"
+              type="button"
+              onClick={() =>
+                onSafeWorkingChange({
+                  ...safeWorkingConfig,
+                  breakEnabled: !safeWorkingConfig.breakEnabled,
+                })
+              }
+              className={cn(
+                "w-8 h-[18px] rounded-full transition-colors relative",
+                safeWorkingConfig.breakEnabled ? "bg-accent" : "bg-white/[0.12]",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
+                  safeWorkingConfig.breakEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
+                )}
+              />
+            </button>
+          </div>
+          <p className="text-[10px] text-tertiary">Scheduled breaks at regular intervals.</p>
+          {safeWorkingConfig.breakEnabled && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label htmlFor="work-mins" className="text-[10px] text-tertiary block mb-1">
+                    Work (min)
+                  </label>
+                  <input
+                    id="work-mins"
+                    type="number"
+                    min={1}
+                    value={safeWorkingConfig.workMinutes}
+                    onChange={(e) =>
+                      onSafeWorkingChange({
+                        ...safeWorkingConfig,
+                        workMinutes: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                      })
+                    }
+                    className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label htmlFor="break-mins" className="text-[10px] text-tertiary block mb-1">
+                    Break (min)
+                  </label>
+                  <input
+                    id="break-mins"
+                    type="number"
+                    min={1}
+                    value={safeWorkingConfig.breakMinutes}
+                    onChange={(e) =>
+                      onSafeWorkingChange({
+                        ...safeWorkingConfig,
+                        breakMinutes: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                      })
+                    }
+                    className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {BREAK_PRESETS.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() =>
+                      onSafeWorkingChange({
+                        ...safeWorkingConfig,
+                        workMinutes: p.work,
+                        breakMinutes: p.rest,
+                      })
+                    }
+                    className={cn(
+                      "px-2 py-0.5 text-[10px] rounded transition-colors",
+                      safeWorkingConfig.workMinutes === p.work &&
+                        safeWorkingConfig.breakMinutes === p.rest
+                        ? "bg-white/[0.08] text-white"
+                        : "text-tertiary hover:text-muted-foreground hover:bg-white/[0.04]",
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <span className="text-[10px] text-tertiary ml-1">work / break</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Config file location */}

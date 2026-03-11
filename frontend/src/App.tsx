@@ -7,6 +7,7 @@ import NotificationsPanel from "./components/NotificationsPanel";
 import OverlayPage from "./components/OverlayPage";
 import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
+import SafeWorkingOverlay from "./components/SafeWorkingOverlay";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsPanel from "./components/SettingsPanel";
 import SlackPanel from "./components/SlackPanel";
@@ -18,6 +19,7 @@ import { useGitHub } from "./hooks/useGitHub";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { useOverlay } from "./hooks/useOverlay";
+import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
 import { useSubagents } from "./hooks/useSubagents";
@@ -62,6 +64,15 @@ export default function App() {
     loading: processesLoading,
     refresh: refreshProcesses,
   } = useSubagents(activeTabId);
+  const {
+    config: safeWorkingConfig,
+    updateConfig: updateSafeWorking,
+    isQuietHours,
+    quietResumeTime,
+    isBreakTime,
+    breakSecondsLeft,
+    skipBreak,
+  } = useSafeWorking(!!activeTabId);
 
   const handleSwitchByIndex = useCallback(
     (index: number) => {
@@ -225,7 +236,11 @@ export default function App() {
           title="Settings"
           icon={<Settings className="size-4" />}
         >
-          <SettingsPanel onTokenSaved={refreshSlack} />
+          <SettingsPanel
+            onTokenSaved={refreshSlack}
+            safeWorkingConfig={safeWorkingConfig}
+            onSafeWorkingChange={updateSafeWorking}
+          />
         </OverlayPage>
 
         <NewSessionDialog
@@ -237,6 +252,15 @@ export default function App() {
           }}
         />
       </div>
+
+      <SafeWorkingOverlay
+        isQuietHours={isQuietHours}
+        quietResumeTime={quietResumeTime}
+        isBreakTime={isBreakTime}
+        breakSecondsLeft={breakSecondsLeft}
+        breakTotalSeconds={safeWorkingConfig.breakMinutes * 60}
+        onSkipBreak={skipBreak}
+      />
     </div>
   );
 }
