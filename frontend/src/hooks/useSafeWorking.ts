@@ -78,7 +78,8 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     GetConfig()
       .then((appConfig) => {
         if (appConfig.safeWorking) {
-          setConfig(appConfig.safeWorking);
+          // Merge with defaults to handle missing/zero fields
+          setConfig({ ...DEFAULT_CONFIG, ...appConfig.safeWorking });
         }
       })
       .catch(() => {});
@@ -89,8 +90,11 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     setConfig(newConfig);
     try {
       const appConfig = await GetConfig();
-      appConfig.safeWorking = newConfig;
-      await SaveConfig(appConfig);
+      // Spread into plain object to avoid Wails class serialization issues
+      await SaveConfig({
+        ...appConfig,
+        safeWorking: { ...newConfig },
+      } as typeof appConfig);
     } catch {
       // ignore
     }
