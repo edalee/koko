@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kõkõ — A Desktop Workspace for Claude Code</title>
+  <meta name="description" content="Run multiple Claude Code sessions side-by-side with GitHub, Slack, and git awareness — all in one native desktop app." />
+  <meta property="og:title" content="Kõkõ — A Desktop Workspace for Claude Code" />
+  <meta property="og:description" content="Run multiple Claude Code sessions side-by-side with GitHub, Slack, and git awareness." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/png" href="appicon.png" />
+  <style>
+    :root {
+      --bg: #0f1219;
+      --bg-card: rgba(255, 255, 255, 0.04);
+      --bg-card-hover: rgba(255, 255, 255, 0.07);
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #e8eaf0;
+      --text-muted: rgba(255, 255, 255, 0.55);
+      --accent: #4ade80;
+      --accent-dim: rgba(74, 222, 128, 0.15);
+      --gradient-start: #0f1219;
+      --gradient-end: #1a1028;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Mesh gradient background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 20%, rgba(74, 222, 128, 0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 80% at 80% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 60%),
+        linear-gradient(160deg, var(--gradient-start), var(--gradient-end));
+      z-index: -1;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 0 48px;
+    }
+
+    .hero-icon {
+      width: 96px;
+      height: 96px;
+      border-radius: 22%;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .hero h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+
+    .hero .tagline {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 auto 32px;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0f1219;
+    }
+
+    .btn-primary:hover {
+      background: #6ee7a0;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(74, 222, 128, 0.25);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    /* Screenshot */
+    .screenshot {
+      text-align: center;
+      padding: 32px 0 64px;
+    }
+
+    .screenshot img {
+      max-width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 16px 64px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Features */
+    .features {
+      padding: 64px 0;
+    }
+
+    .features h2 {
+      text-align: center;
+      font-size: 2rem;
+      font-weight: 600;
+      margin-bottom: 48px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s;
+    }
+
+    .feature-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255, 255, 255, 0.12);
+      transform: translateY(-2px);
+    }
+
+    .feature-card .icon {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Install */
+    .install {
+      padding: 64px 0;
+      text-align: center;
+    }
+
+    .install h2 {
+      font-size: 2rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .install .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    .install-cards {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 32px;
+    }
+
+    .install-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 32px;
+      text-decoration: none;
+      color: var(--text);
+      min-width: 220px;
+      transition: all 0.2s;
+    }
+
+    .install-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+
+    .install-card .platform {
+      font-size: 1.5rem;
+      margin-bottom: 8px;
+    }
+
+    .install-card .name {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .install-card .detail {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* Prereq */
+    .prereq {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      backdrop-filter: blur(12px);
+    }
+
+    .prereq p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .prereq code {
+      display: block;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--accent);
+      overflow-x: auto;
+    }
+
+    /* Architecture */
+    .architecture {
+      padding: 64px 0;
+    }
+
+    .architecture h2 {
+      text-align: center;
+      font-size: 2rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .architecture .subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    .arch-diagram {
+      max-width: 640px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      color: var(--text-muted);
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .tech-pills {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 32px;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid rgba(74, 222, 128, 0.2);
+    }
+
+    /* Footer */
+    footer {
+      padding: 48px 0;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+    }
+
+    footer p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .hero { padding: 48px 0 32px; }
+      .hero h1 { font-size: 2.25rem; }
+      .hero .tagline { font-size: 1.1rem; }
+      .feature-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Hero -->
+    <section class="hero">
+      <img src="appicon.png" alt="Kõkõ" class="hero-icon" />
+      <h1>Kõkõ</h1>
+      <p class="tagline">
+        A desktop workspace for Claude Code. Run multiple sessions side-by-side
+        with GitHub, Slack, and git awareness — all in one window.
+      </p>
+      <div class="hero-buttons">
+        <a href="https://github.com/edalee/koko/releases/latest" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download
+        </a>
+        <a href="https://github.com/edalee/koko" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          View Source
+        </a>
+      </div>
+    </section>
+
+    <!-- Screenshot -->
+    <section class="screenshot">
+      <img src="screenshot.png" alt="Kõkõ running with a Claude Code session, sidebar panels showing GitHub PRs and file changes" />
+    </section>
+
+    <!-- Features -->
+    <section class="features">
+      <h2>Everything you need in one window</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon">&#x1F4BB;</div>
+          <h3>Claude Code Sessions</h3>
+          <p>Launch named sessions in any directory. Claude Code's full interactive TUI renders natively — slash commands, tool approvals, keyboard shortcuts all work.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x1F500;</div>
+          <h3>GitHub Awareness</h3>
+          <p>See open PRs across your repos with review status. Approve and merge directly from the sidebar. Notifications with quick mark-as-read.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x1F4AC;</div>
+          <h3>Slack DMs</h3>
+          <p>Unread direct messages at a glance. Click to deep-link into the Slack app. No more tab switching to check if someone messaged you.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x1F4C2;</div>
+          <h3>File Changes</h3>
+          <p>Live git diff for the active session's directory. Staged files in green, unstaged in orange. See what Claude is changing as it works.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x1F52D;</div>
+          <h3>Subagent Monitor</h3>
+          <p>Watch Claude's spawned child processes in real time. See what tools and subagents are running, how long they've been active, and their process trees.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x26A1;</div>
+          <h3>Quick Terminal</h3>
+          <p>Press <kbd>Cmd+`</kbd> to slide up a zsh shell for quick commands without leaving your Claude session. Prompt history persists across toggles.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x1F3A8;</div>
+          <h3>Glassmorphism UI</h3>
+          <p>Dark navy theme with frosted glass panels, mesh gradient backgrounds, and mint accents. Designed for extended terminal use without eye strain.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x2615;</div>
+          <h3>Safe Working</h3>
+          <p>Configurable quiet hours block access during off-hours. Break reminders with a visual timer nudge you to step away on a schedule.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">&#x2328;</div>
+          <h3>Keyboard First</h3>
+          <p><kbd>Cmd+N</kbd> new session, <kbd>Cmd+W</kbd> close, <kbd>Cmd+1-9</kbd> switch tabs. Sessions persist across restarts and reconnect automatically.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Install -->
+    <section class="install">
+      <h2>Get Started</h2>
+      <p class="subtitle">Download for macOS or Linux. Windows support coming later.</p>
+
+      <div class="install-cards">
+        <a href="https://github.com/edalee/koko/releases/latest" class="install-card">
+          <div class="platform">&#x1F34E;</div>
+          <div class="name">macOS</div>
+          <div class="detail">Universal (Apple Silicon + Intel)</div>
+        </a>
+        <a href="https://github.com/edalee/koko/releases/latest" class="install-card">
+          <div class="platform">&#x1F427;</div>
+          <div class="name">Linux</div>
+          <div class="detail">AppImage (x86_64)</div>
+        </a>
+      </div>
+
+      <div class="prereq">
+        <p>Kõkõ launches Claude Code for you. Make sure it's installed:</p>
+        <code>npm install -g @anthropic-ai/claude-code</code>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="architecture">
+      <h2>How It Works</h2>
+      <p class="subtitle">Wails v2 — a Go backend connected to a React frontend in a native webview.</p>
+
+      <div class="arch-diagram">┌─────────────────────────────────────────────────┐
+│  Kõkõ Window                                    │
+│                                                 │
+│  ┌──────┐  ┌──────────────────┐  ┌───────────┐  │
+│  │      │  │                  │  │  GitHub    │  │
+│  │  S   │  │   Claude Code    │  │  PRs       │  │
+│  │  e   │  │   Terminal       │  ├───────────┤  │
+│  │  s   │  │   (xterm.js)     │  │  Slack     │  │
+│  │  s   │  │                  │  │  DMs       │  │
+│  │  i   │  │                  │  ├───────────┤  │
+│  │  o   │  │                  │  │  File      │  │
+│  │  n   │  │                  │  │  Changes   │  │
+│  │  s   │  │                  │  │            │  │
+│  └──────┘  └──────────────────┘  └───────────┘  │
+│  ┌──────────────────────────────────────────┐   │
+│  │  Quick Terminal (Cmd+`)                  │   │
+│  └──────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘</div>
+
+      <div class="tech-pills">
+        <span class="pill">Go 1.24</span>
+        <span class="pill">React 19</span>
+        <span class="pill">Wails v2</span>
+        <span class="pill">xterm.js</span>
+        <span class="pill">Tailwind CSS v4</span>
+        <span class="pill">TypeScript</span>
+        <span class="pill">creack/pty</span>
+        <span class="pill">Lucide Icons</span>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://github.com/edalee/koko">GitHub</a>
+        <a href="https://github.com/edalee/koko/releases">Releases</a>
+        <a href="https://github.com/edalee/koko/issues">Issues</a>
+      </div>
+      <p>
+        Built by <a href="https://github.com/edalee">Edward Lee</a>.
+        Named after the <a href="https://en.wikipedia.org/wiki/Tui_(bird)">Tui bird</a>.
+        Licensed under <a href="https://github.com/edalee/koko/blob/main/LICENSE">BSL 1.1</a>.
+      </p>
+    </div>
+  </footer>
+</body>
+</html>
