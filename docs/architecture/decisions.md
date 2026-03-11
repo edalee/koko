@@ -179,6 +179,38 @@
 - **Frontend:** `useSubagents.ts` (3s polling), `RightSidebar.tsx` (subagents/MCPs/infra sections)
 - **Plan:** `docs/plans/014-subagent-monitor.md`
 
+## ADR-019: GitHub notifications replacing mock mail panel
+- **Date:** 2026-03-11
+- **Status:** Accepted
+- **Decision:** Replace mock MailPanel with real GitHub notifications via `gh api /notifications`. Server-side `participating=true` filtering, client-side sub-filters (review/mentioned/all), mark-as-read with optimistic updates.
+- **Rationale:**
+  - MailPanel was mock data with no real integration
+  - GitHub notifications API provides review requests, mentions, CI activity — exactly what developers need
+  - Server-side `participating=true` matches github.com behavior (50 items vs 5000+ unfiltered)
+  - Mark-as-read via `PATCH /notifications/threads/{id}` with optimistic UI update + refresh
+  - No pagination needed — small focused lists are more useful than exhaustive ones
+
+## ADR-020: PR action buttons (approve, merge, view)
+- **Date:** 2026-03-11
+- **Status:** Accepted
+- **Decision:** Add hover-revealed action buttons on PR cards: Approve (`gh pr review --approve`), Merge (`gh pr merge --squash --delete-branch`), View (open in browser)
+- **Rationale:**
+  - Quick PR triage without leaving Koko or opening browser
+  - Squash merge + delete branch is the team's default merge strategy
+  - Approve disabled when already approved, spinner during async operations
+  - Auto-refreshes PR list after actions complete
+
+## ADR-021: Claude Code permission mode switcher
+- **Date:** 2026-03-11
+- **Status:** Accepted
+- **Decision:** Slim bar below terminal with Ask/Auto-edit/Plan mode buttons. Sends `Shift+Tab` (`\x1b[Z`) escape sequence to PTY to cycle Claude Code's permission modes.
+- **Rationale:**
+  - Claude Code's Shift+Tab cycling is not discoverable in a desktop app context
+  - Visual mode indicator makes current state visible at a glance
+  - Sending escape sequences via existing PTY write path — no new backend methods needed
+  - Mode state tracked locally (cannot reliably parse Claude's TUI output)
+  - Caveat: manual Shift+Tab in terminal desynchs UI state — acceptable tradeoff for v1
+
 ## ADR-012: TerminalPane stability — onExit ref pattern
 - **Date:** 2026-03-08
 - **Status:** Accepted

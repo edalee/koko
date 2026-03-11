@@ -114,6 +114,33 @@ func apiToHTMLURL(apiURL, repoHTMLURL string) string {
 	return "https://github.com/" + path
 }
 
+// ApprovePR approves a pull request via gh CLI.
+func (g *GitHubService) ApprovePR(repo string, number int) error {
+	err := exec.Command("gh", "pr", "review",
+		"--repo", "epidemicsound/"+repo,
+		"--approve",
+		fmt.Sprintf("%d", number),
+	).Run()
+	if err != nil {
+		return fmt.Errorf("failed to approve PR: %w", err)
+	}
+	return nil
+}
+
+// MergePR merges a pull request via gh CLI using squash merge.
+func (g *GitHubService) MergePR(repo string, number int) error {
+	err := exec.Command("gh", "pr", "merge",
+		"--repo", "epidemicsound/"+repo,
+		"--squash",
+		"--delete-branch",
+		fmt.Sprintf("%d", number),
+	).Run()
+	if err != nil {
+		return fmt.Errorf("failed to merge PR: %w", err)
+	}
+	return nil
+}
+
 func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 	var allPRs []GitHubPR
 	for _, repo := range trackedRepos {

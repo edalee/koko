@@ -1,5 +1,6 @@
 import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
+import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import GitHubPanel from "./components/GitHubPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
 import NotificationsPanel from "./components/NotificationsPanel";
@@ -120,14 +121,17 @@ export default function App() {
               {tabs.map((tab) => (
                 <div
                   key={tab.id}
-                  className="absolute inset-0"
-                  style={{ display: tab.id === activeTabId ? "block" : "none" }}
+                  className="absolute inset-0 flex flex-col"
+                  style={{ display: tab.id === activeTabId ? "flex" : "none" }}
                 >
-                  <TerminalPane
-                    sessionId={tab.id}
-                    active={tab.id === activeTabId}
-                    onExit={() => handleSessionExit(tab.id)}
-                  />
+                  <div className="flex-1 min-h-0">
+                    <TerminalPane
+                      sessionId={tab.id}
+                      active={tab.id === activeTabId}
+                      onExit={() => handleSessionExit(tab.id)}
+                    />
+                  </div>
+                  <ClaudeModeSwitcher sessionId={tab.id} />
                 </div>
               ))}
               {tabs.length === 0 && (
