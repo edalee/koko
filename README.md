@@ -45,18 +45,24 @@ Each session launches Claude Code in a directory you choose, with a name you pic
 - **File Changes** — Git diff for the active session's directory (staged/unstaged)
 - **Subagent Monitor** — See Claude's spawned child processes in real time
 
+### Safe Working
+
+Kõkõ includes built-in features to help you maintain healthy working habits:
+
+- **Quiet Hours** — Set a time window (e.g. 23:00–07:00) when the app blocks access with a full-screen overlay. A countdown shows when work resumes. No sneaky "just five more minutes" — the code will be there in the morning.
+- **Break Reminders** — Configure a work/break cycle (e.g. 90 min work, 15 min break). When the timer fires, a visual overlay with a circular progress ring nudges you to step away. Skip if you're in flow, but you'll be reminded again next cycle.
+
+<p align="center">
+  <img src="docs/screenshots/quiet-hours.png" alt="Kõkõ — Quiet hours blocker encouraging rest" width="800" />
+</p>
+
 ### Workspace
 - **Quick Terminal** — `Cmd+`` ` slides up a regular zsh shell for quick commands
 - **Glassmorphism UI** — Dark theme with frosted glass panels and mint accents
-- **Safe Working** — Configurable quiet hours and break reminders
 - **Auto-updates** — Checks for new releases and shows a toolbar notification
 
 <p align="center">
   <img src="docs/screenshots/new-session-dialog.png" alt="Kõkõ — New session dialog with name and directory picker" width="800" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/quiet-hours.png" alt="Kõkõ — Quiet hours blocker for safe working" width="800" />
 </p>
 
 ## Install
