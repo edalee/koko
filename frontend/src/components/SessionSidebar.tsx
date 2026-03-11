@@ -88,15 +88,17 @@ export default function SessionSidebar({
               <div className="absolute inset-0 bg-gradient-to-r from-accent/10 to-accent-dark/10 opacity-0 group-hover:opacity-100 transition-opacity" />
               <Plus className="size-4 relative z-10" />
               <span className="text-sm font-medium relative z-10">New Session</span>
+              <kbd className="text-[10px] text-white/40 font-mono relative z-10 ml-auto">⌘N</kbd>
             </button>
           </div>
 
           {/* Session list */}
           <div className="flex-1 overflow-auto px-2 pt-2 pb-10">
             <div className="space-y-2">
-              {filteredSessions.map((session) => {
+              {filteredSessions.map((session, index) => {
                 const isActive = activeSessionId === session.id;
                 const isEditing = editingId === session.id;
+                const shortcutKey = index < 9 ? index + 1 : null;
                 return (
                   // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: nested interactive elements require div wrapper
                   <div
@@ -150,16 +152,24 @@ export default function SessionSidebar({
                         <p className="text-[10px] text-tertiary mt-0.5">Click to resume</p>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteSession(session.id);
-                      }}
-                      className="p-1 hover:bg-white/10 rounded transition-opacity"
-                    >
-                      <X className="size-4 text-muted-foreground hover:text-[#F14D4C]" />
-                    </button>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteSession(session.id);
+                        }}
+                        className="p-1 hover:bg-white/10 rounded transition-opacity"
+                        title="Close session (⌘W)"
+                      >
+                        <X className="size-4 text-muted-foreground hover:text-[#F14D4C]" />
+                      </button>
+                      {shortcutKey && (
+                        <kbd className="text-[10px] text-tertiary font-mono px-1 rounded bg-white/[0.04] border border-white/[0.06] leading-relaxed">
+                          ⌘{shortcutKey}
+                        </kbd>
+                      )}
+                    </div>
                   </div>
                 );
               })}
