@@ -58,6 +58,22 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ContextInfo {
+	    usedPercentage: number;
+	    remainingPercentage: number;
+	    model: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ContextInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.usedPercentage = source["usedPercentage"];
+	        this.remainingPercentage = source["remainingPercentage"];
+	        this.model = source["model"];
+	    }
+	}
 	export class FileChange {
 	    path: string;
 	    status: string;
