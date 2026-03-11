@@ -7,11 +7,22 @@ import (
 	"sync"
 )
 
+// SafeWorkingConfig holds settings for work/break boundaries.
+type SafeWorkingConfig struct {
+	QuietHoursEnabled bool   `json:"quietHoursEnabled"`
+	QuietHoursStart   string `json:"quietHoursStart"` // "HH:MM" format
+	QuietHoursEnd     string `json:"quietHoursEnd"`   // "HH:MM" format
+	BreakEnabled      bool   `json:"breakEnabled"`
+	WorkMinutes       int    `json:"workMinutes"`  // e.g., 90
+	BreakMinutes      int    `json:"breakMinutes"` // e.g., 15
+}
+
 // AppConfig holds all persisted application settings.
 type AppConfig struct {
-	SlackToken   string   `json:"slackToken"`
-	GitHubRepos  []string `json:"githubRepos"`
-	SlackEnabled bool     `json:"slackEnabled"`
+	SlackToken   string            `json:"slackToken"`
+	GitHubRepos  []string          `json:"githubRepos"`
+	SlackEnabled bool              `json:"slackEnabled"`
+	SafeWorking  SafeWorkingConfig `json:"safeWorking"`
 }
 
 // ConfigService manages reading and writing the app config file.

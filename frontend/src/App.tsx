@@ -1,11 +1,13 @@
-import { GitPullRequest, Mail, MessageSquare, Settings } from "lucide-react";
+import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
+import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import GitHubPanel from "./components/GitHubPanel";
-import MailPanel, { useMailCount } from "./components/MailPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
+import NotificationsPanel from "./components/NotificationsPanel";
 import OverlayPage from "./components/OverlayPage";
 import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
+import SafeWorkingOverlay from "./components/SafeWorkingOverlay";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsPanel from "./components/SettingsPanel";
 import SlackPanel from "./components/SlackPanel";
@@ -15,7 +17,9 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./componen
 import { useFileChanges } from "./hooks/useFileChanges";
 import { useGitHub } from "./hooks/useGitHub";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useNotifications } from "./hooks/useNotifications";
 import { useOverlay } from "./hooks/useOverlay";
+import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
 import { useSubagents } from "./hooks/useSubagents";
@@ -45,13 +49,30 @@ export default function App() {
     refresh: refreshSlack,
     openMessage: openSlackMessage,
   } = useSlack();
-  const mailCount = useMailCount();
+  const {
+    notifications,
+    unreadCount: notifCount,
+    loading: notifLoading,
+    filter: notifFilter,
+    setFilter: setNotifFilter,
+    refresh: refreshNotifications,
+    markRead: markNotifRead,
+  } = useNotifications();
   const {
     processes,
     agentCount,
     loading: processesLoading,
     refresh: refreshProcesses,
   } = useSubagents(activeTabId);
+  const {
+    config: safeWorkingConfig,
+    updateConfig: updateSafeWorking,
+    isQuietHours,
+    quietResumeTime,
+    isBreakTime,
+    breakSecondsLeft,
+    skipBreak,
+  } = useSafeWorking(!!activeTabId);
 
   const handleSwitchByIndex = useCallback(
     (index: number) => {
@@ -84,7 +105,7 @@ export default function App() {
         onToggleOverlay={toggleOverlay}
         githubCount={prs.length}
         slackCount={slackCount}
-        mailCount={mailCount}
+        notifCount={notifCount}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -111,14 +132,17 @@ export default function App() {
               {tabs.map((tab) => (
                 <div
                   key={tab.id}
-                  className="absolute inset-0"
-                  style={{ display: tab.id === activeTabId ? "block" : "none" }}
+                  className="absolute inset-0 flex flex-col"
+                  style={{ display: tab.id === activeTabId ? "flex" : "none" }}
                 >
-                  <TerminalPane
-                    sessionId={tab.id}
-                    active={tab.id === activeTabId}
-                    onExit={() => handleSessionExit(tab.id)}
-                  />
+                  <div className="flex-1 min-h-0">
+                    <TerminalPane
+                      sessionId={tab.id}
+                      active={tab.id === activeTabId}
+                      onExit={() => handleSessionExit(tab.id)}
+                    />
+                  </div>
+                  <ClaudeModeSwitcher sessionId={tab.id} />
                 </div>
               ))}
               {tabs.length === 0 && (
@@ -191,12 +215,19 @@ export default function App() {
         </OverlayPage>
 
         <OverlayPage
-          open={activeOverlay === "mail"}
+          open={activeOverlay === "notifications"}
           onClose={closeOverlay}
-          title="Mail"
-          icon={<Mail className="size-4" />}
+          title="Notifications"
+          icon={<Bell className="size-4" />}
         >
-          <MailPanel />
+          <NotificationsPanel
+            notifications={notifications}
+            loading={notifLoading}
+            refresh={refreshNotifications}
+            filter={notifFilter}
+            onFilterChange={setNotifFilter}
+            onMarkRead={markNotifRead}
+          />
         </OverlayPage>
 
         <OverlayPage
@@ -205,7 +236,11 @@ export default function App() {
           title="Settings"
           icon={<Settings className="size-4" />}
         >
-          <SettingsPanel onTokenSaved={refreshSlack} />
+          <SettingsPanel
+            onTokenSaved={refreshSlack}
+            safeWorkingConfig={safeWorkingConfig}
+            onSafeWorkingChange={updateSafeWorking}
+          />
         </OverlayPage>
 
         <NewSessionDialog
@@ -217,6 +252,15 @@ export default function App() {
           }}
         />
       </div>
+
+      <SafeWorkingOverlay
+        isQuietHours={isQuietHours}
+        quietResumeTime={quietResumeTime}
+        isBreakTime={isBreakTime}
+        breakSecondsLeft={breakSecondsLeft}
+        breakTotalSeconds={safeWorkingConfig.breakMinutes * 60}
+        onSkipBreak={skipBreak}
+      />
     </div>
   );
 }

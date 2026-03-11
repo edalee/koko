@@ -1,4 +1,4 @@
-import { GitPullRequest, Mail, MessageSquare, Settings } from "lucide-react";
+import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
 import kokoLogo from "../assets/koko_logo.svg";
 import type { OverlayModule } from "../hooks/useOverlay";
 import { cn } from "../lib/utils";
@@ -9,7 +9,7 @@ interface ToolbarProps {
   onToggleOverlay: (module: OverlayModule) => void;
   githubCount: number;
   slackCount: number;
-  mailCount: number;
+  notifCount: number;
 }
 
 export default function Toolbar({
@@ -17,7 +17,7 @@ export default function Toolbar({
   onToggleOverlay,
   githubCount,
   slackCount,
-  mailCount,
+  notifCount,
 }: ToolbarProps) {
   return (
     <div
@@ -72,17 +72,17 @@ export default function Toolbar({
 
         <button
           type="button"
-          onClick={() => onToggleOverlay("mail")}
+          onClick={() => onToggleOverlay("notifications")}
           className={cn(
             "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
-            activeOverlay === "mail"
+            activeOverlay === "notifications"
               ? "text-accent bg-white/10"
               : "text-white/70 hover:text-white hover:bg-white/5",
           )}
-          title="Mail"
+          title="Notifications"
         >
-          <Mail className="size-4" />
-          <NotificationBadge count={mailCount} color="var(--color-badge-mail)" />
+          <Bell className="size-4" />
+          <NotificationBadge count={notifCount} color="var(--color-badge-mail)" />
         </button>
 
         <div className="w-px h-4 bg-white/10 mx-1" />

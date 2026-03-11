@@ -27,3 +27,15 @@ type GitHubPR struct {
 	ReviewDecision string `json:"reviewDecision"`
 	URL            string `json:"url"`
 }
+
+// GitHubNotification represents a GitHub notification.
+type GitHubNotification struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Type      string `json:"type"`   // "PullRequest", "Issue", "Release", etc.
+	Reason    string `json:"reason"` // "review_requested", "mention", "subscribed", etc.
+	Repo      string `json:"repo"`
+	URL       string `json:"url"` // HTML URL for opening in browser
+	Unread    bool   `json:"unread"`
+	UpdatedAt string `json:"updatedAt"`
+}
