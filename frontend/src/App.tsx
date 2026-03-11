@@ -23,6 +23,7 @@ import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
 import { useSubagents } from "./hooks/useSubagents";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
 export default function App() {
   const { tabs, activeTabId, createTab, closeTab, switchTab, renameTab, handleSessionExit } =
@@ -73,6 +74,7 @@ export default function App() {
     breakSecondsLeft,
     skipBreak,
   } = useSafeWorking(!!activeTabId);
+  const { update, dismiss: dismissUpdate } = useUpdateCheck();
 
   const handleSwitchByIndex = useCallback(
     (index: number) => {
@@ -106,6 +108,8 @@ export default function App() {
         githubCount={prs.length}
         slackCount={slackCount}
         notifCount={notifCount}
+        update={update}
+        onDismissUpdate={dismissUpdate}
       />
 
       <div className="flex-1 flex overflow-hidden relative">

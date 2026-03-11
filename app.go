@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -141,4 +144,46 @@ func (a *App) EnsureStatusLine() error {
 func statusLineCommand() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".koko", "koko-statusline.sh")
+}
+
+// UpdateInfo holds information about an available update.
+type UpdateInfo struct {
+	Available  bool   `json:"available"`
+	Version    string `json:"version"`
+	CurrentVer string `json:"currentVersion"`
+	URL        string `json:"url"`
+}
+
+// CheckForUpdate checks the GitHub Releases API for a newer version.
+func (a *App) CheckForUpdate() (*UpdateInfo, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/edalee/koko/releases/latest")
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for updates: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return &UpdateInfo{Available: false, CurrentVer: version}, nil
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("failed to parse release: %w", err)
+	}
+
+	latestVer := strings.TrimPrefix(release.TagName, "v")
+	if latestVer != version && latestVer > version {
+		return &UpdateInfo{
+			Available:  true,
+			Version:    latestVer,
+			CurrentVer: version,
+			URL:        release.HTMLURL,
+		}, nil
+	}
+
+	return &UpdateInfo{Available: false, CurrentVer: version}, nil
 }
