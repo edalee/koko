@@ -132,35 +132,55 @@ export default function App() {
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel defaultSize="66">
-            <div className="h-full relative">
-              {tabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className="absolute inset-0 flex flex-col"
-                  style={{ display: tab.id === activeTabId ? "flex" : "none" }}
-                >
-                  <div className="flex-1 min-h-0">
-                    <TerminalPane
-                      sessionId={tab.id}
-                      active={tab.id === activeTabId}
-                      onExit={() => handleSessionExit(tab.id)}
-                    />
+            <div className="h-full flex flex-col">
+              {/* Terminal area — shrinks when Quick Terminal is open */}
+              <div className="flex-1 min-h-0 relative">
+                {tabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    className="absolute inset-0 flex flex-col"
+                    style={{ display: tab.id === activeTabId ? "flex" : "none" }}
+                  >
+                    <div className="flex-1 min-h-0">
+                      {tab.connected ? (
+                        <TerminalPane
+                          sessionId={tab.id}
+                          active={tab.id === activeTabId}
+                          onExit={() => handleSessionExit(tab.id)}
+                        />
+                      ) : (
+                        <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                          <p className="text-sm">Session disconnected</p>
+                          <p className="text-xs text-tertiary">
+                            Click to reconnect with claude --continue
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    {tab.connected && <ClaudeModeSwitcher sessionId={tab.id} />}
                   </div>
-                  <ClaudeModeSwitcher sessionId={tab.id} />
-                </div>
-              ))}
-              {tabs.length === 0 && (
-                <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <p className="text-sm">No active sessions</p>
-                  <p className="text-xs text-tertiary">
-                    Press{" "}
-                    <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] text-[10px] font-mono text-white/70">
-                      ⌘N
-                    </kbd>{" "}
-                    to start a new session
-                  </p>
-                </div>
-              )}
+                ))}
+                {tabs.length === 0 && (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                    <p className="text-sm">No active sessions</p>
+                    <p className="text-xs text-tertiary">
+                      Press{" "}
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] text-[10px] font-mono text-white/70">
+                        ⌘N
+                      </kbd>{" "}
+                      to start a new session
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Terminal — takes space from the terminal above */}
+              <QuickTerminal
+                open={showQuickTerminal}
+                onClose={() => setShowQuickTerminal(false)}
+                activeTabId={activeTabId}
+                directory={activeTab?.directory ?? "."}
+              />
             </div>
           </ResizablePanel>
           <ResizableHandle />
@@ -184,13 +204,6 @@ export default function App() {
             />
           </ResizablePanel>
         </ResizablePanelGroup>
-
-        {/* Quick Terminal */}
-        <QuickTerminal
-          open={showQuickTerminal}
-          onClose={() => setShowQuickTerminal(false)}
-          directory={activeTab?.directory ?? "."}
-        />
 
         {/* Floating Overlays */}
         <OverlayPage

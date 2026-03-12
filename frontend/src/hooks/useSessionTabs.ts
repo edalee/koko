@@ -23,7 +23,10 @@ function saveTabs(tabs: SessionTab[]) {
 
 export function useSessionTabs() {
   const [tabs, setTabs] = useState<SessionTab[]>(loadSavedTabs);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => {
+    const saved = loadSavedTabs();
+    return saved.length > 0 ? saved[0].id : null;
+  });
 
   // Persist tabs to localStorage on every change
   useEffect(() => {
@@ -77,14 +80,18 @@ export function useSessionTabs() {
   const switchTab = useCallback(
     (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
-      if (tab && !tab.connected) {
-        // Auto-reconnect disconnected sessions
+      if (!tab) return;
+
+      if (!tab.connected && activeTabId === tabId) {
+        // Already viewing this disconnected tab — reconnect it
         reconnectTab(tab);
         return;
       }
+
+      // Select the tab (whether connected or not)
       setActiveTabId(tabId);
     },
-    [tabs, reconnectTab],
+    [tabs, activeTabId, reconnectTab],
   );
 
   const renameTab = useCallback((tabId: string, newName: string) => {

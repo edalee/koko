@@ -30,6 +30,8 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
+      scrollback: 5000,
+      smoothScrollDuration: 0,
       fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
       theme: {
         background: "#0f1117",
@@ -100,15 +102,19 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       Write(sessionId, btoa(String.fromCharCode(...bytes)));
     });
 
-    // Resize
+    // Resize — debounce to avoid rapid SIGWINCH during drag
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
-      if (fitRef.current) {
-        fitRef.current.fit();
-        const dims = fitRef.current.proposeDimensions();
-        if (dims) {
-          Resize(sessionId, dims.cols, dims.rows);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (fitRef.current) {
+          fitRef.current.fit();
+          const dims = fitRef.current.proposeDimensions();
+          if (dims) {
+            Resize(sessionId, dims.cols, dims.rows);
+          }
         }
-      }
+      }, 50);
     });
     observer.observe(container);
 
@@ -131,6 +137,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       cleanupExit();
       onDataDisposable.dispose();
       onBinaryDisposable.dispose();
+      if (resizeTimer) clearTimeout(resizeTimer);
       observer.disconnect();
       term.dispose();
       termRef.current = null;
