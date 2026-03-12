@@ -72,6 +72,8 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
   const [workSecondsLeft, setWorkSecondsLeft] = useState(0);
   const workElapsedRef = useRef(0);
   const breakElapsedRef = useRef(0);
+  const isBreakTimeRef = useRef(false);
+  const isQuietHoursRef = useRef(false);
 
   // Load config on mount
   useEffect(() => {
@@ -119,13 +121,21 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     return () => clearInterval(id);
   }, [config.quietHoursEnabled, config.quietHoursStart, config.quietHoursEnd]);
 
-  // Break timer — ticks every second
+  // Keep refs in sync with state
+  useEffect(() => {
+    isBreakTimeRef.current = isBreakTime;
+  }, [isBreakTime]);
+  useEffect(() => {
+    isQuietHoursRef.current = isQuietHours;
+  }, [isQuietHours]);
+
+  // Break timer — ticks every second, uses refs to avoid stale closures
   useEffect(() => {
     if (!config.breakEnabled || !hasActiveSession) {
-      // Reset when disabled or no session
       if (!config.breakEnabled) {
         workElapsedRef.current = 0;
         breakElapsedRef.current = 0;
+        isBreakTimeRef.current = false;
         setIsBreakTime(false);
         setBreakSecondsLeft(0);
         setWorkSecondsLeft(0);
@@ -136,17 +146,20 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     const workDuration = config.workMinutes * 60;
     const breakDuration = config.breakMinutes * 60;
 
-    const id = setInterval(() => {
-      if (isQuietHours) return; // Pause during quiet hours
+    // Initialize display
+    setWorkSecondsLeft(workDuration - workElapsedRef.current);
 
-      if (!isBreakTime) {
+    const id = setInterval(() => {
+      if (isQuietHoursRef.current) return;
+
+      if (!isBreakTimeRef.current) {
         // Working phase
         workElapsedRef.current += 1;
         const remaining = workDuration - workElapsedRef.current;
         setWorkSecondsLeft(Math.max(0, remaining));
 
         if (workElapsedRef.current >= workDuration) {
-          // Time for a break
+          isBreakTimeRef.current = true;
           setIsBreakTime(true);
           breakElapsedRef.current = 0;
           setBreakSecondsLeft(breakDuration);
@@ -158,7 +171,7 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
         setBreakSecondsLeft(Math.max(0, remaining));
 
         if (breakElapsedRef.current >= breakDuration) {
-          // Break over
+          isBreakTimeRef.current = false;
           setIsBreakTime(false);
           workElapsedRef.current = 0;
           setWorkSecondsLeft(workDuration);
@@ -166,22 +179,11 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
       }
     }, 1000);
 
-    // Initialize display
-    if (!isBreakTime) {
-      setWorkSecondsLeft(config.workMinutes * 60 - workElapsedRef.current);
-    }
-
     return () => clearInterval(id);
-  }, [
-    config.breakEnabled,
-    config.workMinutes,
-    config.breakMinutes,
-    hasActiveSession,
-    isQuietHours,
-    isBreakTime,
-  ]);
+  }, [config.breakEnabled, config.workMinutes, config.breakMinutes, hasActiveSession]);
 
   const skipBreak = useCallback(() => {
+    isBreakTimeRef.current = false;
     setIsBreakTime(false);
     workElapsedRef.current = 0;
     breakElapsedRef.current = 0;
