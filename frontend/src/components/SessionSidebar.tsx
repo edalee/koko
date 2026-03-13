@@ -11,6 +11,7 @@ function shortenPath(path: string): string {
 interface SessionSidebarProps {
   sessions: SessionTab[];
   activeSessionId: string | null;
+  idleSessions: Set<string>;
   onSessionSelect: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
@@ -22,6 +23,7 @@ interface SessionSidebarProps {
 export default function SessionSidebar({
   sessions,
   activeSessionId,
+  idleSessions,
   onSessionSelect,
   onNewSession,
   onDeleteSession,
@@ -98,6 +100,7 @@ export default function SessionSidebar({
               {filteredSessions.map((session, index) => {
                 const isActive = activeSessionId === session.id;
                 const isEditing = editingId === session.id;
+                const isIdle = session.connected && idleSessions.has(session.id);
                 const shortcutKey = index < 9 ? index + 1 : null;
                 return (
                   // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: nested interactive elements require div wrapper
@@ -106,19 +109,28 @@ export default function SessionSidebar({
                     className={`group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
                       isActive
                         ? "bg-white/[0.08] border border-accent/20 glow-accent"
-                        : "hover:bg-white/[0.05] border border-transparent"
+                        : isIdle
+                          ? "hover:bg-white/[0.05] border border-amber-400/30"
+                          : "hover:bg-white/[0.05] border border-transparent"
                     }`}
                     onClick={() => onSessionSelect(session.id)}
                   >
-                    <SquareTerminal
-                      className={`size-5 mt-0.5 shrink-0 transition-colors ${
-                        !session.connected
-                          ? "text-tertiary"
-                          : isActive
-                            ? "text-accent"
-                            : "text-muted-foreground group-hover:text-accent"
-                      }`}
-                    />
+                    <div className="relative mt-0.5 shrink-0">
+                      <SquareTerminal
+                        className={`size-5 transition-colors ${
+                          isIdle
+                            ? "text-amber-400 animate-pulse"
+                            : !session.connected
+                              ? "text-tertiary"
+                              : isActive
+                                ? "text-accent"
+                                : "text-muted-foreground group-hover:text-accent"
+                        }`}
+                      />
+                      {isIdle && (
+                        <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-400 animate-ping" />
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       {isEditing ? (
                         <input
@@ -192,27 +204,35 @@ export default function SessionSidebar({
           >
             <Plus className="size-4" />
           </button>
-          {sessions.slice(0, 5).map((session) => (
-            <button
-              type="button"
-              key={session.id}
-              onClick={() => onSessionSelect(session.id)}
-              className={`p-2 rounded-xl transition-all ${
-                activeSessionId === session.id
-                  ? "bg-white/[0.08] glow-accent"
-                  : "hover:bg-white/[0.05]"
-              }`}
-              title={session.name}
-            >
-              <SquareTerminal
-                className={`size-5 transition-colors ${
+          {sessions.slice(0, 5).map((session) => {
+            const isIdle = session.connected && idleSessions.has(session.id);
+            return (
+              <button
+                type="button"
+                key={session.id}
+                onClick={() => onSessionSelect(session.id)}
+                className={`relative p-2 rounded-xl transition-all ${
                   activeSessionId === session.id
-                    ? "text-accent"
-                    : "text-muted-foreground hover:text-accent"
+                    ? "bg-white/[0.08] glow-accent"
+                    : "hover:bg-white/[0.05]"
                 }`}
-              />
-            </button>
-          ))}
+                title={isIdle ? `${session.name} — waiting for input` : session.name}
+              >
+                <SquareTerminal
+                  className={`size-5 transition-colors ${
+                    isIdle
+                      ? "text-amber-400 animate-pulse"
+                      : activeSessionId === session.id
+                        ? "text-accent"
+                        : "text-muted-foreground hover:text-accent"
+                  }`}
+                />
+                {isIdle && (
+                  <span className="absolute top-1 right-1 size-2 rounded-full bg-amber-400 animate-ping" />
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
