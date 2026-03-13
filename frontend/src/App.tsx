@@ -85,6 +85,7 @@ export default function App() {
     isBreakTime,
     breakSecondsLeft,
     skipBreak,
+    delayQuietHours,
   } = useSafeWorking(!!activeTabId);
   const { update, dismiss: dismissUpdate } = useUpdateCheck();
 
@@ -304,6 +305,7 @@ export default function App() {
         breakSecondsLeft={breakSecondsLeft}
         breakTotalSeconds={safeWorkingConfig.breakMinutes * 60}
         onSkipBreak={skipBreak}
+        onDelayQuietHours={delayQuietHours}
       />
     </div>
   );

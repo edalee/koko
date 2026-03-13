@@ -61,6 +61,7 @@ export interface UseSafeWorkingResult {
   breakSecondsLeft: number;
   workSecondsLeft: number;
   skipBreak: () => void;
+  delayQuietHours: () => void;
 }
 
 export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult {
@@ -74,6 +75,7 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
   const breakElapsedRef = useRef(0);
   const isBreakTimeRef = useRef(false);
   const isQuietHoursRef = useRef(false);
+  const delayUntilRef = useRef(0);
 
   // Load config on mount
   useEffect(() => {
@@ -111,6 +113,7 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     }
 
     function check() {
+      if (Date.now() < delayUntilRef.current) return;
       const inQuiet = isInQuietWindow(config.quietHoursStart, config.quietHoursEnd);
       setIsQuietHours(inQuiet);
       setQuietResumeTime(inQuiet ? quietHoursResumeTime(config.quietHoursEnd) : null);
@@ -182,6 +185,12 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     return () => clearInterval(id);
   }, [config.breakEnabled, config.workMinutes, config.breakMinutes, hasActiveSession]);
 
+  const delayQuietHours = useCallback(() => {
+    delayUntilRef.current = Date.now() + 30 * 60 * 1000;
+    setIsQuietHours(false);
+    setQuietResumeTime(null);
+  }, []);
+
   const skipBreak = useCallback(() => {
     isBreakTimeRef.current = false;
     setIsBreakTime(false);
@@ -200,5 +209,6 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
     breakSecondsLeft,
     workSecondsLeft,
     skipBreak,
+    delayQuietHours,
   };
 }

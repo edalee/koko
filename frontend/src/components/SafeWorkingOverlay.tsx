@@ -16,9 +16,10 @@ function formatTime(date: Date): string {
 
 interface QuietHoursOverlayProps {
   resumeTime: Date;
+  onDelay: () => void;
 }
 
-function QuietHoursOverlay({ resumeTime }: QuietHoursOverlayProps) {
+function QuietHoursOverlay({ resumeTime, onDelay }: QuietHoursOverlayProps) {
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   useEffect(() => {
@@ -49,6 +50,13 @@ function QuietHoursOverlay({ resumeTime }: QuietHoursOverlayProps) {
           </span>
           <span className="text-xs text-white/40">Resuming at {formatTime(resumeTime)}</span>
         </div>
+        <button
+          type="button"
+          onClick={onDelay}
+          className="text-xs text-white/30 hover:text-white/50 transition-colors mt-4"
+        >
+          Delay 30 minutes
+        </button>
       </div>
     </div>
   );
@@ -127,6 +135,7 @@ interface SafeWorkingOverlayProps {
   breakSecondsLeft: number;
   breakTotalSeconds: number;
   onSkipBreak: () => void;
+  onDelayQuietHours: () => void;
 }
 
 export default function SafeWorkingOverlay({
@@ -136,10 +145,11 @@ export default function SafeWorkingOverlay({
   breakSecondsLeft,
   breakTotalSeconds,
   onSkipBreak,
+  onDelayQuietHours,
 }: SafeWorkingOverlayProps) {
   // Quiet hours takes priority
   if (isQuietHours && quietResumeTime) {
-    return <QuietHoursOverlay resumeTime={quietResumeTime} />;
+    return <QuietHoursOverlay resumeTime={quietResumeTime} onDelay={onDelayQuietHours} />;
   }
 
   if (isBreakTime) {
