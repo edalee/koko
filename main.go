@@ -20,6 +20,7 @@ func main() {
 	cfg := NewConfigService()
 	slack := NewSlackService(cfg)
 	pm := NewProcessMonitor()
+	claude := NewClaudeService()
 
 	err := wails.Run(&options.App{
 		Title:     "Koko",
@@ -47,6 +48,7 @@ func main() {
 			cfg,
 			slack,
 			pm,
+			claude,
 		},
 	})
 

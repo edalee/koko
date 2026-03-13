@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import { GetLastMessage } from "../../wailsjs/go/main/ClaudeService";
 import { CloseSession, CreateSession } from "../../wailsjs/go/main/TerminalManager";
 import { addRecentDir } from "../components/NewSessionDialog";
-import type { SessionTab } from "../types";
+import type { SessionHistoryEntry, SessionTab } from "../types";
 
 const TABS_STORAGE_KEY = "koko:session-tabs";
+const HISTORY_STORAGE_KEY = "koko:session-history";
+const MAX_HISTORY = 20;
 
 function loadSavedTabs(): SessionTab[] {
   try {
@@ -19,6 +22,38 @@ function loadSavedTabs(): SessionTab[] {
 
 function saveTabs(tabs: SessionTab[]) {
   localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(tabs));
+}
+
+function loadHistory(): SessionHistoryEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history: SessionHistoryEntry[]) {
+  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, MAX_HISTORY)));
+}
+
+async function addToHistory(tab: SessionTab) {
+  let lastMessage = "";
+  try {
+    lastMessage = await GetLastMessage(tab.directory);
+  } catch {
+    // ignore
+  }
+  const history = loadHistory();
+  // Deduplicate by directory — keep the most recent
+  const filtered = history.filter((h) => h.directory !== tab.directory);
+  filtered.unshift({
+    name: tab.name,
+    directory: tab.directory,
+    createdAt: tab.createdAt,
+    closedAt: Date.now(),
+    lastMessage,
+  });
+  saveHistory(filtered);
 }
 
 export function useSessionTabs() {
@@ -61,8 +96,11 @@ export function useSessionTabs() {
   const closeTab = useCallback(
     async (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
-      if (tab?.connected) {
-        await CloseSession(tabId);
+      if (tab) {
+        addToHistory(tab);
+        if (tab.connected) {
+          await CloseSession(tabId);
+        }
       }
       setTabs((prev) => {
         const remaining = prev.filter((t) => t.id !== tabId);
@@ -109,6 +147,13 @@ export function useSessionTabs() {
     [activeTabId],
   );
 
+  const history = loadHistory();
+
+  const clearHistoryEntry = useCallback((directory: string) => {
+    const h = loadHistory().filter((e) => e.directory !== directory);
+    saveHistory(h);
+  }, []);
+
   return {
     tabs,
     activeTabId,
@@ -117,5 +162,7 @@ export function useSessionTabs() {
     switchTab,
     renameTab,
     handleSessionExit,
+    history,
+    clearHistoryEntry,
   };
 }
