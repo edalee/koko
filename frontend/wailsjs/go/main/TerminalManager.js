@@ -18,6 +18,10 @@ export function GetSessionPID(arg1) {
   return window['go']['main']['TerminalManager']['GetSessionPID'](arg1);
 }
 
+export function GetSessionState(arg1) {
+  return window['go']['main']['TerminalManager']['GetSessionState'](arg1);
+}
+
 export function GetSessions() {
   return window['go']['main']['TerminalManager']['GetSessions']();
 }

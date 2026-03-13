@@ -10,6 +10,8 @@ export function CreateShellSession(arg1:string,arg2:number,arg3:number):Promise<
 
 export function GetSessionPID(arg1:string):Promise<number>;
 
+export function GetSessionState(arg1:string):Promise<string>;
+
 export function GetSessions():Promise<Array<main.SessionInfo>>;
 
 export function ReplayBuffer(arg1:string):Promise<string>;

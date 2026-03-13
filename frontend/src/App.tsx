@@ -45,7 +45,7 @@ export default function App() {
   const [showQuickTerminal, setShowQuickTerminal] = useState(false);
 
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
-  const idleSessions = useSessionActivity(connectedIds);
+  const sessionStates = useSessionActivity(connectedIds);
   const { prs, loading, refresh } = useGitHub();
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const {
@@ -147,7 +147,7 @@ export default function App() {
             <SessionSidebar
               sessions={tabs}
               activeSessionId={activeTabId}
-              idleSessions={idleSessions}
+              sessionStates={sessionStates}
               onSessionSelect={switchTab}
               onNewSession={() => setShowNewSession(true)}
               onDeleteSession={closeTab}

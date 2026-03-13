@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Plus, Search, SquareTerminal, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import type { SessionState } from "../hooks/useSessionActivity";
 import type { SessionTab } from "../types";
 
 function shortenPath(path: string): string {
@@ -11,7 +12,7 @@ function shortenPath(path: string): string {
 interface SessionSidebarProps {
   sessions: SessionTab[];
   activeSessionId: string | null;
-  idleSessions: Set<string>;
+  sessionStates: Map<string, SessionState>;
   onSessionSelect: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
@@ -23,7 +24,7 @@ interface SessionSidebarProps {
 export default function SessionSidebar({
   sessions,
   activeSessionId,
-  idleSessions,
+  sessionStates,
   onSessionSelect,
   onNewSession,
   onDeleteSession,
@@ -100,7 +101,9 @@ export default function SessionSidebar({
               {filteredSessions.map((session, index) => {
                 const isActive = activeSessionId === session.id;
                 const isEditing = editingId === session.id;
-                const isIdle = session.connected && idleSessions.has(session.id);
+                const state = session.connected
+                  ? (sessionStates.get(session.id) ?? "active")
+                  : "disconnected";
                 const shortcutKey = index < 9 ? index + 1 : null;
                 return (
                   // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: nested interactive elements require div wrapper
@@ -109,7 +112,7 @@ export default function SessionSidebar({
                     className={`group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
                       isActive
                         ? "bg-white/[0.08] border border-accent/20 glow-accent"
-                        : isIdle
+                        : state === "approval"
                           ? "hover:bg-white/[0.05] border border-amber-400/30"
                           : "hover:bg-white/[0.05] border border-transparent"
                     }`}
@@ -118,16 +121,16 @@ export default function SessionSidebar({
                     <div className="relative mt-0.5 shrink-0">
                       <SquareTerminal
                         className={`size-5 transition-colors ${
-                          isIdle
+                          state === "approval"
                             ? "text-amber-400 animate-pulse"
-                            : !session.connected
+                            : state === "disconnected"
                               ? "text-tertiary"
                               : isActive
                                 ? "text-accent"
                                 : "text-muted-foreground group-hover:text-accent"
                         }`}
                       />
-                      {isIdle && (
+                      {state === "approval" && (
                         <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-400 animate-ping" />
                       )}
                     </div>
@@ -205,7 +208,9 @@ export default function SessionSidebar({
             <Plus className="size-4" />
           </button>
           {sessions.slice(0, 5).map((session) => {
-            const isIdle = session.connected && idleSessions.has(session.id);
+            const state = session.connected
+              ? (sessionStates.get(session.id) ?? "active")
+              : "disconnected";
             return (
               <button
                 type="button"
@@ -216,18 +221,18 @@ export default function SessionSidebar({
                     ? "bg-white/[0.08] glow-accent"
                     : "hover:bg-white/[0.05]"
                 }`}
-                title={isIdle ? `${session.name} — waiting for input` : session.name}
+                title={state === "approval" ? `${session.name} — needs approval` : session.name}
               >
                 <SquareTerminal
                   className={`size-5 transition-colors ${
-                    isIdle
+                    state === "approval"
                       ? "text-amber-400 animate-pulse"
                       : activeSessionId === session.id
                         ? "text-accent"
                         : "text-muted-foreground hover:text-accent"
                   }`}
                 />
-                {isIdle && (
+                {state === "approval" && (
                   <span className="absolute top-1 right-1 size-2 rounded-full bg-amber-400 animate-ping" />
                 )}
               </button>
