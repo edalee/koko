@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/creack/pty"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// ansiRegex strips ANSI escape sequences from terminal output.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[()][0-9A-B]|\x1b\[[\?]?[0-9;]*[hlmsu]`)
 
 // ringBuffer stores recent PTY output so late-connecting frontends can replay it.
 type ringBuffer struct {
@@ -46,14 +50,15 @@ func (rb *ringBuffer) Bytes() []byte {
 }
 
 type session struct {
-	id   string
-	name string
-	dir  string
-	ptmx *os.File
-	cmd  *exec.Cmd
-	mu   sync.Mutex
-	done chan struct{}
-	buf  *ringBuffer // buffered PTY output for late-connecting frontends
+	id       string
+	name     string
+	dir      string
+	ptmx     *os.File
+	cmd      *exec.Cmd
+	mu       sync.Mutex
+	done     chan struct{}
+	buf      *ringBuffer // buffered PTY output for late-connecting frontends
+	tailText *ringBuffer // last 2KB of ANSI-stripped text for state detection
 }
 
 type TerminalManager struct {
@@ -112,12 +117,13 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 	}
 
 	s := &session{
-		id:   id,
-		name: name,
-		dir:  dir,
-		ptmx: ptmx,
-		cmd:  cmd,
-		done: make(chan struct{}),
+		id:       id,
+		name:     name,
+		dir:      dir,
+		ptmx:     ptmx,
+		cmd:      cmd,
+		done:     make(chan struct{}),
+		tailText: newRingBuffer(2048),
 	}
 
 	tm.mu.Lock()
@@ -242,11 +248,15 @@ func (tm *TerminalManager) readLoop(s *session) {
 		n, err := s.ptmx.Read(readBuf)
 		if n > 0 {
 			chunk := readBuf[:n]
+			s.mu.Lock()
 			if s.buf != nil {
-				s.mu.Lock()
 				s.buf.Write(chunk)
-				s.mu.Unlock()
 			}
+			if s.tailText != nil {
+				stripped := ansiRegex.ReplaceAll(chunk, nil)
+				s.tailText.Write(stripped)
+			}
+			s.mu.Unlock()
 			encoded := base64.StdEncoding.EncodeToString(chunk)
 			runtime.EventsEmit(tm.ctx, "pty:data:"+s.id, encoded)
 		}
@@ -279,6 +289,41 @@ func (tm *TerminalManager) GetSessionPID(sessionID string) (int, error) {
 		return 0, fmt.Errorf("session process not started")
 	}
 	return s.cmd.Process.Pid, nil
+}
+
+// GetSessionState returns "approval" if the session appears to be waiting for
+// tool approval, or "idle" otherwise. Called by frontend when PTY output stops.
+func (tm *TerminalManager) GetSessionState(sessionID string) string {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return "idle"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.tailText == nil {
+		return "idle"
+	}
+
+	text := strings.ToLower(string(s.tailText.Bytes()))
+
+	// Claude Code approval prompt patterns
+	approvalPatterns := []string{
+		"allow",
+		"yes, allow",
+		"yes, during this session",
+		"deny",
+		"permission",
+		"do you want to",
+	}
+
+	for _, p := range approvalPatterns {
+		if strings.Contains(text, p) {
+			return "approval"
+		}
+	}
+
+	return "idle"
 }
 
 func (tm *TerminalManager) getSession(id string) (*session, error) {

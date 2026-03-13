@@ -21,6 +21,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSafeWorking } from "./hooks/useSafeWorking";
+import { useSessionActivity } from "./hooks/useSessionActivity";
 import { useSessionContext } from "./hooks/useSessionContext";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
@@ -43,6 +44,8 @@ export default function App() {
   const [showNewSession, setShowNewSession] = useState(false);
   const [showQuickTerminal, setShowQuickTerminal] = useState(false);
 
+  const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
+  const sessionStates = useSessionActivity(connectedIds);
   const { prs, loading, refresh } = useGitHub();
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const {
@@ -144,6 +147,7 @@ export default function App() {
             <SessionSidebar
               sessions={tabs}
               activeSessionId={activeTabId}
+              sessionStates={sessionStates}
               onSessionSelect={switchTab}
               onNewSession={() => setShowNewSession(true)}
               onDeleteSession={closeTab}
