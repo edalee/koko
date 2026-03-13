@@ -18,6 +18,27 @@ type ProcessInfo struct {
 	Children  int    `json:"children"`  // number of grandchild processes
 }
 
+// MCPServer represents a configured MCP server and its connection status.
+type MCPServer struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	Status  string `json:"status"` // "connected", "auth_needed", "error"
+}
+
+// AgentInfo represents a built-in Claude agent.
+type AgentInfo struct {
+	Name  string `json:"name"`
+	Model string `json:"model"`
+}
+
+// CommandInfo represents a slash command or custom agent definition.
+type CommandInfo struct {
+	Name        string `json:"name"`
+	Source      string `json:"source"` // "project", "global"
+	Type        string `json:"type"`   // "command", "agent"
+	Description string `json:"description"`
+}
+
 // GitHubPR represents a pull request from a tracked repository.
 type GitHubPR struct {
 	Repo           string `json:"repo"`

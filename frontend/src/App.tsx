@@ -1,5 +1,6 @@
 import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
+import { Write } from "../wailsjs/go/main/TerminalManager";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import GitHubPanel from "./components/GitHubPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
@@ -20,14 +21,23 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSafeWorking } from "./hooks/useSafeWorking";
+import { useSessionContext } from "./hooks/useSessionContext";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSlack } from "./hooks/useSlack";
 import { useSubagents } from "./hooks/useSubagents";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
 export default function App() {
-  const { tabs, activeTabId, createTab, closeTab, switchTab, renameTab, handleSessionExit } =
-    useSessionTabs();
+  const {
+    tabs,
+    activeTabId,
+    createTab,
+    closeTab,
+    switchTab,
+    renameTab,
+    handleSessionExit,
+    history,
+  } = useSessionTabs();
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
@@ -59,12 +69,14 @@ export default function App() {
     refresh: refreshNotifications,
     markRead: markNotifRead,
   } = useNotifications();
+  const { processes, agentCount } = useSubagents(activeTabId);
   const {
-    processes,
-    agentCount,
-    loading: processesLoading,
-    refresh: refreshProcesses,
-  } = useSubagents(activeTabId);
+    mcpServers,
+    agents,
+    commands,
+    loading: contextLoading,
+    refresh: refreshContext,
+  } = useSessionContext(activeTab?.directory ?? null);
   const {
     config: safeWorkingConfig,
     updateConfig: updateSafeWorking,
@@ -92,6 +104,15 @@ export default function App() {
   const handleToggleTerminal = useCallback(() => {
     setShowQuickTerminal((prev) => !prev);
   }, []);
+
+  const handleInjectCommand = useCallback(
+    (command: string) => {
+      if (activeTabId) {
+        Write(activeTabId, btoa(command));
+      }
+    },
+    [activeTabId],
+  );
 
   useKeyboardShortcuts({
     onNewSession: () => setShowNewSession(true),
@@ -198,8 +219,12 @@ export default function App() {
               onRefreshFileChanges={refreshFileChanges}
               processes={processes}
               agentCount={agentCount}
-              processesLoading={processesLoading}
-              onRefreshProcesses={refreshProcesses}
+              mcpServers={mcpServers}
+              agents={agents}
+              commands={commands}
+              contextLoading={contextLoading}
+              onRefreshContext={refreshContext}
+              onInjectCommand={handleInjectCommand}
               hasActiveSession={!!activeTabId}
             />
           </ResizablePanel>
@@ -267,6 +292,8 @@ export default function App() {
             createTab(name, directory);
             setShowNewSession(false);
           }}
+          history={history}
+          activeDirs={tabs.map((t) => t.directory)}
         />
       </div>
 

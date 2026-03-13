@@ -14,3 +14,11 @@ export interface SessionTab {
   createdAt: number;
   connected: boolean;
 }
+
+export interface SessionHistoryEntry {
+  name: string;
+  directory: string;
+  createdAt: number;
+  closedAt: number;
+  lastMessage?: string;
+}

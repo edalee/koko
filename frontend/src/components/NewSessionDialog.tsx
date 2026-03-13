@@ -1,7 +1,7 @@
-import { Folder, FolderOpen, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Clock, Folder, FolderOpen, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PickDirectory } from "../../wailsjs/go/main/App";
-import { randomName } from "../lib/names";
+import type { SessionHistoryEntry } from "../types";
 
 const RECENT_DIRS_KEY = "koko:recent-dirs";
 const MAX_RECENT = 5;
@@ -20,6 +20,17 @@ export function addRecentDir(dir: string) {
   localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs.slice(0, MAX_RECENT)));
 }
 
+function timeAgo(ts: number): string {
+  const seconds = Math.floor((Date.now() - ts) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 function shortenPath(path: string): string {
   const home = path.match(/^\/Users\/[^/]+/)?.[0];
   if (home) return path.replace(home, "~");
@@ -30,13 +41,25 @@ interface NewSessionDialogProps {
   open: boolean;
   onClose: () => void;
   onCreate: (name: string, directory: string) => void;
+  history: SessionHistoryEntry[];
+  activeDirs: string[];
 }
 
 type AnimState = "closed" | "open" | "closing";
 
-export default function NewSessionDialog({ open, onClose, onCreate }: NewSessionDialogProps) {
+function dirBasename(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || path;
+}
+
+export default function NewSessionDialog({
+  open,
+  onClose,
+  onCreate,
+  history,
+  activeDirs,
+}: NewSessionDialogProps) {
   const [state, setState] = useState<AnimState>("closed");
-  const placeholder = useMemo(() => randomName(), []);
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
   const [recentDirs] = useState(getRecentDirs);
@@ -66,9 +89,9 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
 
   const handleCreate = useCallback(() => {
     if (!directory) return;
-    const sessionName = name.trim() || placeholder;
+    const sessionName = name.trim() || dirBasename(directory);
     onCreate(sessionName, directory);
-  }, [name, directory, placeholder, onCreate]);
+  }, [name, directory, onCreate]);
 
   useEffect(() => {
     if (state !== "open") return;
@@ -137,7 +160,7 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
               id="session-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={placeholder}
+              placeholder={directory ? dirBasename(directory) : "Session name"}
               className="w-full px-3 py-2.5 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
             />
           </div>
@@ -168,21 +191,62 @@ export default function NewSessionDialog({ open, onClose, onCreate }: NewSession
               </button>
             )}
 
-            {/* Recent directories */}
-            {recentDirs.length > 0 && !directory && (
+            {/* Session history / Recent directories */}
+            {!directory && (
               <div className="space-y-1 pt-1">
-                <span className="text-xs text-muted-foreground/60 px-1">Recent</span>
-                {recentDirs.map((dir) => (
-                  <button
-                    type="button"
-                    key={dir}
-                    onClick={() => setDirectory(dir)}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md text-muted-foreground hover:text-white hover:bg-white/5 transition-colors text-left"
-                  >
-                    <Folder className="size-3.5 shrink-0" />
-                    <span className="truncate">{shortenPath(dir)}</span>
-                  </button>
-                ))}
+                {history.length > 0 && (
+                  <>
+                    <span className="text-xs text-muted-foreground/60 px-1 flex items-center gap-1.5">
+                      <Clock className="size-3" />
+                      Recent Sessions
+                    </span>
+                    {history
+                      .filter((h) => !activeDirs.includes(h.directory))
+                      .slice(0, 5)
+                      .map((entry) => (
+                        <button
+                          type="button"
+                          key={entry.directory}
+                          onClick={() => {
+                            onCreate(entry.name, entry.directory);
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md text-muted-foreground hover:text-white hover:bg-white/5 transition-colors text-left"
+                        >
+                          <Folder className="size-3.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-white/80 block truncate">{entry.name}</span>
+                            <span className="text-[10px] text-tertiary block truncate">
+                              {shortenPath(entry.directory)}
+                            </span>
+                            {entry.lastMessage && (
+                              <span className="text-[10px] text-muted-foreground/50 block truncate mt-0.5 italic">
+                                {entry.lastMessage}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-tertiary shrink-0">
+                            {timeAgo(entry.closedAt)}
+                          </span>
+                        </button>
+                      ))}
+                  </>
+                )}
+                {history.length === 0 && recentDirs.length > 0 && (
+                  <>
+                    <span className="text-xs text-muted-foreground/60 px-1">Recent</span>
+                    {recentDirs.map((dir) => (
+                      <button
+                        type="button"
+                        key={dir}
+                        onClick={() => setDirectory(dir)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md text-muted-foreground hover:text-white hover:bg-white/5 transition-colors text-left"
+                      >
+                        <Folder className="size-3.5 shrink-0" />
+                        <span className="truncate">{shortenPath(dir)}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>

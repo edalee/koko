@@ -1,5 +1,19 @@
 export namespace main {
 	
+	export class AgentInfo {
+	    name: string;
+	    model: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AgentInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.model = source["model"];
+	    }
+	}
 	export class SafeWorkingConfig {
 	    quietHoursEnabled: boolean;
 	    quietHoursStart: string;
@@ -58,22 +72,22 @@ export namespace main {
 		    return a;
 		}
 	}
-	export class UpdateInfo {
-	    available: boolean;
-	    version: string;
-	    currentVersion: string;
-	    url: string;
-
+	export class CommandInfo {
+	    name: string;
+	    source: string;
+	    type: string;
+	    description: string;
+	
 	    static createFrom(source: any = {}) {
-	        return new UpdateInfo(source);
+	        return new CommandInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.available = source["available"];
-	        this.version = source["version"];
-	        this.currentVersion = source["currentVersion"];
-	        this.url = source["url"];
+	        this.name = source["name"];
+	        this.source = source["source"];
+	        this.type = source["type"];
+	        this.description = source["description"];
 	    }
 	}
 	export class ContextInfo {
@@ -156,6 +170,22 @@ export namespace main {
 	        this.url = source["url"];
 	    }
 	}
+	export class MCPServer {
+	    name: string;
+	    command: string;
+	    status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPServer(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.command = source["command"];
+	        this.status = source["status"];
+	    }
+	}
 	export class ProcessInfo {
 	    pid: number;
 	    command: string;
@@ -223,6 +253,24 @@ export namespace main {
 	        this.teamId = source["teamId"];
 	        this.unread = source["unread"];
 	        this.time = source["time"];
+	    }
+	}
+	export class UpdateInfo {
+	    available: boolean;
+	    version: string;
+	    currentVersion: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.version = source["version"];
+	        this.currentVersion = source["currentVersion"];
+	        this.url = source["url"];
 	    }
 	}
 

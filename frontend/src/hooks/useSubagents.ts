@@ -55,7 +55,7 @@ export function useSubagents(sessionId: string | null): UseSubagentsResult {
     fetchProcesses().finally(() => setLoading(false));
   }, [fetchProcesses]);
 
-  // Poll every 3 seconds
+  // Poll every 5 seconds
   useEffect(() => {
     if (!sessionId) {
       setProcesses([]);
@@ -63,7 +63,7 @@ export function useSubagents(sessionId: string | null): UseSubagentsResult {
     }
 
     fetchProcesses();
-    intervalRef.current = setInterval(fetchProcesses, 3000);
+    intervalRef.current = setInterval(fetchProcesses, 5000);
 
     return () => {
       if (intervalRef.current) {
