@@ -34,7 +34,7 @@ jobs:
         run: wails build -platform darwin/universal
 
       - name: Ad-hoc codesign
-        run: codesign -s - --force --deep build/bin/Koko.app
+        run: codesign -s - --force build/bin/Koko.app
 
       - name: Create DMG
         run: |
