@@ -12,6 +12,10 @@ pre-commit:
       root: frontend/
       glob: "*.{ts,tsx}"
       run: export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && node_modules/.bin/tsc --noEmit
+    test:
+      root: frontend/
+      glob: "*.{ts,tsx}"
+      run: export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && node_modules/.bin/vitest run
 
 commit-msg:
   commands:

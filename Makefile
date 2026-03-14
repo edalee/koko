@@ -10,6 +10,7 @@ build:
 
 test:
 	go test ./...
+	cd frontend && npx vitest run
 
 lint:
 	golangci-lint run

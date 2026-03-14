@@ -8,4 +8,13 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    css: false,
+    alias: {
+      "@/": new URL("./src/", import.meta.url).pathname,
+    },
+  },
 });
