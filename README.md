@@ -67,16 +67,25 @@ Kõkõ includes built-in features to help you maintain healthy working habits:
 
 ## Install
 
+### macOS (Homebrew)
+
+```bash
+brew tap edalee/koko
+brew install --cask koko
+```
+
+Update with `brew upgrade --cask koko`.
+
+> **Note:** The app is not notarized. On first launch, right-click → Open, or go to System Settings → Privacy & Security → Open Anyway.
+
 ### Download
 
-Grab the latest release for your platform:
+Alternatively, grab the latest release directly:
 
 | Platform | Download |
 |----------|----------|
 | **macOS** (Universal) | [Koko-vX.X.X-macOS.dmg](https://github.com/edalee/koko/releases/latest) |
 | **Linux** (x86_64) | [Koko-vX.X.X-linux-x86_64.AppImage](https://github.com/edalee/koko/releases/latest) |
-
-> **macOS note:** The app is not notarized. On first launch, right-click → Open, or go to System Settings → Privacy & Security → Open Anyway.
 
 ### Prerequisites
 
