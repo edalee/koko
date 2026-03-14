@@ -35,16 +35,15 @@ jobs:
 
       - name: Create DMG
         run: |
-          APP_NAME="Kõkõ"
           DMG_NAME="Koko-${GITHUB_REF_NAME}-macOS.dmg"
 
           # Create DMG staging directory
           mkdir -p dmg-staging
-          cp -R "build/bin/Koko.app" "dmg-staging/${APP_NAME}.app"
+          cp -R "build/bin/Koko.app" "dmg-staging/Koko.app"
           ln -s /Applications dmg-staging/Applications
 
           # Create DMG
-          hdiutil create -volname "$APP_NAME" \
+          hdiutil create -volname "Koko" \
             -srcfolder dmg-staging \
             -ov -format UDZO \
             "$DMG_NAME"
@@ -187,7 +186,7 @@ jobs:
             desc "Unified workspace for Claude Code sessions"
             homepage "https://github.com/edalee/koko"
 
-            app "Kõkõ.app"
+            app "Koko.app"
 
             zap trash: [
               "~/Library/Application Support/koko",
