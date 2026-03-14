@@ -102,15 +102,16 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       Write(sessionId, btoa(String.fromCharCode(...bytes)));
     });
 
-    // Resize — debounce to avoid rapid SIGWINCH during drag
+    // Resize — debounce to avoid rapid SIGWINCH during drag.
+    // Only resize if dimensions actually changed to avoid scroll disruption.
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        if (fitRef.current) {
-          fitRef.current.fit();
+        if (fitRef.current && termRef.current) {
           const dims = fitRef.current.proposeDimensions();
-          if (dims) {
+          if (dims && (dims.cols !== termRef.current.cols || dims.rows !== termRef.current.rows)) {
+            fitRef.current.fit();
             Resize(sessionId, dims.cols, dims.rows);
           }
         }
@@ -150,14 +151,23 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     };
   }, [sessionId]);
 
-  // Refit when becoming active
+  // Refit when becoming active — only if dimensions actually changed
+  // to avoid unnecessary PTY resize that disrupts scroll position.
   useEffect(() => {
-    if (active && fitRef.current) {
+    if (active && fitRef.current && termRef.current) {
       requestAnimationFrame(() => {
-        fitRef.current?.fit();
+        if (!fitRef.current || !termRef.current) return;
+        const dims = fitRef.current.proposeDimensions();
+        if (dims && (dims.cols !== termRef.current.cols || dims.rows !== termRef.current.rows)) {
+          fitRef.current.fit();
+          const proposedDims = fitRef.current.proposeDimensions();
+          if (proposedDims) {
+            Resize(sessionId, proposedDims.cols, proposedDims.rows);
+          }
+        }
       });
     }
-  }, [active]);
+  }, [active, sessionId]);
 
   // Focus terminal when active
   useEffect(() => {
