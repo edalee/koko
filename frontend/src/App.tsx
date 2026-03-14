@@ -42,7 +42,7 @@ export default function App() {
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
-  const [showQuickTerminal, setShowQuickTerminal] = useState(false);
+  const [quickTerminalTabs, setQuickTerminalTabs] = useState<Set<string>>(new Set());
 
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
   const sessionStates = useSessionActivity(connectedIds);
@@ -105,9 +105,20 @@ export default function App() {
     if (activeTabId) closeTab(activeTabId);
   }, [activeTabId, closeTab]);
 
+  const showQuickTerminal = activeTabId ? quickTerminalTabs.has(activeTabId) : false;
+
   const handleToggleTerminal = useCallback(() => {
-    setShowQuickTerminal((prev) => !prev);
-  }, []);
+    if (!activeTabId) return;
+    setQuickTerminalTabs((prev) => {
+      const next = new Set(prev);
+      if (next.has(activeTabId)) {
+        next.delete(activeTabId);
+      } else {
+        next.add(activeTabId);
+      }
+      return next;
+    });
+  }, [activeTabId]);
 
   const handleInjectCommand = useCallback(
     (command: string) => {
@@ -203,7 +214,15 @@ export default function App() {
               {/* Quick Terminal — takes space from the terminal above */}
               <QuickTerminal
                 open={showQuickTerminal}
-                onClose={() => setShowQuickTerminal(false)}
+                onClose={() => {
+                  if (activeTabId) {
+                    setQuickTerminalTabs((prev) => {
+                      const next = new Set(prev);
+                      next.delete(activeTabId);
+                      return next;
+                    });
+                  }
+                }}
                 activeTabId={activeTabId}
                 directory={activeTab?.directory ?? "."}
               />
