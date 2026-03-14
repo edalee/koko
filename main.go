@@ -4,6 +4,7 @@ import (
 	"embed"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
@@ -22,6 +23,13 @@ func main() {
 	pm := NewProcessMonitor()
 	claude := NewClaudeService()
 
+	// macOS Edit menu enables Cmd+C/V/X/A in the webview
+	editMenu := menu.NewMenu()
+	editMenu.Append(menu.EditMenu())
+	appMenu := menu.NewMenu()
+	appMenu.Append(menu.AppMenu())
+	appMenu.Merge(editMenu)
+
 	err := wails.Run(&options.App{
 		Title:     "Koko",
 		Width:     1280,
@@ -34,6 +42,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 15, G: 17, B: 23, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
+		Menu:             appMenu,
 		Frameless:        false,
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),
