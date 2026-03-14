@@ -150,3 +150,59 @@ jobs:
           files: |
             artifacts/*.dmg
             artifacts/*.AppImage
+
+  update-homebrew:
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download macOS DMG
+        run: |
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo edalee/koko \
+            --pattern "*.dmg" \
+            --dir .
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Compute SHA256
+        id: sha
+        run: echo "sha256=$(shasum -a 256 *.dmg | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew Cask
+        run: |
+          git clone https://x-access-token:${TAP_TOKEN}@github.com/edalee/homebrew-koko.git tap
+          cd tap
+
+          cat > Casks/koko.rb << CASK
+          cask "koko" do
+            version "${{ steps.version.outputs.version }}"
+            sha256 "${{ steps.sha.outputs.sha256 }}"
+
+            url "https://github.com/edalee/koko/releases/download/v#{version}/Koko-v#{version}-macOS.dmg"
+            name "Kõkõ"
+            desc "Unified workspace for Claude Code sessions"
+            homepage "https://github.com/edalee/koko"
+
+            app "Kõkõ.app"
+
+            zap trash: [
+              "~/Library/Application Support/koko",
+              "~/Library/Preferences/com.koko.app.plist",
+            ]
+          end
+          CASK
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' Casks/koko.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/koko.rb
+          git commit -m "chore: bump koko to ${{ steps.version.outputs.version }}"
+          git push
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
