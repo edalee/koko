@@ -76,10 +76,10 @@ brew install --cask koko
 
 Update with `brew upgrade --cask koko`.
 
-> **macOS note:** The app is not notarized. If you see "damaged or incomplete", run:
-> ```bash
-> xattr -cr /Applications/Koko.app
-> ```
+> **macOS note:** The app is not notarized. On first launch you'll see "damaged or incomplete":
+> 1. Run `xattr -cr /Applications/Koko.app`
+> 2. Open the app — macOS will block it
+> 3. Go to **System Settings → Privacy & Security** → click **Open Anyway**
 
 ### Download
 
