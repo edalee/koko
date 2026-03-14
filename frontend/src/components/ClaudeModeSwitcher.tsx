@@ -73,7 +73,7 @@ export default function ClaudeModeSwitcher({ sessionId }: ClaudeModeSwitcherProp
           : "text-muted-foreground";
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 bg-base border-t border-white/[0.06]">
+    <div className="flex items-center gap-1 px-2 py-1.5 bg-base border-t border-white/[0.06] h-9 shrink-0">
       {MODES.map(({ key, label, icon: Icon }) => (
         <button
           key={key}
@@ -92,26 +92,26 @@ export default function ClaudeModeSwitcher({ sessionId }: ClaudeModeSwitcherProp
       ))}
 
       <div className="flex items-center gap-2 ml-auto">
-        {contextPct !== null && (
-          <div className="flex items-center gap-1.5">
-            {/* Mini progress bar */}
-            <div className="w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden">
-              <div
-                className={cn(
-                  "h-full rounded-full transition-all",
-                  contextPct >= 80
-                    ? "bg-red-400"
-                    : contextPct >= 60
-                      ? "bg-yellow-400"
-                      : "bg-accent",
-                )}
-                style={{ width: `${contextPct}%` }}
-              />
-            </div>
-            <span className={cn("text-[10px] tabular-nums", contextColor)}>{contextPct}%</span>
+        <div className="flex items-center gap-1.5">
+          {/* Mini progress bar — always rendered to avoid layout shift */}
+          <div className="w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all",
+                contextPct !== null && contextPct >= 80
+                  ? "bg-red-400"
+                  : contextPct !== null && contextPct >= 60
+                    ? "bg-yellow-400"
+                    : "bg-accent",
+              )}
+              style={{ width: `${contextPct ?? 0}%` }}
+            />
           </div>
-        )}
-        {model && <span className="text-[10px] text-tertiary">{model}</span>}
+          <span className={cn("text-[10px] tabular-nums w-7", contextColor)}>
+            {contextPct !== null ? `${contextPct}%` : ""}
+          </span>
+        </div>
+        <span className="text-[10px] text-tertiary">{model ?? ""}</span>
       </div>
     </div>
   );
