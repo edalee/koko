@@ -133,6 +133,30 @@ func (cs *ClaudeService) GetCommands(dir string) ([]CommandInfo, error) {
 				}
 			}
 		}
+
+		// Plugin skills: ~/.claude/plugins/marketplaces/*/plugins/*/skills/*/SKILL.md
+		pluginGlob := filepath.Join(home, ".claude", "plugins", "marketplaces", "*", "plugins", "*", "skills", "*", "SKILL.md")
+		if matches, err := filepath.Glob(pluginGlob); err == nil {
+			for _, match := range matches {
+				skillDir := filepath.Dir(match)
+				pluginDir := filepath.Dir(filepath.Dir(skillDir))
+				pluginName := filepath.Base(pluginDir)
+				skillName := filepath.Base(skillDir)
+				qualifiedName := pluginName + ":" + skillName
+
+				if seen[qualifiedName] {
+					continue
+				}
+				desc := skillFrontmatterField(match, "description")
+				commands = append(commands, CommandInfo{
+					Name:        qualifiedName,
+					Source:      "plugin",
+					Type:        "command",
+					Description: desc,
+				})
+				seen[qualifiedName] = true
+			}
+		}
 	}
 
 	return commands, nil
@@ -312,6 +336,38 @@ func extractAssistantText(line []byte) string {
 	for _, block := range entry.Data.Message.Message.Content {
 		if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
 			return strings.TrimSpace(block.Text)
+		}
+	}
+	return ""
+}
+
+// skillFrontmatterField reads a specific field from YAML frontmatter in a SKILL.md file.
+func skillFrontmatterField(path, field string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	inFrontmatter := false
+	prefix := field + ": "
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" {
+			if inFrontmatter {
+				return "" // end of frontmatter, field not found
+			}
+			inFrontmatter = true
+			continue
+		}
+		if inFrontmatter && strings.HasPrefix(trimmed, prefix) {
+			val := strings.TrimPrefix(trimmed, prefix)
+			if len(val) > 80 {
+				val = val[:77] + "..."
+			}
+			return val
 		}
 	}
 	return ""
