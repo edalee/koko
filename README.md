@@ -79,23 +79,16 @@ Kõkõ includes built-in features to help you maintain healthy working habits:
 
 ```bash
 brew tap edalee/koko
-brew install --cask koko
+brew install koko
 ```
-
-After install, clear the quarantine attribute (the app is not notarized):
-
-```bash
-sudo xattr -cr /Applications/Koko.app
-```
-
-Then open Koko — if macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
 
 Update:
 
 ```bash
-brew upgrade --cask koko
-sudo xattr -cr /Applications/Koko.app
+brew upgrade koko
 ```
+
+> **First launch:** The app is not notarized. macOS may block it — go to **System Settings → Privacy & Security → Open Anyway**.
 
 ### Manual download
 

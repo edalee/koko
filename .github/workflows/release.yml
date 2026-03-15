@@ -36,27 +36,8 @@ jobs:
       - name: Ad-hoc codesign
         run: codesign -s - --force build/bin/Koko.app
 
-      - name: Create pkg (for Homebrew)
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          mkdir -p pkg-root/Applications
-          cp -R build/bin/Koko.app pkg-root/Applications/
-
-          mkdir -p pkg-scripts
-          cat > pkg-scripts/postinstall << 'SCRIPT'
-          #!/bin/bash
-          # Clear quarantine immediately so XProtect doesn't strip the unsigned binary
-          xattr -cr /Applications/Koko.app 2>/dev/null || true
-          SCRIPT
-          chmod +x pkg-scripts/postinstall
-
-          pkgbuild \
-            --root pkg-root \
-            --scripts pkg-scripts \
-            --identifier com.edalee.koko \
-            --version "${VERSION#v}" \
-            --install-location / \
-            "Koko-${VERSION}-macOS.pkg"
+      - name: Create tar.gz (for Homebrew formula)
+        run: tar -czf "Koko-${GITHUB_REF_NAME}-macOS.tar.gz" -C build/bin Koko.app
 
       - name: Create DMG
         run: |
@@ -74,7 +55,7 @@ jobs:
           name: macos
           path: |
             *.dmg
-            *.pkg
+            *.tar.gz
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -164,7 +145,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/*.dmg
-            artifacts/*.pkg
+            artifacts/*.tar.gz
             artifacts/*.AppImage
 
   update-homebrew:
@@ -175,50 +156,71 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download macOS pkg
+      - name: Download macOS tar.gz
         run: |
           gh release download "${GITHUB_REF_NAME}" \
             --repo edalee/koko \
-            --pattern "*.pkg" \
+            --pattern "*.tar.gz" \
             --dir .
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Compute SHA256
         id: sha
-        run: echo "sha256=$(shasum -a 256 *.pkg | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+        run: echo "sha256=$(shasum -a 256 *.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      - name: Update Homebrew Cask
+      - name: Update Homebrew Formula
         run: |
           git clone https://x-access-token:${TAP_TOKEN}@github.com/edalee/homebrew-koko.git tap
           cd tap
 
-          cat > Casks/koko.rb << CASK
-          cask "koko" do
-            version "${{ steps.version.outputs.version }}"
-            sha256 "${{ steps.sha.outputs.sha256 }}"
-
-            url "https://github.com/edalee/koko/releases/download/v#{version}/Koko-v#{version}-macOS.pkg"
-            name "Koko"
+          mkdir -p Formula
+          cat > Formula/koko.rb << FORMULA
+          class Koko < Formula
             desc "Unified workspace for Claude Code sessions"
             homepage "https://github.com/edalee/koko"
+            url "https://github.com/edalee/koko/releases/download/v${{ steps.version.outputs.version }}/Koko-v${{ steps.version.outputs.version }}-macOS.tar.gz"
+            sha256 "${{ steps.sha.outputs.sha256 }}"
+            version "${{ steps.version.outputs.version }}"
 
-            pkg "Koko-v#{version}-macOS.pkg"
+            depends_on :macos
 
-            uninstall pkgutil: "com.edalee.koko",
-                      delete:  "/Applications/Koko.app"
+            def install
+              prefix.install "Koko.app"
+            end
 
-            zap trash: [
-              "~/Library/Application Support/koko",
-              "~/Library/Preferences/com.koko.app.plist",
-            ]
+            def post_install
+              # Clear quarantine to prevent XProtect from stripping the unsigned binary
+              system "xattr", "-cr", "#{prefix}/Koko.app"
+              # Symlink to /Applications for Finder/Launchpad visibility
+              ln_sf "#{prefix}/Koko.app", "/Applications/Koko.app"
+            end
+
+            def caveats
+              <<~EOS
+                Koko.app has been linked to /Applications.
+
+                The app is not notarized. On first launch macOS may block it:
+                  1. Open Koko from /Applications or Launchpad
+                  2. Go to System Settings → Privacy & Security
+                  3. Click "Open Anyway"
+              EOS
+            end
+
+            test do
+              assert_predicate prefix/"Koko.app/Contents/MacOS/Koko", :exist?
+            end
           end
-          CASK
-          sed -i 's/^          //' Casks/koko.rb
+          FORMULA
+          sed -i 's/^          //' Formula/koko.rb
+
+          # Remove old Cask if it exists
+          rm -f Casks/koko.rb
+          rmdir Casks 2>/dev/null || true
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/koko.rb
+          git add -A
           git commit -m "chore: bump koko to ${{ steps.version.outputs.version }}"
           git push
         env:
