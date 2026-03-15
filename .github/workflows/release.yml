@@ -41,8 +41,18 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           mkdir -p pkg-root/Applications
           cp -R build/bin/Koko.app pkg-root/Applications/
+
+          mkdir -p pkg-scripts
+          cat > pkg-scripts/postinstall << 'SCRIPT'
+          #!/bin/bash
+          # Clear quarantine immediately so XProtect doesn't strip the unsigned binary
+          xattr -cr /Applications/Koko.app 2>/dev/null || true
+          SCRIPT
+          chmod +x pkg-scripts/postinstall
+
           pkgbuild \
             --root pkg-root \
+            --scripts pkg-scripts \
             --identifier com.edalee.koko \
             --version "${VERSION#v}" \
             --install-location / \
