@@ -33,19 +33,17 @@ jobs:
       - name: Build macOS app
         run: wails build -platform darwin/universal
 
-      - name: Ad-hoc codesign
-        run: codesign -s - --force build/bin/Koko.app
+      - name: Create zip (for Homebrew)
+        run: |
+          cd build/bin
+          zip -r "../../Koko-${GITHUB_REF_NAME}-macOS.zip" Koko.app
 
       - name: Create DMG
         run: |
           DMG_NAME="Koko-${GITHUB_REF_NAME}-macOS.dmg"
-
-          # Create DMG staging directory
           mkdir -p dmg-staging
           cp -R "build/bin/Koko.app" "dmg-staging/Koko.app"
           ln -s /Applications dmg-staging/Applications
-
-          # Create DMG
           hdiutil create -volname "Koko" \
             -srcfolder dmg-staging \
             -ov -format UDZO \
@@ -53,8 +51,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
-          path: "*.dmg"
+          name: macos
+          path: |
+            *.dmg
+            *.zip
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -94,32 +94,26 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           APPDIR="Koko.AppDir"
 
-          # Download AppImage tooling
           wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
           chmod +x appimagetool
 
-          # Create AppDir structure
           mkdir -p "${APPDIR}/usr/bin"
           mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
           cp build/bin/Koko "${APPDIR}/usr/bin/koko"
           cp build/appicon.png "${APPDIR}/usr/share/icons/hicolor/256x256/apps/koko.png"
           cp build/appicon.png "${APPDIR}/koko.png"
 
-          # Desktop entry
           cat > "${APPDIR}/koko.desktop" << 'DESKTOP'
           [Desktop Entry]
-          Name=Kõkõ
+          Name=Koko
           Exec=koko
           Icon=koko
           Type=Application
           Categories=Development;
           Comment=Unified workspace for Claude Code sessions
           DESKTOP
-
-          # Remove leading whitespace from heredoc
           sed -i 's/^          //' "${APPDIR}/koko.desktop"
 
-          # AppRun entry point
           cat > "${APPDIR}/AppRun" << 'APPRUN'
           #!/bin/bash
           SELF="$(readlink -f "$0")"
@@ -128,7 +122,6 @@ jobs:
           APPRUN
           chmod +x "${APPDIR}/AppRun"
 
-          # Build AppImage
           ARCH=x86_64 ./appimagetool "${APPDIR}" "Koko-${VERSION}-linux-x86_64.AppImage"
 
       - uses: actions/upload-artifact@v4
@@ -151,6 +144,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/*.dmg
+            artifacts/*.zip
             artifacts/*.AppImage
 
   update-homebrew:
@@ -161,18 +155,18 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download macOS DMG
+      - name: Download macOS zip
         run: |
           gh release download "${GITHUB_REF_NAME}" \
             --repo edalee/koko \
-            --pattern "*.dmg" \
+            --pattern "*.zip" \
             --dir .
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Compute SHA256
         id: sha
-        run: echo "sha256=$(shasum -a 256 *.dmg | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+        run: echo "sha256=$(shasum -a 256 *.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew Cask
         run: |
@@ -184,8 +178,8 @@ jobs:
             version "${{ steps.version.outputs.version }}"
             sha256 "${{ steps.sha.outputs.sha256 }}"
 
-            url "https://github.com/edalee/koko/releases/download/v#{version}/Koko-v#{version}-macOS.dmg"
-            name "Kõkõ"
+            url "https://github.com/edalee/koko/releases/download/v#{version}/Koko-v#{version}-macOS.zip"
+            name "Koko"
             desc "Unified workspace for Claude Code sessions"
             homepage "https://github.com/edalee/koko"
 
@@ -197,8 +191,6 @@ jobs:
             ]
           end
           CASK
-
-          # Remove leading whitespace from heredoc
           sed -i 's/^          //' Casks/koko.rb
 
           git config user.name "github-actions[bot]"
