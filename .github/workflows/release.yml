@@ -36,10 +36,17 @@ jobs:
       - name: Ad-hoc codesign
         run: codesign -s - --force build/bin/Koko.app
 
-      - name: Create zip (for Homebrew)
+      - name: Create pkg (for Homebrew)
         run: |
-          cd build/bin
-          zip -r "../../Koko-${GITHUB_REF_NAME}-macOS.zip" Koko.app
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p pkg-root/Applications
+          cp -R build/bin/Koko.app pkg-root/Applications/
+          pkgbuild \
+            --root pkg-root \
+            --identifier com.edalee.koko \
+            --version "${VERSION#v}" \
+            --install-location / \
+            "Koko-${VERSION}-macOS.pkg"
 
       - name: Create DMG
         run: |
@@ -57,7 +64,7 @@ jobs:
           name: macos
           path: |
             *.dmg
-            *.zip
+            *.pkg
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -147,7 +154,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/*.dmg
-            artifacts/*.zip
+            artifacts/*.pkg
             artifacts/*.AppImage
 
   update-homebrew:
@@ -158,18 +165,18 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download macOS zip
+      - name: Download macOS pkg
         run: |
           gh release download "${GITHUB_REF_NAME}" \
             --repo edalee/koko \
-            --pattern "*.zip" \
+            --pattern "*.pkg" \
             --dir .
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Compute SHA256
         id: sha
-        run: echo "sha256=$(shasum -a 256 *.zip | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+        run: echo "sha256=$(shasum -a 256 *.pkg | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Update Homebrew Cask
         run: |
@@ -181,12 +188,15 @@ jobs:
             version "${{ steps.version.outputs.version }}"
             sha256 "${{ steps.sha.outputs.sha256 }}"
 
-            url "https://github.com/edalee/koko/releases/download/v#{version}/Koko-v#{version}-macOS.zip"
+            url "https://github.com/edalee/koko/releases/download/v#{version}/Koko-v#{version}-macOS.pkg"
             name "Koko"
             desc "Unified workspace for Claude Code sessions"
             homepage "https://github.com/edalee/koko"
 
-            app "Koko.app"
+            pkg "Koko-v#{version}-macOS.pkg"
+
+            uninstall pkgutil: "com.edalee.koko",
+                      delete:  "/Applications/Koko.app"
 
             zap trash: [
               "~/Library/Application Support/koko",
