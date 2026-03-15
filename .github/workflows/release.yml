@@ -37,7 +37,10 @@ jobs:
         run: codesign -s - --force build/bin/Koko.app
 
       - name: Create tar.gz (for Homebrew formula)
-        run: tar -czf "Koko-${GITHUB_REF_NAME}-macOS.tar.gz" -C build/bin Koko.app
+        run: |
+          mkdir -p "Koko-${GITHUB_REF_NAME}"
+          cp -R build/bin/Koko.app "Koko-${GITHUB_REF_NAME}/"
+          tar -czf "Koko-${GITHUB_REF_NAME}-macOS.tar.gz" "Koko-${GITHUB_REF_NAME}"
 
       - name: Create DMG
         run: |
