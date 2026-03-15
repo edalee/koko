@@ -82,7 +82,11 @@ brew tap edalee/koko
 brew install --cask koko
 ```
 
-Update with `brew upgrade --cask koko`.
+Update:
+
+```bash
+brew upgrade --cask koko
+```
 
 > **macOS note:** The app is not notarized. On first launch you'll see "damaged or incomplete":
 > 1. Run `xattr -cr /Applications/Koko.app`
