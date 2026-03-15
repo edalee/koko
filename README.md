@@ -82,25 +82,29 @@ brew tap edalee/koko
 brew install --cask koko
 ```
 
+After install, clear the quarantine attribute (the app is not notarized):
+
+```bash
+sudo xattr -cr /Applications/Koko.app
+```
+
+Then open Koko — if macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**.
+
 Update:
 
 ```bash
 brew upgrade --cask koko
+sudo xattr -cr /Applications/Koko.app
 ```
 
-> **macOS note:** The app is not notarized. On first launch you'll see "damaged or incomplete":
-> 1. Run `xattr -cr /Applications/Koko.app`
-> 2. Open the app — macOS will block it
-> 3. Go to **System Settings → Privacy & Security** → click **Open Anyway**
-
-### Download
-
-Alternatively, grab the latest release directly:
+### Manual download
 
 | Platform | Download |
 |----------|----------|
 | **macOS** (Universal) | [Koko-vX.X.X-macOS.dmg](https://github.com/edalee/koko/releases/latest) |
 | **Linux** (x86_64) | [Koko-vX.X.X-linux-x86_64.AppImage](https://github.com/edalee/koko/releases/latest) |
+
+For macOS: open the DMG, drag to Applications, then `sudo xattr -cr /Applications/Koko.app`.
 
 ### Prerequisites
 
