@@ -75,29 +75,42 @@ Kõkõ includes built-in features to help you maintain healthy working habits:
 
 ## Install
 
+### macOS (recommended: build from source)
+
+The app is not notarized, and macOS XProtect removes unsigned binaries after first launch. Building from source avoids this entirely:
+
+```bash
+git clone https://github.com/edalee/koko.git
+cd koko
+make install-fe
+make build
+cp -R build/bin/Koko.app /Applications/
+```
+
+See [Build from Source](#build-from-source) for prerequisites.
+
 ### macOS (Homebrew)
+
+Homebrew handles downloading and installing, but you'll need to reinstall after each launch until the app is [code-signed](https://developer.apple.com/developer-id/):
 
 ```bash
 brew tap edalee/koko
 brew install koko
 ```
 
-Update:
+Update or restore after XProtect strips the binary:
 
 ```bash
-brew upgrade koko
+brew reinstall koko
 ```
 
-> **First launch:** The app is not notarized. macOS may block it — go to **System Settings → Privacy & Security → Open Anyway**.
+> **First launch:** macOS may block the app — go to **System Settings → Privacy & Security → Open Anyway**.
 
-### Manual download
+### Linux
 
 | Platform | Download |
 |----------|----------|
-| **macOS** (Universal) | [Koko-vX.X.X-macOS.dmg](https://github.com/edalee/koko/releases/latest) |
 | **Linux** (x86_64) | [Koko-vX.X.X-linux-x86_64.AppImage](https://github.com/edalee/koko/releases/latest) |
-
-For macOS: open the DMG, drag to Applications, then `sudo xattr -cr /Applications/Koko.app`.
 
 ### Prerequisites
 
@@ -126,15 +139,18 @@ cd koko
 # Install frontend dependencies
 make install-fe
 
-# Run in development mode (hot reload)
-make dev
-
-# Build production app bundle
+# Build production app bundle and install to /Applications
 make build
+cp -R build/bin/Koko.app /Applications/
+
+# Or run in development mode (hot reload)
+make dev
 
 # Run tests
 make test
 ```
+
+Locally-built binaries are not flagged by XProtect, so the app will persist across launches without issues. To update, `git pull` and rebuild.
 
 ## How It Works
 
