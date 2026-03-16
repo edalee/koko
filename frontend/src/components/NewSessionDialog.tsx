@@ -1,24 +1,8 @@
 import { Clock, Folder, FolderOpen, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PickDirectory } from "../../wailsjs/go/main/App";
+import { GetSessions } from "../../wailsjs/go/main/ConfigService";
 import type { SessionHistoryEntry } from "../types";
-
-const RECENT_DIRS_KEY = "koko:recent-dirs";
-const MAX_RECENT = 5;
-
-function getRecentDirs(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_DIRS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-export function addRecentDir(dir: string) {
-  const dirs = getRecentDirs().filter((d) => d !== dir);
-  dirs.unshift(dir);
-  localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(dirs.slice(0, MAX_RECENT)));
-}
 
 function timeAgo(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -62,7 +46,16 @@ export default function NewSessionDialog({
   const [state, setState] = useState<AnimState>("closed");
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
-  const [recentDirs] = useState(getRecentDirs);
+  const [recentDirs, setRecentDirs] = useState<string[]>([]);
+
+  // Load recent dirs from Go backend
+  useEffect(() => {
+    if (open) {
+      GetSessions()
+        .then((s) => setRecentDirs(s.recentDirs || []))
+        .catch(() => {});
+    }
+  }, [open]);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {

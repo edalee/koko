@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -78,6 +80,26 @@ func (tm *TerminalManager) setContext(ctx context.Context) {
 	tm.ctx = ctx
 }
 
+// resolveClaudePath finds the absolute path to claude.
+// GUI apps launched from Finder have a minimal PATH that won't include ~/.local/bin.
+func resolveClaudePath() string {
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", "claude"),
+		filepath.Join(home, ".claude", "local", "claude"),
+		"/usr/local/bin/claude",
+		"/opt/homebrew/bin/claude",
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			log.Printf("[pty] found claude at: %s", p)
+			return p
+		}
+	}
+	log.Printf("[pty] could not find claude binary, falling back to bare 'claude'")
+	return "claude"
+}
+
 func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
 	tm.mu.Lock()
 	tm.nextID++
@@ -98,11 +120,11 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 	}
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
 
-	// Login shell resolves PATH (GUI apps have minimal env),
-	// exec replaces shell with claude (no wrapper process).
-	claudeCmd := "exec claude"
+	// Resolve claude path via login shell (GUI apps have minimal PATH).
+	claudePath := resolveClaudePath()
+	claudeCmd := fmt.Sprintf("exec %s", claudePath)
 	if resume {
-		claudeCmd = "exec claude --continue"
+		claudeCmd = fmt.Sprintf("exec %s --continue", claudePath)
 	}
 	cmd := exec.Command(shell, "-l", "-c", claudeCmd)
 	cmd.Dir = dir
@@ -239,6 +261,7 @@ func (tm *TerminalManager) CloseSession(sessionID string) error {
 
 func (tm *TerminalManager) readLoop(s *session) {
 	defer func() {
+		_ = s.cmd.Wait()
 		close(s.done)
 		runtime.EventsEmit(tm.ctx, "pty:exit:"+s.id)
 	}()

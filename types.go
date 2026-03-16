@@ -39,6 +39,30 @@ type CommandInfo struct {
 	Description string `json:"description"`
 }
 
+// SavedSessionTab represents a persisted session tab.
+type SavedSessionTab struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Directory string `json:"directory"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+// SavedSessionHistory represents a closed session entry.
+type SavedSessionHistory struct {
+	Name        string `json:"name"`
+	Directory   string `json:"directory"`
+	CreatedAt   int64  `json:"createdAt"`
+	ClosedAt    int64  `json:"closedAt"`
+	LastMessage string `json:"lastMessage,omitempty"`
+}
+
+// SessionsData holds all persisted session state.
+type SessionsData struct {
+	Tabs       []SavedSessionTab     `json:"tabs"`
+	History    []SavedSessionHistory `json:"history"`
+	RecentDirs []string              `json:"recentDirs"`
+}
+
 // GitHubPR represents a pull request from a tracked repository.
 type GitHubPR struct {
 	Repo           string `json:"repo"`

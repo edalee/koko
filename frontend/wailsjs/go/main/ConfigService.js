@@ -6,8 +6,16 @@ export function GetConfig() {
   return window['go']['main']['ConfigService']['GetConfig']();
 }
 
+export function GetSessions() {
+  return window['go']['main']['ConfigService']['GetSessions']();
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['ConfigService']['SaveConfig'](arg1);
+}
+
+export function SaveSessions(arg1) {
+  return window['go']['main']['ConfigService']['SaveSessions'](arg1);
 }
 
 export function SetSlackToken(arg1) {

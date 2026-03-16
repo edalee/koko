@@ -186,7 +186,11 @@ export default function App() {
                           onExit={() => handleSessionExit(tab.id)}
                         />
                       ) : (
-                        <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                        // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
+                        <div
+                          className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground cursor-pointer hover:text-white transition-colors"
+                          onClick={() => switchTab(tab.id)}
+                        >
                           <p className="text-sm">Session disconnected</p>
                           <p className="text-xs text-tertiary">
                             Click to reconnect with claude --continue

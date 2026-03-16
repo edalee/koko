@@ -4,6 +4,10 @@ import {main} from '../models';
 
 export function GetConfig():Promise<main.AppConfig>;
 
+export function GetSessions():Promise<main.SessionsData>;
+
 export function SaveConfig(arg1:main.AppConfig):Promise<void>;
+
+export function SaveSessions(arg1:main.SessionsData):Promise<void>;
 
 export function SetSlackToken(arg1:string):Promise<void>;

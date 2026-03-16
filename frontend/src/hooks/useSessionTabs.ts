@@ -1,76 +1,83 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GetLastMessage } from "../../wailsjs/go/main/ClaudeService";
+import { GetSessions, SaveSessions } from "../../wailsjs/go/main/ConfigService";
 import { CloseSession, CreateSession } from "../../wailsjs/go/main/TerminalManager";
-import { addRecentDir } from "../components/NewSessionDialog";
 import type { SessionHistoryEntry, SessionTab } from "../types";
 
-const TABS_STORAGE_KEY = "koko:session-tabs";
-const HISTORY_STORAGE_KEY = "koko:session-history";
 const MAX_HISTORY = 20;
 
-function loadSavedTabs(): SessionTab[] {
-  try {
-    const raw = localStorage.getItem(TABS_STORAGE_KEY);
-    if (!raw) return [];
-    const tabs: SessionTab[] = JSON.parse(raw);
-    // Mark all as disconnected (no PTY after restart)
-    return tabs.map((t) => ({ ...t, connected: false }));
-  } catch {
-    return [];
-  }
-}
-
-function saveTabs(tabs: SessionTab[]) {
-  localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(tabs));
-}
-
-function loadHistory(): SessionHistoryEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(history: SessionHistoryEntry[]) {
-  localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, MAX_HISTORY)));
-}
-
-async function addToHistory(tab: SessionTab) {
-  let lastMessage = "";
-  try {
-    lastMessage = await GetLastMessage(tab.directory);
-  } catch {
-    // ignore
-  }
-  const history = loadHistory();
-  // Deduplicate by directory — keep the most recent
-  const filtered = history.filter((h) => h.directory !== tab.directory);
-  filtered.unshift({
-    name: tab.name,
-    directory: tab.directory,
-    createdAt: tab.createdAt,
-    closedAt: Date.now(),
-    lastMessage,
-  });
-  saveHistory(filtered);
-}
-
 export function useSessionTabs() {
-  const [tabs, setTabs] = useState<SessionTab[]>(loadSavedTabs);
-  const [activeTabId, setActiveTabId] = useState<string | null>(() => {
-    const saved = loadSavedTabs();
-    return saved.length > 0 ? saved[0].id : null;
-  });
+  const [tabs, setTabs] = useState<SessionTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [history, setHistory] = useState<SessionHistoryEntry[]>([]);
+  const historyRef = useRef<SessionHistoryEntry[]>([]);
+  const loadedRef = useRef(false);
 
-  // Persist tabs to localStorage on every change
+  // Load sessions from Go backend on mount
   useEffect(() => {
-    saveTabs(tabs);
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+
+    GetSessions()
+      .then((sessions) => {
+        const savedTabs = (sessions.tabs || []).map(
+          (t: { id: string; name: string; directory: string; createdAt: number }) => ({
+            ...t,
+            connected: false,
+          }),
+        );
+        setTabs(savedTabs);
+        if (savedTabs.length > 0) {
+          setActiveTabId(savedTabs[0].id);
+        }
+        const h = sessions.history || [];
+        setHistory(h);
+        historyRef.current = h;
+      })
+      .catch(() => {
+        // No sessions yet
+      });
+  }, []);
+
+  // Persist tabs to Go backend on every change (skip initial empty state)
+  const initialRender = useRef(true);
+  useEffect(() => {
+    if (initialRender.current) {
+      initialRender.current = false;
+      return;
+    }
+    SaveSessions({
+      tabs: tabs.map(({ id, name, directory, createdAt }) => ({
+        id,
+        name,
+        directory,
+        createdAt,
+      })),
+      history: historyRef.current,
+      recentDirs: [...new Set(tabs.map((t) => t.directory))].slice(0, 5),
+      // biome-ignore lint/suspicious/noExplicitAny: Wails-generated SessionsData class requires convertValues but plain objects work at runtime
+    } as any).catch(() => {});
   }, [tabs]);
+
+  const saveCurrentState = useCallback(
+    (newTabs: SessionTab[], newHistory: SessionHistoryEntry[]) => {
+      SaveSessions({
+        tabs: newTabs.map(({ id, name, directory, createdAt }) => ({
+          id,
+          name,
+          directory,
+          createdAt,
+        })),
+        history: newHistory,
+        recentDirs: [...new Set(newTabs.map((t) => t.directory))].slice(0, 5),
+        // biome-ignore lint/suspicious/noExplicitAny: Wails-generated SessionsData class requires convertValues but plain objects work at runtime
+      } as any).catch(() => {});
+    },
+    [],
+  );
 
   const createTab = useCallback(async (name: string, directory: string) => {
     const sessionId = await CreateSession(name, directory, 80, 24, false);
-    addRecentDir(directory);
     const newTab: SessionTab = {
       id: sessionId,
       name,
@@ -84,23 +91,49 @@ export function useSessionTabs() {
   }, []);
 
   const reconnectTab = useCallback(async (tab: SessionTab) => {
-    const sessionId = await CreateSession(tab.name, tab.directory, 80, 24, true);
-    // Replace the old disconnected tab with the new connected one
-    setTabs((prev) =>
-      prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
-    );
-    setActiveTabId(sessionId);
-    return sessionId;
+    try {
+      const sessionId = await CreateSession(tab.name, tab.directory, 80, 24, true);
+      setTabs((prev) =>
+        prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
+      );
+      setActiveTabId(sessionId);
+      return sessionId;
+    } catch (err) {
+      console.error("reconnectTab failed:", err);
+      return "";
+    }
   }, []);
 
   const closeTab = useCallback(
     async (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
       if (tab) {
-        addToHistory(tab);
+        // Add to history
+        let lastMessage = "";
+        try {
+          lastMessage = await GetLastMessage(tab.directory);
+        } catch {
+          // ignore
+        }
+        const filtered = historyRef.current.filter((h) => h.directory !== tab.directory);
+        filtered.unshift({
+          name: tab.name,
+          directory: tab.directory,
+          createdAt: tab.createdAt,
+          closedAt: Date.now(),
+          lastMessage,
+        });
+        const newHistory = filtered.slice(0, MAX_HISTORY);
+        historyRef.current = newHistory;
+        setHistory(newHistory);
+
         if (tab.connected) {
           await CloseSession(tabId);
         }
+
+        // Save with updated history
+        const remaining = tabs.filter((t) => t.id !== tabId);
+        saveCurrentState(remaining, newHistory);
       }
       setTabs((prev) => {
         const remaining = prev.filter((t) => t.id !== tabId);
@@ -112,7 +145,7 @@ export function useSessionTabs() {
         return remaining;
       });
     },
-    [activeTabId, tabs],
+    [activeTabId, tabs, saveCurrentState],
   );
 
   const switchTab = useCallback(
@@ -120,39 +153,33 @@ export function useSessionTabs() {
       const tab = tabs.find((t) => t.id === tabId);
       if (!tab) return;
 
-      if (!tab.connected && activeTabId === tabId) {
-        // Already viewing this disconnected tab — reconnect it
+      if (!tab.connected) {
         reconnectTab(tab);
         return;
       }
 
-      // Select the tab (whether connected or not)
       setActiveTabId(tabId);
     },
-    [tabs, activeTabId, reconnectTab],
+    [tabs, reconnectTab],
   );
 
   const renameTab = useCallback((tabId: string, newName: string) => {
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, name: newName } : t)));
   }, []);
 
-  const handleSessionExit = useCallback(
-    (tabId: string) => {
-      // Mark as disconnected instead of removing
-      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, connected: false } : t)));
-      if (activeTabId === tabId) {
-        // Stay on the tab — user can see "[Session ended]" and click to resume
-      }
-    },
-    [activeTabId],
-  );
-
-  const history = loadHistory();
-
-  const clearHistoryEntry = useCallback((directory: string) => {
-    const h = loadHistory().filter((e) => e.directory !== directory);
-    saveHistory(h);
+  const handleSessionExit = useCallback((tabId: string) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, connected: false } : t)));
   }, []);
+
+  const clearHistoryEntry = useCallback(
+    (directory: string) => {
+      const newHistory = historyRef.current.filter((e) => e.directory !== directory);
+      historyRef.current = newHistory;
+      setHistory(newHistory);
+      saveCurrentState(tabs, newHistory);
+    },
+    [tabs, saveCurrentState],
+  );
 
   return {
     tabs,

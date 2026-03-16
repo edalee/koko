@@ -2,6 +2,9 @@ package main
 
 import (
 	"embed"
+	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
@@ -14,6 +17,14 @@ import (
 var assets embed.FS
 
 func main() {
+	// Log to file so we can debug Finder launches
+	configDir, _ := os.UserConfigDir()
+	logPath := filepath.Join(configDir, "koko", "koko.log")
+	_ = os.MkdirAll(filepath.Dir(logPath), 0o700)
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+		log.SetOutput(f)
+	}
+
 	tm := NewTerminalManager()
 	app := NewApp(tm)
 	gh := NewGitHubService()

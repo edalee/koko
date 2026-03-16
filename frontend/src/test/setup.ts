@@ -35,6 +35,8 @@ vi.mock("../../wailsjs/go/main/ConfigService", () => ({
   GetConfig: vi.fn().mockResolvedValue({}),
   SaveConfig: vi.fn().mockResolvedValue(undefined),
   SetSlackToken: vi.fn().mockResolvedValue(undefined),
+  GetSessions: vi.fn().mockResolvedValue({ tabs: [], history: [], recentDirs: [] }),
+  SaveSessions: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../../wailsjs/go/main/App", () => ({
