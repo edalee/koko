@@ -174,7 +174,7 @@ export default function App() {
               <div className="flex-1 min-h-0 relative">
                 {tabs.map((tab) => (
                   <div
-                    key={tab.id}
+                    key={tab.createdAt}
                     className="absolute inset-0 flex flex-col"
                     style={{ display: tab.id === activeTabId ? "flex" : "none" }}
                   >

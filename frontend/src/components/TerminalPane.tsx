@@ -17,12 +17,15 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
-  // Initialize terminal once per sessionId — onExit is accessed via ref
-  // to avoid re-creating the terminal on every parent render.
+  // Use ref for sessionId so input/resize handlers always target the current session
+  // without recreating the terminal when the ID changes during reconnect.
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
+  // Create terminal once (stable across reconnects)
   useEffect(() => {
     const container = containerRef.current;
     if (!container || termRef.current) return;
@@ -80,34 +83,20 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     termRef.current = term;
     fitRef.current = fit;
 
-    // PTY output → terminal
-    const cleanupData = EventsOn(`pty:data:${sessionId}`, (encoded: string) => {
-      const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
-      term.write(bytes);
-    });
-
-    // PTY exit
-    const cleanupExit = EventsOn(`pty:exit:${sessionId}`, () => {
-      term.writeln("\r\n\x1b[31m[Session ended]\x1b[0m");
-      onExitRef.current?.();
-    });
-
-    // User input → PTY
+    // User input → PTY (uses ref so it always targets current session)
     const onDataDisposable = term.onData((data: string) => {
-      Write(sessionId, btoa(data));
+      Write(sessionIdRef.current, btoa(data));
     });
 
-    // Binary data → PTY
     const onBinaryDisposable = term.onBinary((data: string) => {
       const bytes = new Uint8Array(data.length);
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
       }
-      Write(sessionId, btoa(String.fromCharCode(...bytes)));
+      Write(sessionIdRef.current, btoa(String.fromCharCode(...bytes)));
     });
 
     // Resize — debounce to avoid rapid SIGWINCH during drag.
-    // Only resize if dimensions actually changed to avoid scroll disruption.
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
       if (resizeTimer) clearTimeout(resizeTimer);
@@ -116,30 +105,14 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
           const dims = fitRef.current.proposeDimensions();
           if (dims && (dims.cols !== termRef.current.cols || dims.rows !== termRef.current.rows)) {
             fitRef.current.fit();
-            Resize(sessionId, dims.cols, dims.rows);
+            Resize(sessionIdRef.current, dims.cols, dims.rows);
           }
         }
       }, 50);
     });
     observer.observe(container);
 
-    // Initial resize
-    const dims = fit.proposeDimensions();
-    if (dims) {
-      Resize(sessionId, dims.cols, dims.rows);
-    }
-
-    // Replay any buffered output that arrived before we connected
-    ReplayBuffer(sessionId).then((encoded) => {
-      if (encoded) {
-        const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
-        term.write(bytes);
-      }
-    });
-
-    cleanupRef.current = () => {
-      cleanupData();
-      cleanupExit();
+    return () => {
       onDataDisposable.dispose();
       onBinaryDisposable.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
@@ -148,10 +121,42 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       termRef.current = null;
       fitRef.current = null;
     };
+  }, []); // stable — never recreated
+
+  // Subscribe to PTY events — re-subscribes when sessionId changes (reconnect)
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+
+    const cleanupData = EventsOn(`pty:data:${sessionId}`, (encoded: string) => {
+      const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
+      term.write(bytes);
+    });
+
+    const cleanupExit = EventsOn(`pty:exit:${sessionId}`, () => {
+      term.writeln("\r\n\x1b[31m[Session ended]\x1b[0m");
+      onExitRef.current?.();
+    });
+
+    // Initial resize for this session
+    if (fitRef.current) {
+      const dims = fitRef.current.proposeDimensions();
+      if (dims) {
+        Resize(sessionId, dims.cols, dims.rows);
+      }
+    }
+
+    // Replay buffered output from this session
+    ReplayBuffer(sessionId).then((encoded) => {
+      if (encoded) {
+        const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
+        term.write(bytes);
+      }
+    });
 
     return () => {
-      cleanupRef.current?.();
-      cleanupRef.current = null;
+      cleanupData();
+      cleanupExit();
     };
   }, [sessionId]);
 
@@ -166,12 +171,12 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
           fitRef.current.fit();
           const proposedDims = fitRef.current.proposeDimensions();
           if (proposedDims) {
-            Resize(sessionId, proposedDims.cols, proposedDims.rows);
+            Resize(sessionIdRef.current, proposedDims.cols, proposedDims.rows);
           }
         }
       });
     }
-  }, [active, sessionId]);
+  }, [active]);
 
   // Focus terminal when active
   useEffect(() => {
