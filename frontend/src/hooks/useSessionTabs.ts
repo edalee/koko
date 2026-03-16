@@ -20,9 +20,13 @@ export function useSessionTabs() {
 
     GetSessions()
       .then((sessions) => {
+        // Assign unique placeholder IDs — saved IDs are stale PTY session IDs
+        // that may collide after app restart (Go's nextID resets to 0).
+        let nextPlaceholder = 0;
         const savedTabs = (sessions.tabs || []).map(
           (t: { id: string; name: string; directory: string; createdAt: number }) => ({
             ...t,
+            id: `saved-${++nextPlaceholder}`,
             connected: false,
           }),
         );
@@ -90,17 +94,24 @@ export function useSessionTabs() {
     return sessionId;
   }, []);
 
+  const reconnectingRef = useRef<Set<string>>(new Set());
   const reconnectTab = useCallback(async (tab: SessionTab) => {
+    if (reconnectingRef.current.has(tab.id)) return "";
+    reconnectingRef.current.add(tab.id);
     try {
       const sessionId = await CreateSession(tab.name, tab.directory, 80, 24, true);
       setTabs((prev) =>
         prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
       );
-      setActiveTabId(sessionId);
+      // Update activeTabId to the new session ID only if this tab is still
+      // the active one (user may have switched away during the async reconnect).
+      setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
       return sessionId;
     } catch (err) {
       console.error("reconnectTab failed:", err);
       return "";
+    } finally {
+      reconnectingRef.current.delete(tab.id);
     }
   }, []);
 
@@ -153,12 +164,11 @@ export function useSessionTabs() {
       const tab = tabs.find((t) => t.id === tabId);
       if (!tab) return;
 
+      setActiveTabId(tabId);
+
       if (!tab.connected) {
         reconnectTab(tab);
-        return;
       }
-
-      setActiveTabId(tabId);
     },
     [tabs, reconnectTab],
   );

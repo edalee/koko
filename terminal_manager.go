@@ -64,20 +64,64 @@ type session struct {
 }
 
 type TerminalManager struct {
-	ctx      context.Context
-	sessions map[string]*session
-	mu       sync.Mutex
-	nextID   int
+	ctx       context.Context
+	sessions  map[string]*session
+	mu        sync.Mutex
+	nextID    int
+	loginPath string // full PATH from login shell, resolved once at startup
 }
 
 func NewTerminalManager() *TerminalManager {
-	return &TerminalManager{
+	tm := &TerminalManager{
 		sessions: make(map[string]*session),
 	}
+	tm.loginPath = resolveLoginPath()
+	return tm
+}
+
+// resolveLoginPath gets the full PATH from an interactive login shell.
+// GUI apps launched from Finder have a minimal PATH that doesn't include
+// user additions from .zshrc/.bashrc. This runs once at startup.
+func resolveLoginPath() string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/zsh"
+	}
+	out, err := exec.Command(shell, "-l", "-i", "-c", "echo $PATH").Output()
+	if err == nil {
+		if p := strings.TrimSpace(string(out)); p != "" {
+			log.Printf("[pty] resolved login PATH: %s", p)
+			return p
+		}
+	}
+	log.Printf("[pty] failed to resolve login PATH: %v", err)
+	return ""
 }
 
 func (tm *TerminalManager) setContext(ctx context.Context) {
 	tm.ctx = ctx
+}
+
+// buildEnv returns the process environment with login PATH injected and CLAUDECODE filtered.
+func (tm *TerminalManager) buildEnv() []string {
+	var env []string
+	hasPath := false
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "CLAUDECODE=") {
+			continue
+		}
+		if strings.HasPrefix(e, "PATH=") && tm.loginPath != "" {
+			env = append(env, "PATH="+tm.loginPath)
+			hasPath = true
+			continue
+		}
+		env = append(env, e)
+	}
+	if !hasPath && tm.loginPath != "" {
+		env = append(env, "PATH="+tm.loginPath)
+	}
+	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+	return env
 }
 
 // resolveClaudePath finds the absolute path to claude.
@@ -111,14 +155,8 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 		shell = "/bin/zsh"
 	}
 
-	// Filter out CLAUDECODE to avoid nested session detection.
-	var env []string
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			env = append(env, e)
-		}
-	}
-	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+	// Build environment: filter CLAUDECODE, inject login PATH + terminal vars.
+	env := tm.buildEnv()
 
 	// Resolve claude path via login shell (GUI apps have minimal PATH).
 	claudePath := resolveClaudePath()
@@ -168,7 +206,7 @@ func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (strin
 		shell = "/bin/zsh"
 	}
 
-	env := append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	env := tm.buildEnv()
 
 	cmd := exec.Command(shell, "-l")
 	cmd.Dir = dir
