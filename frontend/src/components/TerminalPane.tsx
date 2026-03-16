@@ -4,7 +4,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { ReplayBuffer, Resize, Write } from "../../wailsjs/go/main/TerminalManager";
-import { EventsOn } from "../../wailsjs/runtime/runtime";
+import { BrowserOpenURL, EventsOn } from "../../wailsjs/runtime/runtime";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPaneProps {
@@ -60,7 +60,11 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
 
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        BrowserOpenURL(uri);
+      }),
+    );
 
     term.open(container);
 
