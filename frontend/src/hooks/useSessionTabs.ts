@@ -37,19 +37,20 @@ export function useSessionTabs() {
         const h = sessions.history || [];
         setHistory(h);
         historyRef.current = h;
+        hasLoadedSessions.current = true;
       })
       .catch(() => {
-        // No sessions yet
+        // No sessions yet — still allow saving from this point
+        hasLoadedSessions.current = true;
       });
   }, []);
 
-  // Persist tabs to Go backend on every change (skip initial empty state)
-  const initialRender = useRef(true);
+  // Persist tabs to Go backend on every change.
+  // Skip until GetSessions has resolved to avoid overwriting saved data
+  // with the initial empty state (race condition on hot-reload / slow load).
+  const hasLoadedSessions = useRef(false);
   useEffect(() => {
-    if (initialRender.current) {
-      initialRender.current = false;
-      return;
-    }
+    if (!hasLoadedSessions.current) return;
     SaveSessions({
       tabs: tabs.map(({ id, name, directory, createdAt }) => ({
         id,
