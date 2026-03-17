@@ -176,19 +176,21 @@ export default function App() {
                   <div
                     key={tab.createdAt}
                     className="absolute inset-0 flex flex-col"
-                    style={{ display: tab.id === activeTabId ? "flex" : "none" }}
+                    style={{
+                      visibility: tab.id === activeTabId ? "visible" : "hidden",
+                      zIndex: tab.id === activeTabId ? 1 : 0,
+                    }}
                   >
-                    <div className="flex-1 min-h-0">
-                      {tab.connected ? (
-                        <TerminalPane
-                          sessionId={tab.id}
-                          active={tab.id === activeTabId}
-                          onExit={() => handleSessionExit(tab.id)}
-                        />
-                      ) : (
+                    <div className="flex-1 min-h-0 relative">
+                      <TerminalPane
+                        sessionId={tab.id}
+                        active={tab.id === activeTabId}
+                        onExit={() => handleSessionExit(tab.id)}
+                      />
+                      {!tab.connected && (
                         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
                         <div
-                          className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground cursor-pointer hover:text-white transition-colors"
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground cursor-pointer hover:text-white transition-colors bg-[#0f1117]/90"
                           onClick={() => switchTab(tab.id)}
                         >
                           <p className="text-sm">Session disconnected</p>

@@ -17,6 +17,10 @@ vi.mock("@xterm/xterm", () => {
     writeln = vi.fn();
     onData = vi.fn(() => ({ dispose: vi.fn() }));
     onBinary = vi.fn(() => ({ dispose: vi.fn() }));
+    onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));
+    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
+    scrollToBottom = vi.fn();
+    buffer = { active: { viewportY: 0, baseY: 0 } };
     loadAddon = vi.fn();
     dispose = vi.fn();
     focus = vi.fn();
@@ -96,13 +100,14 @@ describe("TerminalPane resize guard", () => {
     expect(Resize).not.toHaveBeenCalled();
   });
 
-  it("calls fit() on tab switch when dimensions have changed", async () => {
+  it("relies on ResizeObserver (not tab switch) to trigger fit()", async () => {
+    // With the scroll-pinning rewrite, fit() is no longer called on
+    // active prop change — ResizeObserver handles all resize detection.
     const { rerender } = render(<TerminalPane sessionId="session-1" active={false} />);
 
     fitFn.mockClear();
     (Resize as ReturnType<typeof vi.fn>).mockClear();
 
-    // Container resized while tab was hidden — proposed dims differ
     proposeDimensionsFn.mockReturnValue({ cols: 120, rows: 30 });
 
     rerender(<TerminalPane sessionId="session-1" active={true} />);
@@ -111,8 +116,8 @@ describe("TerminalPane resize guard", () => {
       await new Promise((r) => requestAnimationFrame(r));
     });
 
-    // fit() SHOULD be called — dimensions changed
-    expect(fitFn).toHaveBeenCalled();
+    // fit() should NOT be called on tab switch — ResizeObserver handles it
+    expect(fitFn).not.toHaveBeenCalled();
   });
 
   it("ResizeObserver skips fit when dimensions are unchanged", async () => {

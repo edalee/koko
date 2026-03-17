@@ -20,10 +20,12 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
-  // Use ref for sessionId so input/resize handlers always target the current session
-  // without recreating the terminal when the ID changes during reconnect.
+  // Use refs so handlers created once always access current values
+  // without recreating the terminal when props change during reconnect.
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   // Create terminal once (stable across reconnects)
   useEffect(() => {
@@ -34,6 +36,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       cursorBlink: true,
       fontSize: 13,
       scrollback: 5000,
+      scrollOnUserInput: true,
       smoothScrollDuration: 0,
       fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
       theme: {
@@ -83,8 +86,44 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     termRef.current = term;
     fitRef.current = fit;
 
-    // User input → PTY (uses ref so it always targets current session)
+    // --- Scroll pinning ---
+    // Track whether the user intentionally scrolled away from the bottom
+    // (mouse wheel / trackpad). Any keyboard input resets this, pinning
+    // the viewport back to the bottom. This sidesteps whatever internal
+    // xterm.js / WebKit behavior is displacing the viewport on key events.
+    let userScrolledAway = false;
+
+    const onWheel = () => {
+      requestAnimationFrame(() => {
+        if (termRef.current) {
+          const buf = termRef.current.buffer.active;
+          userScrolledAway = buf.viewportY < buf.baseY;
+        }
+      });
+    };
+    container.addEventListener("wheel", onWheel, { passive: true });
+
+    // After every write is parsed, snap to bottom (unless user scrolled away)
+    const onWriteParsedDisposable = term.onWriteParsed(() => {
+      if (!userScrolledAway && termRef.current) {
+        termRef.current.scrollToBottom();
+      }
+    });
+
+    // Catch scroll displacement synchronously — fires before the browser
+    // paints, eliminating the 1-frame flicker that onWriteParsed alone has.
+    let correctingScroll = false;
+    const onScrollDisposable = term.onScroll(() => {
+      if (!userScrolledAway && !correctingScroll && termRef.current) {
+        correctingScroll = true;
+        termRef.current.scrollToBottom();
+        correctingScroll = false;
+      }
+    });
+
+    // Any keyboard input = user is typing, pin to bottom
     const onDataDisposable = term.onData((data: string) => {
+      userScrolledAway = false;
       Write(sessionIdRef.current, btoa(data));
     });
 
@@ -99,6 +138,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     // Resize — debounce to avoid rapid SIGWINCH during drag.
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
+      if (!activeRef.current) return; // skip hidden tabs
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         if (fitRef.current && termRef.current) {
@@ -113,7 +153,10 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     observer.observe(container);
 
     return () => {
+      container.removeEventListener("wheel", onWheel);
       onDataDisposable.dispose();
+      onWriteParsedDisposable.dispose();
+      onScrollDisposable.dispose();
       onBinaryDisposable.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
       observer.disconnect();
@@ -123,7 +166,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     };
   }, []); // stable — never recreated
 
-  // Subscribe to PTY events — re-subscribes when sessionId changes (reconnect)
+  // Subscribe to PTY events — re-subscribes when sessionId changes (reconnect).
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -160,25 +203,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     };
   }, [sessionId]);
 
-  // Refit when becoming active — only if dimensions actually changed
-  // to avoid unnecessary PTY resize that disrupts scroll position.
-  useEffect(() => {
-    if (active && fitRef.current && termRef.current) {
-      requestAnimationFrame(() => {
-        if (!fitRef.current || !termRef.current) return;
-        const dims = fitRef.current.proposeDimensions();
-        if (dims && (dims.cols !== termRef.current.cols || dims.rows !== termRef.current.rows)) {
-          fitRef.current.fit();
-          const proposedDims = fitRef.current.proposeDimensions();
-          if (proposedDims) {
-            Resize(sessionIdRef.current, proposedDims.cols, proposedDims.rows);
-          }
-        }
-      });
-    }
-  }, [active]);
-
-  // Focus terminal when active
+  // Focus terminal when becoming active.
   useEffect(() => {
     if (active && termRef.current) {
       termRef.current.focus();
@@ -189,7 +214,14 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     <div
       ref={containerRef}
       className="h-full w-full p-1"
-      style={{ display: active ? "block" : "none" }}
+      style={{
+        visibility: active ? "visible" : "hidden",
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      }}
     />
   );
 }

@@ -78,6 +78,7 @@ export default function ClaudeModeSwitcher({ sessionId }: ClaudeModeSwitcherProp
         <button
           key={key}
           type="button"
+          tabIndex={-1}
           onClick={() => switchTo(key)}
           className={cn(
             "flex items-center gap-1.5 px-2.5 py-1 text-[11px] rounded-md transition-colors",
