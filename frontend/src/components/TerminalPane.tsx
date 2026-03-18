@@ -86,44 +86,8 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     termRef.current = term;
     fitRef.current = fit;
 
-    // --- Scroll pinning ---
-    // Track whether the user intentionally scrolled away from the bottom
-    // (mouse wheel / trackpad). Any keyboard input resets this, pinning
-    // the viewport back to the bottom. This sidesteps whatever internal
-    // xterm.js / WebKit behavior is displacing the viewport on key events.
-    let userScrolledAway = false;
-
-    const onWheel = () => {
-      requestAnimationFrame(() => {
-        if (termRef.current) {
-          const buf = termRef.current.buffer.active;
-          userScrolledAway = buf.viewportY < buf.baseY;
-        }
-      });
-    };
-    container.addEventListener("wheel", onWheel, { passive: true });
-
-    // After every write is parsed, snap to bottom (unless user scrolled away)
-    const onWriteParsedDisposable = term.onWriteParsed(() => {
-      if (!userScrolledAway && termRef.current) {
-        termRef.current.scrollToBottom();
-      }
-    });
-
-    // Catch scroll displacement synchronously — fires before the browser
-    // paints, eliminating the 1-frame flicker that onWriteParsed alone has.
-    let correctingScroll = false;
-    const onScrollDisposable = term.onScroll(() => {
-      if (!userScrolledAway && !correctingScroll && termRef.current) {
-        correctingScroll = true;
-        termRef.current.scrollToBottom();
-        correctingScroll = false;
-      }
-    });
-
-    // Any keyboard input = user is typing, pin to bottom
+    // User input → PTY (uses ref so it always targets current session)
     const onDataDisposable = term.onData((data: string) => {
-      userScrolledAway = false;
       Write(sessionIdRef.current, btoa(data));
     });
 
@@ -153,10 +117,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     observer.observe(container);
 
     return () => {
-      container.removeEventListener("wheel", onWheel);
       onDataDisposable.dispose();
-      onWriteParsedDisposable.dispose();
-      onScrollDisposable.dispose();
       onBinaryDisposable.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
       observer.disconnect();
