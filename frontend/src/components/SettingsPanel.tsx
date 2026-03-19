@@ -90,7 +90,7 @@ export default function SettingsPanel({
             </button>
           </div>
           <p className="text-[10px] text-tertiary">
-            Requires scopes: im:history, im:read, users:read
+            Requires scopes: im:history, im:read, users:read, search:read
           </p>
         </div>
 

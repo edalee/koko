@@ -115,13 +115,44 @@ func (ss *SlackService) GetMessages() ([]SlackMessage, error) {
 	}
 
 	token := cfg.SlackToken
-	// Fetch DMs
-	messages, err := ss.fetchDMs(token)
+
+	// Get authenticated user ID
+	authResp, err := ss.apiGet(token, "auth.test", nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch DMs: %w", err)
+		return nil, err
+	}
+	selfID, _ := authResp["user_id"].(string)
+	teamID, _ := authResp["team_id"].(string)
+
+	// Fetch DMs and mentions in parallel
+	type result struct {
+		msgs []SlackMessage
+		err  error
+	}
+	dmCh := make(chan result, 1)
+	mentionCh := make(chan result, 1)
+
+	go func() {
+		msgs, err := ss.fetchDMs(token, selfID, teamID)
+		dmCh <- result{msgs, err}
+	}()
+	go func() {
+		msgs, err := ss.fetchMentionsAndThreads(token, selfID, teamID)
+		mentionCh <- result{msgs, err}
+	}()
+
+	dmResult := <-dmCh
+	mentionResult := <-mentionCh
+
+	var messages []SlackMessage
+	if dmResult.err == nil {
+		messages = append(messages, dmResult.msgs...)
+	}
+	if mentionResult.err == nil {
+		messages = append(messages, mentionResult.msgs...)
 	}
 
-	fmt.Printf("[Slack] DMs: %d\n", len(messages))
+	fmt.Printf("[Slack] DMs: %d, Mentions/Threads: %d\n", len(dmResult.msgs), len(mentionResult.msgs))
 
 	// Sort by time, newest first
 	sort.Slice(messages, func(i, j int) bool {
@@ -152,7 +183,7 @@ func (ss *SlackService) GetTeamID() (string, error) {
 	return teamID, nil
 }
 
-func (ss *SlackService) fetchDMs(token string) ([]SlackMessage, error) {
+func (ss *SlackService) fetchDMs(token, selfID, teamID string) ([]SlackMessage, error) {
 	// List IM conversations
 	convResp, err := ss.apiGet(token, "conversations.list", map[string]string{
 		"types": "im",
@@ -167,9 +198,6 @@ func (ss *SlackService) fetchDMs(token string) ([]SlackMessage, error) {
 		return nil, fmt.Errorf("unexpected conversations response")
 	}
 
-	// Get team ID for deep links
-	teamID, _ := ss.getTeamID(token)
-
 	// Cache user names
 	userCache := make(map[string]string)
 
@@ -183,10 +211,12 @@ func (ss *SlackService) fetchDMs(token string) ([]SlackMessage, error) {
 		channelID, _ := conv["id"].(string)
 		userID, _ := conv["user"].(string)
 
-		// Get recent messages in this DM
+		// Fetch only the most recent message, within the last hour
+		oneHourAgo := fmt.Sprintf("%d", time.Now().Unix()-3600)
 		histResp, err := ss.apiGet(token, "conversations.history", map[string]string{
 			"channel": channelID,
-			"limit":   "3",
+			"limit":   "1",
+			"oldest":  oneHourAgo,
 		})
 		if err != nil {
 			continue
@@ -197,39 +227,107 @@ func (ss *SlackService) fetchDMs(token string) ([]SlackMessage, error) {
 			continue
 		}
 
-		// Get display name for this user
-		userName := ss.resolveUser(token, userID, userCache)
-
-		for _, m := range msgs {
-			msg, ok := m.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			text, _ := msg["text"].(string)
-			ts, _ := msg["ts"].(string)
-			senderID, _ := msg["user"].(string)
-			senderName := ss.resolveUser(token, senderID, userCache)
-
-			// Truncate text for preview
-			if len(text) > 120 {
-				text = text[:120] + "..."
-			}
-
-			unixTime := tsToUnix(ts)
-
-			messages = append(messages, SlackMessage{
-				Type:      "dm",
-				Channel:   userName,
-				ChannelID: channelID,
-				User:      senderName,
-				Text:      text,
-				Timestamp: ts,
-				TeamID:    teamID,
-				Unread:    true,
-				Time:      unixTime,
-			})
+		// Only show conversations where the most recent message is from
+		// someone else — i.e. DMs waiting for your reply.
+		latest, ok := msgs[0].(map[string]interface{})
+		if !ok {
+			continue
 		}
+		latestSender, _ := latest["user"].(string)
+		if latestSender == selfID {
+			continue // you replied last, skip
+		}
+
+		userName := ss.resolveUser(token, userID, userCache)
+		text, _ := latest["text"].(string)
+		ts, _ := latest["ts"].(string)
+		senderName := ss.resolveUser(token, latestSender, userCache)
+
+		if len(text) > 120 {
+			text = text[:120] + "..."
+		}
+
+		messages = append(messages, SlackMessage{
+			Type:      "dm",
+			Channel:   userName,
+			ChannelID: channelID,
+			User:      senderName,
+			Text:      text,
+			Timestamp: ts,
+			TeamID:    teamID,
+			Unread:    true,
+			Time:      tsToUnix(ts),
+		})
+	}
+
+	return messages, nil
+}
+
+// fetchMentionsAndThreads uses search.messages to find @mentions and thread replies
+// directed at the user within the last hour. Requires search:read scope.
+func (ss *SlackService) fetchMentionsAndThreads(token, selfID, teamID string) ([]SlackMessage, error) {
+	oneHourAgo := fmt.Sprintf("%d", time.Now().Unix()-3600)
+
+	// Search for messages that mention the user, sorted newest first
+	searchResp, err := ss.apiGet(token, "search.messages", map[string]string{
+		"query": fmt.Sprintf("<@%s> after:%s", selfID, oneHourAgo),
+		"sort":  "timestamp",
+		"count": "20",
+	})
+	if err != nil {
+		// search:read scope might not be available — fail silently
+		fmt.Printf("[Slack] search.messages failed (need search:read scope?): %v\n", err)
+		return nil, nil
+	}
+
+	messagesObj, _ := searchResp["messages"].(map[string]interface{})
+	matches, _ := messagesObj["matches"].([]interface{})
+
+	userCache := make(map[string]string)
+	var messages []SlackMessage
+
+	for _, m := range matches {
+		match, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		senderID, _ := match["user"].(string)
+		// Skip own messages
+		if senderID == selfID {
+			continue
+		}
+
+		text, _ := match["text"].(string)
+		ts, _ := match["ts"].(string)
+		channelObj, _ := match["channel"].(map[string]interface{})
+		channelID, _ := channelObj["id"].(string)
+		channelName, _ := channelObj["name"].(string)
+
+		// Determine if this is a thread reply
+		threadTS, _ := match["thread_ts"].(string)
+		msgType := "mention"
+		if threadTS != "" && threadTS != ts {
+			msgType = "thread"
+		}
+
+		senderName := ss.resolveUser(token, senderID, userCache)
+
+		if len(text) > 120 {
+			text = text[:120] + "..."
+		}
+
+		messages = append(messages, SlackMessage{
+			Type:      msgType,
+			Channel:   channelName,
+			ChannelID: channelID,
+			User:      senderName,
+			Text:      text,
+			Timestamp: ts,
+			TeamID:    teamID,
+			Unread:    true,
+			Time:      tsToUnix(ts),
+		})
 	}
 
 	return messages, nil
@@ -268,15 +366,6 @@ func (ss *SlackService) resolveUser(token, userID string, cache map[string]strin
 
 	cache[userID] = displayName
 	return displayName
-}
-
-func (ss *SlackService) getTeamID(token string) (string, error) {
-	resp, err := ss.apiGet(token, "auth.test", nil)
-	if err != nil {
-		return "", err
-	}
-	teamID, _ := resp["team_id"].(string)
-	return teamID, nil
 }
 
 func (ss *SlackService) apiGet(token, method string, params map[string]string) (map[string]interface{}, error) {

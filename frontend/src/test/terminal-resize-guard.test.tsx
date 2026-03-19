@@ -20,6 +20,10 @@ vi.mock("@xterm/xterm", () => {
     onWriteParsed = vi.fn(() => ({ dispose: vi.fn() }));
     onScroll = vi.fn(() => ({ dispose: vi.fn() }));
     scrollToBottom = vi.fn();
+    selectAll = vi.fn();
+    hasSelection = vi.fn(() => false);
+    getSelection = vi.fn(() => "");
+    attachCustomKeyEventHandler = vi.fn();
     buffer = { active: { viewportY: 0, baseY: 0 } };
     loadAddon = vi.fn();
     dispose = vi.fn();
@@ -41,6 +45,14 @@ vi.mock("@xterm/addon-fit", () => {
     dispose = vi.fn();
   }
   return { FitAddon: MockFitAddon };
+});
+
+vi.mock("@xterm/addon-serialize", () => {
+  class MockSerializeAddon {
+    serializeAsHTML = vi.fn(() => "");
+    dispose = vi.fn();
+  }
+  return { SerializeAddon: MockSerializeAddon };
 });
 
 vi.mock("@xterm/addon-webgl", () => {

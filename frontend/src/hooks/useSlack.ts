@@ -52,8 +52,8 @@ export function useSlack() {
 
   useEffect(() => {
     refresh();
-    // Poll every 30 seconds
-    intervalRef.current = setInterval(refresh, 30000);
+    // Poll every 60 seconds
+    intervalRef.current = setInterval(refresh, 60000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
