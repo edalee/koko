@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -174,6 +176,129 @@ func (gs *GitService) normalizeStatus(s string) string {
 	default:
 		return "modified"
 	}
+}
+
+// langMap maps file extensions to language names for syntax highlighting.
+var langMap = map[string]string{
+	".ts": "typescript", ".tsx": "tsx", ".js": "javascript", ".jsx": "jsx",
+	".go": "go", ".py": "python", ".rs": "rust", ".java": "java",
+	".kt": "kotlin", ".rb": "ruby", ".sh": "bash", ".bash": "bash",
+	".css": "css", ".scss": "scss", ".html": "html", ".json": "json",
+	".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".md": "markdown",
+	".sql": "sql", ".proto": "protobuf", ".dockerfile": "dockerfile",
+	".xml": "xml", ".svg": "xml", ".graphql": "graphql",
+	".c": "c", ".cpp": "cpp", ".h": "c", ".hpp": "cpp",
+	".swift": "swift", ".zig": "zig", ".lua": "lua",
+}
+
+func inferLanguage(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if lang, ok := langMap[ext]; ok {
+		return lang
+	}
+	// Handle Dockerfile without extension
+	base := strings.ToLower(filepath.Base(path))
+	if base == "dockerfile" || strings.HasPrefix(base, "dockerfile.") {
+		return "dockerfile"
+	}
+	if base == "makefile" {
+		return "makefile"
+	}
+	return ""
+}
+
+// GetFileDiff returns the diff data for a file including old/new content and unified diff hunks.
+func (gs *GitService) GetFileDiff(dir, path string, staged bool) (FileDiffData, error) {
+	if dir == "" || path == "" {
+		return FileDiffData{}, nil
+	}
+
+	lang := inferLanguage(path)
+	result := FileDiffData{
+		OldFileName: path,
+		NewFileName: path,
+		Language:    lang,
+	}
+
+	// Get the unified diff hunks
+	var hunks string
+	var err error
+	if staged {
+		hunks, err = gs.runGit(dir, "diff", "--cached", "--", path)
+	} else {
+		hunks, err = gs.runGit(dir, "diff", "--", path)
+	}
+	if err != nil {
+		// Might be a new untracked file — no diff available
+		hunks = ""
+	}
+	result.Hunks = hunks
+
+	// Count additions/deletions from hunks
+	for _, line := range strings.Split(hunks, "\n") {
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			result.Additions++
+		} else if len(line) > 0 && line[0] == '-' && !strings.HasPrefix(line, "---") {
+			result.Deletions++
+		}
+	}
+
+	// Get old content
+	if staged {
+		// For staged files, old content is from HEAD
+		old, err := gs.runGit(dir, "show", "HEAD:"+path)
+		if err != nil {
+			// New file — no HEAD version
+			result.OldContent = ""
+		} else {
+			result.OldContent = old
+		}
+	} else {
+		// For unstaged files, old content is from the index
+		old, err := gs.runGit(dir, "show", ":"+path)
+		if err != nil {
+			// File might not be in the index (untracked), try HEAD
+			old, err = gs.runGit(dir, "show", "HEAD:"+path)
+			if err != nil {
+				result.OldContent = ""
+			} else {
+				result.OldContent = old
+			}
+		} else {
+			result.OldContent = old
+		}
+	}
+
+	// Get new content from working tree
+	fullPath := filepath.Join(dir, path)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		// Deleted file
+		result.NewContent = ""
+	} else {
+		result.NewContent = string(data)
+	}
+
+	return result, nil
+}
+
+// GetFileContent returns the raw content of a file with language inference.
+func (gs *GitService) GetFileContent(dir, path string) (FileContentData, error) {
+	if dir == "" || path == "" {
+		return FileContentData{}, nil
+	}
+
+	fullPath := filepath.Join(dir, path)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return FileContentData{}, err
+	}
+
+	return FileContentData{
+		Content:  string(data),
+		Language: inferLanguage(path),
+		Path:     path,
+	}, nil
 }
 
 // mergeChanges combines committed and uncommitted changes, deduplicating by path.

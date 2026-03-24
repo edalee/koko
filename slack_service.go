@@ -211,8 +211,8 @@ func (ss *SlackService) fetchDMs(token, selfID, teamID string) ([]SlackMessage, 
 		channelID, _ := conv["id"].(string)
 		userID, _ := conv["user"].(string)
 
-		// Fetch only the most recent message, within the last hour
-		oneHourAgo := fmt.Sprintf("%d", time.Now().Unix()-3600)
+		// Fetch only the most recent message, within the last 6 hours
+		oneHourAgo := fmt.Sprintf("%d", time.Now().Unix()-6*3600)
 		histResp, err := ss.apiGet(token, "conversations.history", map[string]string{
 			"channel": channelID,
 			"limit":   "1",
@@ -264,13 +264,16 @@ func (ss *SlackService) fetchDMs(token, selfID, teamID string) ([]SlackMessage, 
 }
 
 // fetchMentionsAndThreads uses search.messages to find @mentions and thread replies
-// directed at the user within the last hour. Requires search:read scope.
+// directed at the user within the last 6 hours. Requires search:read scope.
 func (ss *SlackService) fetchMentionsAndThreads(token, selfID, teamID string) ([]SlackMessage, error) {
-	oneHourAgo := fmt.Sprintf("%d", time.Now().Unix()-3600)
+	// Slack search "after:" expects a date string (YYYY-MM-DD), not a unix timestamp.
+	// Use today's date to get recent mentions. We filter by timestamp after fetching.
+	cutoff := time.Now().Add(-6 * time.Hour)
+	afterDate := cutoff.Format("2006-01-02")
 
 	// Search for messages that mention the user, sorted newest first
 	searchResp, err := ss.apiGet(token, "search.messages", map[string]string{
-		"query": fmt.Sprintf("<@%s> after:%s", selfID, oneHourAgo),
+		"query": fmt.Sprintf("<@%s> after:%s", selfID, afterDate),
 		"sort":  "timestamp",
 		"count": "20",
 	})
@@ -300,6 +303,12 @@ func (ss *SlackService) fetchMentionsAndThreads(token, selfID, teamID string) ([
 
 		text, _ := match["text"].(string)
 		ts, _ := match["ts"].(string)
+
+		// Enforce 6-hour cutoff (search "after:" is date-granularity only)
+		if tsToUnix(ts) < float64(cutoff.Unix()) {
+			continue
+		}
+
 		channelObj, _ := match["channel"].(map[string]interface{})
 		channelID, _ := channelObj["id"].(string)
 		channelName, _ := channelObj["name"].(string)

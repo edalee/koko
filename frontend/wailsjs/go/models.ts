@@ -122,6 +122,48 @@ export namespace main {
 	        this.staged = source["staged"];
 	    }
 	}
+	export class FileContentData {
+	    content: string;
+	    language: string;
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileContentData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.language = source["language"];
+	        this.path = source["path"];
+	    }
+	}
+	export class FileDiffData {
+	    oldFileName: string;
+	    oldContent: string;
+	    newFileName: string;
+	    newContent: string;
+	    hunks: string;
+	    language: string;
+	    additions: number;
+	    deletions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileDiffData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.oldFileName = source["oldFileName"];
+	        this.oldContent = source["oldContent"];
+	        this.newFileName = source["newFileName"];
+	        this.newContent = source["newContent"];
+	        this.hunks = source["hunks"];
+	        this.language = source["language"];
+	        this.additions = source["additions"];
+	        this.deletions = source["deletions"];
+	    }
+	}
 	export class GitHubNotification {
 	    id: string;
 	    title: string;

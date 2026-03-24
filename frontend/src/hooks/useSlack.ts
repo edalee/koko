@@ -17,6 +17,7 @@ export interface SlackMessage {
 
 export function useSlack() {
   const [messages, setMessages] = useState<SlackMessage[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [configured, setConfigured] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -65,7 +66,21 @@ export function useSlack() {
     BrowserOpenURL(link);
   }, []);
 
-  const unreadCount = messages.filter((m) => m.unread).length;
+  const dismissMessage = useCallback((msg: SlackMessage) => {
+    const key = `${msg.channelId}-${msg.timestamp}`;
+    setDismissed((prev) => new Set(prev).add(key));
+  }, []);
 
-  return { messages, loading, configured, unreadCount, refresh, openMessage };
+  const visibleMessages = messages.filter((m) => !dismissed.has(`${m.channelId}-${m.timestamp}`));
+  const unreadCount = visibleMessages.length;
+
+  return {
+    messages: visibleMessages,
+    loading,
+    configured,
+    unreadCount,
+    refresh,
+    openMessage,
+    dismissMessage,
+  };
 }

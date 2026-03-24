@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -57,10 +58,11 @@ type session struct {
 	dir      string
 	ptmx     *os.File
 	cmd      *exec.Cmd
-	mu       sync.Mutex
-	done     chan struct{}
-	buf      *ringBuffer // buffered PTY output for late-connecting frontends
-	tailText *ringBuffer // last 2KB of ANSI-stripped text for state detection
+	mu           sync.Mutex
+	done         chan struct{}
+	buf          *ringBuffer // buffered PTY output for late-connecting frontends
+	tailText     *ringBuffer // last 2KB of ANSI-stripped text for state detection
+	lastOutputAt time.Time   // when PTY last produced output
 }
 
 type TerminalManager struct {
@@ -317,6 +319,7 @@ func (tm *TerminalManager) readLoop(s *session) {
 				stripped := ansiRegex.ReplaceAll(chunk, nil)
 				s.tailText.Write(stripped)
 			}
+			s.lastOutputAt = time.Now()
 			s.mu.Unlock()
 			encoded := base64.StdEncoding.EncodeToString(chunk)
 			runtime.EventsEmit(tm.ctx, "pty:data:"+s.id, encoded)
@@ -363,6 +366,13 @@ func (tm *TerminalManager) GetSessionState(sessionID string) string {
 	defer s.mu.Unlock()
 
 	if s.tailText == nil {
+		return "idle"
+	}
+
+	// Only check for approval patterns if the session produced output recently.
+	// Stale sessions (no output for >30s) should not flash — the approval prompt
+	// text stays in the ring buffer forever but isn't relevant anymore.
+	if time.Since(s.lastOutputAt) > 30*time.Minute {
 		return "idle"
 	}
 

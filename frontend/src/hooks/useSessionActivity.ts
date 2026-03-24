@@ -21,7 +21,11 @@ export function useSessionActivity(sessionIds: string[]): Map<string, SessionSta
     const cleanups: (() => void)[] = [];
 
     for (const id of sessionIds) {
-      lastActivityRef.current.set(id, Date.now());
+      // Only set initial timestamp for new sessions — don't reset existing ones
+      // (resetting would make stale sessions briefly appear "active" after re-render)
+      if (!lastActivityRef.current.has(id)) {
+        lastActivityRef.current.set(id, Date.now());
+      }
       const cancel = EventsOn(`pty:data:${id}`, () => {
         lastActivityRef.current.set(id, Date.now());
         // Immediately mark as active when output arrives

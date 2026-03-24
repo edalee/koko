@@ -63,6 +63,25 @@ type SessionsData struct {
 	RecentDirs []string              `json:"recentDirs"`
 }
 
+// FileDiffData represents diff data for a single file.
+type FileDiffData struct {
+	OldFileName string `json:"oldFileName"`
+	OldContent  string `json:"oldContent"`
+	NewFileName string `json:"newFileName"`
+	NewContent  string `json:"newContent"`
+	Hunks       string `json:"hunks"`    // raw unified diff hunks
+	Language    string `json:"language"`  // inferred from extension
+	Additions   int    `json:"additions"` // number of added lines
+	Deletions   int    `json:"deletions"` // number of removed lines
+}
+
+// FileContentData represents raw file content.
+type FileContentData struct {
+	Content  string `json:"content"`
+	Language string `json:"language"`
+	Path     string `json:"path"`
+}
+
 // GitHubPR represents a pull request from a tracked repository.
 type GitHubPR struct {
 	Repo           string `json:"repo"`

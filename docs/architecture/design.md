@@ -129,11 +129,22 @@
 - Separate from Claude sessions — utility shell for git, make, etc.
 
 ### TerminalPane
-- Full-size xterm.js, no wrapper card
+- Full-size xterm.js v6, no wrapper card
 - Theme: bg `#0f1117`, fg `rgba(255,255,255,0.92)`, cursor `#1FF2AB`
 - WebGL addon for performance
 - Hidden (not unmounted) when tab inactive — preserves scrollback
 - Calls `ReplayBuffer()` on mount to replay any missed PTY output
+- Copy: Cmd+C (trimmed plain text + HTML), Cmd+Shift+C (Markdown), right-click context menu
+- SerializeAddon for HTML serialization of terminal selections
+
+### CodeViewer
+- Full-screen overlay (reuses OverlayPage pattern) — opens on file click in right sidebar
+- `@git-diff-view/react` with Shiki syntax highlighting
+- Split / Unified toggle in header bar
+- File path, status badge (A/M/D + staged indicator), +/- stats
+- Dark theme CSS variables: mint green additions, red deletions, subtle hunk headers
+- Escape to close
+- Go backend: `GetFileDiff(dir, path, staged)` returns old/new content + hunks
 
 ### GitHubPanel
 - Real PR data via Go backend `github_service.go`
@@ -142,12 +153,16 @@
 - Clickable cards open PR in browser
 
 ### SlackPanel
-- Real Slack API: DMs via `conversations.list` + `conversations.history`, @mentions via `search.messages`
+- Real Slack API via user token (`xoxp-`): DMs + mentions + thread replies
+- DMs: `conversations.list` + `conversations.history`, scoped to last hour, only where other person spoke last
+- Mentions/threads: `search.messages` with `<@selfID>` query (requires `search:read` scope)
+- DMs and mentions fetched in parallel goroutines
 - Props-based: receives messages, loading, configured state from `useSlack` hook
 - Unconfigured state: icon + "Connect Slack" message + "Open Settings" button
 - Message cards: `.glass-card`, DM icon (mint) vs @mention icon (blue), sender, channel, preview, time ago
 - Click opens `slack://` deep link to native Slack app
-- Polls every 30 seconds
+- Polls every 60 seconds
+- Required scopes: `im:history`, `im:read`, `users:read`, `search:read`
 
 ### SettingsPanel
 - Slack token input with show/hide toggle (Eye/EyeOff icons)

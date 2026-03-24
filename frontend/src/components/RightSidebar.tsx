@@ -36,6 +36,7 @@ interface RightSidebarProps {
   onRefreshContext: () => void;
   onInjectCommand: (command: string) => void;
   hasActiveSession: boolean;
+  onFileClick?: (path: string, staged: boolean) => void;
 }
 
 function changeColor(change: FileChange): string {
@@ -156,6 +157,7 @@ export default function RightSidebar({
   onRefreshContext,
   onInjectCommand,
   hasActiveSession,
+  onFileClick,
 }: RightSidebarProps) {
   const [activeModule, setActiveModule] = useState<SidebarModule>("files");
 
@@ -242,10 +244,12 @@ export default function RightSidebar({
                 ) : (
                   <div className="py-1">
                     {fileChanges.map((change) => (
+                      // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: file click to open diff
                       <div
                         key={`${change.path}-${change.staged}`}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors group"
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors group cursor-pointer"
                         title={`${change.path}${change.staged ? " (staged)" : ""}`}
+                        onClick={() => onFileClick?.(change.path, change.staged)}
                       >
                         {statusIcon(change)}
                         <div className="flex-1 min-w-0">

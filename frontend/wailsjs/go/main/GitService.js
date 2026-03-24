@@ -9,3 +9,11 @@ export function GetBranchName(arg1) {
 export function GetFileChanges(arg1) {
   return window['go']['main']['GitService']['GetFileChanges'](arg1);
 }
+
+export function GetFileContent(arg1, arg2) {
+  return window['go']['main']['GitService']['GetFileContent'](arg1, arg2);
+}
+
+export function GetFileDiff(arg1, arg2, arg3) {
+  return window['go']['main']['GitService']['GetFileDiff'](arg1, arg2, arg3);
+}

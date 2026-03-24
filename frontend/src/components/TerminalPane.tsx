@@ -334,7 +334,7 @@ function ContextMenu({
 
   return (
     <div
-      className="fixed z-50 min-w-[180px] rounded-lg border border-white/[0.08] bg-panel/95 backdrop-blur-md shadow-xl py-1 text-[12px]"
+      className="fixed z-50 min-w-[180px] rounded-lg border border-glass-border bg-[rgba(15,17,23,0.92)] glass-overlay shadow-xl py-1 text-[12px]"
       style={{ left: x, top: y }}
     >
       {items.map((item) =>

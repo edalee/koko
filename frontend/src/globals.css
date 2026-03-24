@@ -196,6 +196,30 @@
   }
 }
 
+/* @git-diff-view dark theme — Koko palette */
+[data-component="git-diff-view"][data-theme="dark"],
+.code-viewer-wrapper [data-theme="dark"] {
+  --diff-add-line-bg-color: rgba(31, 242, 171, 0.08);
+  --diff-del-line-bg-color: rgba(244, 71, 71, 0.08);
+  --diff-add-content-highlight-bg-color: rgba(31, 242, 171, 0.2);
+  --diff-del-content-highlight-bg-color: rgba(244, 71, 71, 0.2);
+  --diff-hunk-line-bg-color: rgba(255, 255, 255, 0.03);
+  --diff-add-line-num-bg-color: rgba(31, 242, 171, 0.12);
+  --diff-del-line-num-bg-color: rgba(244, 71, 71, 0.12);
+  --diff-content-bg-color: rgba(15, 17, 23, 0.95);
+  --diff-line-num-color: rgba(255, 255, 255, 0.3);
+  --diff-content-color: rgba(255, 255, 255, 0.85);
+  --diff-hunk-content-color: rgba(255, 255, 255, 0.4);
+  --diff-hunk-line-num-color: rgba(255, 255, 255, 0.25);
+  --diff-border-color: rgba(255, 255, 255, 0.06);
+  --diff-add-widget-bg-color: rgba(31, 242, 171, 0.15);
+  --diff-add-widget-color: rgba(31, 242, 171, 0.8);
+}
+
+.code-viewer-wrapper [data-component="git-diff-view"] {
+  font-family: "SF Mono", "Fira Code", "JetBrains Mono", "Menlo", monospace;
+}
+
 /* Glass utility classes */
 @layer utilities {
   .glass-toolbar {

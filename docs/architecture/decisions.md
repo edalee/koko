@@ -211,6 +211,57 @@
   - Mode state tracked locally (cannot reliably parse Claude's TUI output)
   - Caveat: manual Shift+Tab in terminal desynchs UI state — acceptable tradeoff for v1
 
+## ADR-022: xterm.js v6 upgrade and scroll fix
+- **Date:** 2026-03-18
+- **Status:** Accepted
+- **Decision:** Upgrade xterm.js from 5.5.0 to 6.0.0 to fix viewport scroll displacement on Enter key
+- **Rationale:**
+  - The viewport would scroll up when pressing Enter in Claude's TUI (alternate buffer)
+  - Root cause: unknown WebKit/xterm.js interaction displacing `.xterm-viewport` scrollTop during key events
+  - xterm.js 6.0.0 includes: #5390/#5411 (alt buffer scroll teleport fix), #5437 (prevent page scroll in alt buffer), #5096 (complete viewport rewrite using VS Code's scrollbar), #5127 (scroll dimensions on buffer switch)
+  - Also removed `@xterm/addon-canvas` (deleted in v6 — use WebGL or DOM renderer)
+  - An `onWriteParsed` + `onScroll` scroll pinning workaround was tried but blocked intentional scrolling; removed after v6 proved sufficient
+- **Breaking changes handled:** canvas addon removal (not used), `windowsMode`/`fastScrollModifier` removal (not used)
+
+## ADR-023: Terminal copy enhancements
+- **Date:** 2026-03-18
+- **Status:** Accepted
+- **Decision:** Enhanced copy with whitespace cleanup, Markdown export, and right-click context menu
+- **Rationale:**
+  - xterm.js pads lines to terminal width with spaces — `Cmd+C` now trims trailing whitespace and collapses runs of 2+ spaces
+  - `Cmd+Shift+C` copies selection as Markdown (converts HTML formatting via SerializeAddon)
+  - `Cmd+C` also puts HTML on clipboard (via `text/html` MIME type) for rich paste into Slack/Docs
+  - Right-click context menu replaces native WebKit menu (can't extend native): Copy, Copy as Markdown, Paste, Select All, Clear Terminal
+  - `attachCustomKeyEventHandler` intercepts `Cmd+Shift+C` before xterm.js swallows it
+- **Packages:** `@xterm/addon-serialize` for `serializeAsHTML()`
+
+## ADR-024: Slack mentions/threads and unread scoping
+- **Date:** 2026-03-18
+- **Status:** Accepted (updates ADR-016)
+- **Decision:** Upgraded Slack from bot token DMs-only to user token with mentions, threads, and time-scoped inbox
+- **Changes from ADR-016:**
+  - User token (`xoxp-`) instead of bot token — sees all user's DMs
+  - Added `search:read` scope for `search.messages` API (mentions + thread replies)
+  - DMs scoped to last hour, only where other person spoke last (inbox model)
+  - Mentions/threads fetched via `search.messages` with `<@selfID>` query
+  - DMs and mentions fetched in parallel goroutines
+  - Polling interval: 60s (was 30s)
+  - Slack API doesn't expose unread counts for user tokens — abandoned `conversations.info` approach
+
+## ADR-025: Code viewer with @git-diff-view/react
+- **Date:** 2026-03-19
+- **Status:** Accepted
+- **Decision:** Click file in right sidebar → full-screen diff overlay with GitHub-style rendering
+- **Rationale:**
+  - `@git-diff-view/react` provides GitHub-faithful diff rendering with split/unified views
+  - `@git-diff-view/shiki` adds VS Code-quality syntax highlighting (TextMate grammars)
+  - Pure CSS import (`diff-view-pure.css`) avoids Tailwind conflicts
+  - Custom CSS variables match Koko's dark palette (mint green additions, red deletions)
+  - Go backend: `GetFileDiff(dir, path, staged)` handles staged/unstaged/new/deleted files
+  - Overlay pattern reuses existing glassmorphism OverlayPage component
+- **Packages:** `@git-diff-view/react`, `@git-diff-view/shiki`
+- **Plan:** `docs/plans/016-code-viewer.md`
+
 ## ADR-012: TerminalPane stability — onExit ref pattern
 - **Date:** 2026-03-08
 - **Status:** Accepted

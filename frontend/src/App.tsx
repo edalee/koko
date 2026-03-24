@@ -2,6 +2,7 @@ import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Write } from "../wailsjs/go/main/TerminalManager";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
+import CodeViewer from "./components/CodeViewer";
 import GitHubPanel from "./components/GitHubPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
 import NotificationsPanel from "./components/NotificationsPanel";
@@ -15,6 +16,7 @@ import SlackPanel from "./components/SlackPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
+import { useCodeViewer } from "./hooks/useCodeViewer";
 import { useFileChanges } from "./hooks/useFileChanges";
 import { useGitHub } from "./hooks/useGitHub";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -54,6 +56,7 @@ export default function App() {
     loading: fileChangesLoading,
     refresh: refreshFileChanges,
   } = useFileChanges(activeTab?.directory ?? null);
+  const codeViewer = useCodeViewer();
   const { activeOverlay, toggleOverlay, closeOverlay } = useOverlay();
   const {
     messages: slackMessages,
@@ -62,6 +65,7 @@ export default function App() {
     unreadCount: slackCount,
     refresh: refreshSlack,
     openMessage: openSlackMessage,
+    dismissMessage: dismissSlackMessage,
   } = useSlack();
   const {
     notifications,
@@ -256,6 +260,11 @@ export default function App() {
               onRefreshContext={refreshContext}
               onInjectCommand={handleInjectCommand}
               hasActiveSession={!!activeTabId}
+              onFileClick={(path, staged) => {
+                if (activeTab?.directory) {
+                  codeViewer.openDiff(activeTab.directory, path, staged);
+                }
+              }}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -282,6 +291,7 @@ export default function App() {
             configured={slackConfigured}
             onRefresh={refreshSlack}
             onOpenMessage={openSlackMessage}
+            onDismissMessage={dismissSlackMessage}
             onOpenSettings={() => toggleOverlay("settings")}
           />
         </OverlayPage>
@@ -314,6 +324,23 @@ export default function App() {
             onSafeWorkingChange={updateSafeWorking}
           />
         </OverlayPage>
+
+        <CodeViewer
+          open={codeViewer.isOpen}
+          file={codeViewer.file}
+          loading={codeViewer.loading}
+          viewMode={codeViewer.viewMode}
+          filePath={codeViewer.filePath}
+          staged={codeViewer.staged}
+          fileChanges={fileChanges}
+          onClose={codeViewer.close}
+          onSetViewMode={codeViewer.setViewMode}
+          onFileSelect={(path, isStaged) => {
+            if (activeTab?.directory) {
+              codeViewer.openDiff(activeTab.directory, path, isStaged);
+            }
+          }}
+        />
 
         <NewSessionDialog
           open={showNewSession}

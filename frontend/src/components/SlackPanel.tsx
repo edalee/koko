@@ -1,4 +1,4 @@
-import { AtSign, Loader2, MessageSquare, RefreshCw, Settings } from "lucide-react";
+import { AtSign, Check, Loader2, MessageSquare, RefreshCw, Settings } from "lucide-react";
 import type { SlackMessage } from "../hooks/useSlack";
 
 interface SlackPanelProps {
@@ -7,6 +7,7 @@ interface SlackPanelProps {
   configured: boolean;
   onRefresh: () => void;
   onOpenMessage: (msg: SlackMessage) => void;
+  onDismissMessage: (msg: SlackMessage) => void;
   onOpenSettings: () => void;
 }
 
@@ -25,6 +26,7 @@ export default function SlackPanel({
   configured,
   onRefresh,
   onOpenMessage,
+  onDismissMessage,
   onOpenSettings,
 }: SlackPanelProps) {
   if (!configured) {
@@ -73,13 +75,15 @@ export default function SlackPanel({
       ) : (
         <div className="flex-1 overflow-auto px-4 pb-4 space-y-2">
           {messages.map((msg) => (
-            <button
-              type="button"
+            <div
               key={`${msg.channelId}-${msg.timestamp}`}
-              onClick={() => onOpenMessage(msg)}
-              className="w-full text-left p-3 bg-white/[0.06] glass-card rounded-xl border border-border inset-highlight hover:bg-white/[0.09] hover:border-white/[0.12] transition-all cursor-pointer"
+              className="group relative p-3 bg-white/[0.06] glass-card rounded-xl border border-border inset-highlight hover:bg-white/[0.09] hover:border-white/[0.12] transition-all"
             >
-              <div className="flex items-start gap-3">
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: message card click */}
+              <div
+                className="flex items-start gap-3 cursor-pointer"
+                onClick={() => onOpenMessage(msg)}
+              >
                 <div className="size-8 rounded-lg bg-white/[0.08] flex items-center justify-center shrink-0">
                   {msg.type === "dm" ? (
                     <MessageSquare className="size-3.5 text-accent" />
@@ -96,7 +100,18 @@ export default function SlackPanel({
                   <p className="text-xs text-muted-foreground line-clamp-2">{msg.text}</p>
                 </div>
               </div>
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismissMessage(msg);
+                }}
+                className="absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-green-400 hover:bg-white/[0.08] transition-all"
+                title="Mark as read"
+              >
+                <Check className="size-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       )}
