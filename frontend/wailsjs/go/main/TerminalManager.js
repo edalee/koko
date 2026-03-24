@@ -26,12 +26,24 @@ export function GetSessions() {
   return window['go']['main']['TerminalManager']['GetSessions']();
 }
 
+export function ReadOutput(arg1) {
+  return window['go']['main']['TerminalManager']['ReadOutput'](arg1);
+}
+
 export function ReplayBuffer(arg1) {
   return window['go']['main']['TerminalManager']['ReplayBuffer'](arg1);
 }
 
 export function Resize(arg1, arg2, arg3) {
   return window['go']['main']['TerminalManager']['Resize'](arg1, arg2, arg3);
+}
+
+export function Subscribe(arg1) {
+  return window['go']['main']['TerminalManager']['Subscribe'](arg1);
+}
+
+export function Unsubscribe(arg1, arg2) {
+  return window['go']['main']['TerminalManager']['Unsubscribe'](arg1, arg2);
 }
 
 export function Write(arg1, arg2) {

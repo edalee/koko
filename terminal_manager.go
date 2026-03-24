@@ -63,6 +63,7 @@ type session struct {
 	buf          *ringBuffer // buffered PTY output for late-connecting frontends
 	tailText     *ringBuffer // last 2KB of ANSI-stripped text for state detection
 	lastOutputAt time.Time   // when PTY last produced output
+	subscribers  map[chan []byte]struct{}
 }
 
 type TerminalManager struct {
@@ -179,13 +180,14 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 	}
 
 	s := &session{
-		id:       id,
-		name:     name,
-		dir:      dir,
-		ptmx:     ptmx,
-		cmd:      cmd,
-		done:     make(chan struct{}),
-		tailText: newRingBuffer(2048),
+		id:          id,
+		name:        name,
+		dir:         dir,
+		ptmx:        ptmx,
+		cmd:         cmd,
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
 	}
 
 	tm.mu.Lock()
@@ -223,13 +225,14 @@ func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (strin
 	}
 
 	s := &session{
-		id:   id,
-		name: "Quick Terminal",
-		dir:  dir,
-		ptmx: ptmx,
-		cmd:  cmd,
-		done: make(chan struct{}),
-		buf:  newRingBuffer(64 * 1024),
+		id:          id,
+		name:        "Quick Terminal",
+		dir:         dir,
+		ptmx:        ptmx,
+		cmd:         cmd,
+		done:        make(chan struct{}),
+		buf:         newRingBuffer(64 * 1024),
+		subscribers: make(map[chan []byte]struct{}),
 	}
 
 	tm.mu.Lock()
@@ -320,6 +323,14 @@ func (tm *TerminalManager) readLoop(s *session) {
 				s.tailText.Write(stripped)
 			}
 			s.lastOutputAt = time.Now()
+			// Fan out to API subscribers (non-blocking)
+			for ch := range s.subscribers {
+				select {
+				case ch <- append([]byte(nil), chunk...):
+				default:
+					// Slow subscriber, drop
+				}
+			}
 			s.mu.Unlock()
 			encoded := base64.StdEncoding.EncodeToString(chunk)
 			runtime.EventsEmit(tm.ctx, "pty:data:"+s.id, encoded)
@@ -395,6 +406,45 @@ func (tm *TerminalManager) GetSessionState(sessionID string) string {
 	}
 
 	return "idle"
+}
+
+// Subscribe returns a channel that receives raw PTY output for the given session.
+// Returns nil if the session doesn't exist.
+func (tm *TerminalManager) Subscribe(sessionID string) chan []byte {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return nil
+	}
+	ch := make(chan []byte, 256)
+	s.mu.Lock()
+	s.subscribers[ch] = struct{}{}
+	s.mu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel from a session.
+func (tm *TerminalManager) Unsubscribe(sessionID string, ch chan []byte) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	delete(s.subscribers, ch)
+	s.mu.Unlock()
+}
+
+// ReadOutput returns the recent ANSI-stripped text from a session's tail buffer.
+func (tm *TerminalManager) ReadOutput(sessionID string) (string, error) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tailText == nil {
+		return "", nil
+	}
+	return string(s.tailText.Bytes()), nil
 }
 
 func (tm *TerminalManager) getSession(id string) (*session, error) {

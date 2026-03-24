@@ -140,7 +140,7 @@
 - **Status:** Accepted
 - **Decision:** Real Slack DM + @mention fetching using a user token (`xoxp-`/`xoxe.xoxp-`), stored in `~/.config/koko/config.json` with `0600` permissions. Settings overlay for token configuration with test/debug tools.
 - **Rationale:**
-  - Bot token scopes: `im:history`, `im:read`, `users:read`
+  - User token scopes: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
   - Slack deprecated broad `search:read` — granular `search:read.im`/`search:read.mpim` only cover DMs/group DMs (redundant with direct conversations API)
   - Channel @mentions dropped for v1 — would need Events API (requires webhook server) or `channels:history` polling
   - Config file uses restrictive permissions since it contains secrets
@@ -275,3 +275,45 @@
   - `CLAUDECODE` env var must be stripped — Claude Code refuses to start inside another session
   - GUI apps on macOS have minimal PATH — use `zsh -l -c "exec claude"` to get login shell PATH
   - WebGL addon needs `onContextLoss` handler or renderer crashes silently
+
+## ADR-026: Remote access via HTTP API, MCP, Slack commands, and CLI
+- **Date:** 2026-03-24
+- **Status:** Accepted
+- **Decision:** Expose Koko's session management over HTTP/WebSocket API on localhost, with MCP server for Claude Code integration, Slack bot DM commands, and a standalone CLI companion binary.
+- **Rationale:**
+  - Koko only worked through the local webview — no way to interact from other tools/devices
+  - HTTP API (`api_server.go`) on port 19876, Bearer token auth (auto-generated 32-byte hex key)
+  - WebSocket streaming (`/api/sessions/:id/stream`) for real-time PTY output to external consumers
+  - Subscriber fan-out in `readLoop` — non-blocking channel send to all subscribers, slow consumers drop data
+  - MCP server (`koko mcp` subcommand) communicates via stdio JSON-RPC, proxies to HTTP API
+  - Auto-registers in `~/.claude/settings.json` on app startup
+  - Slack commands poll bot DMs every 5s, respond via `chat.postMessage` (needs `chat:write` scope)
+  - CLI companion (`cmd/koko-cli/`) reads `cli.json` for API host/key, supports `tail` via WebSocket
+  - API listens only on `127.0.0.1` (localhost) — not exposed to network
+  - `cli.json` written by app for CLI/MCP to discover connection details
+- **Performance considerations:**
+  - Subscriber channels buffered to 256 messages — prevents backpressure from blocking PTY reads
+  - Non-blocking fan-out (`select/default`) drops data for slow consumers rather than blocking
+  - WebSocket handler has a read goroutine to detect client disconnect promptly
+  - Slack polling at 5s intervals to avoid rate limits
+- **Security:**
+  - API: localhost-only + Bearer token auth (auto-generated 32-byte hex key)
+  - Slack bot: `SlackOwnerID` config field restricts command processing to a single Slack user — messages from anyone else silently dropped. Without this, any workspace member could read session output and send input.
+  - MCP: inherits API auth via `cli.json`
+- **Files:** `api_server.go`, `mcp_server.go`, `mcp_tools.go`, `slack_commands.go`, `cmd/koko-cli/`
+- **Tests:** `api_server_test.go`, `mcp_server_test.go`, `slack_commands_test.go`, `config_service_test.go`, `terminal_manager_test.go`
+- **Plan:** `docs/plans/017-remote-api.md`
+
+## ADR-027: Slack bot simplification — remove awareness panel
+- **Date:** 2026-03-25
+- **Status:** Accepted (supersedes ADR-016, ADR-024)
+- **Decision:** Remove the Slack awareness panel (DMs, @mentions sidebar). Keep only the bot command handler with a dedicated bot token (`xoxb-`). Owner-only access via `SlackOwnerID` config field.
+- **Rationale:**
+  - Awareness panel used a user token (`xoxp-`) which made the "bot" indistinguishable from the user — every DM got treated as a command
+  - Bot token gives Koko its own Slack identity — users DM the bot intentionally
+  - No prefix needed (was `koko <cmd>`) since the bot's DM channel is purpose-built
+  - Scopes reduced from 5 (`im:history`, `im:read`, `users:read`, `search:read`, `chat:write`) to 3 (`im:history`, `im:read`, `chat:write`)
+  - `SlackOwnerID` prevents other workspace members from controlling sessions — silently drops non-owner messages
+  - Removed ~400 lines: `slack_service.go`, `SlackPanel.tsx`, `useSlack.ts`
+- **Setup:** `docs/references/slack-bot-setup.md`
+- **Plan:** `docs/plans/018-slack-bot-simplification.md`

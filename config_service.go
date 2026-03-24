@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -24,9 +26,12 @@ type SafeWorkingConfig struct {
 // AppConfig holds all persisted application settings.
 type AppConfig struct {
 	SlackToken   string            `json:"slackToken"`
+	SlackOwnerID string            `json:"slackOwnerId"` // only respond to this Slack user ID
 	GitHubRepos  []string          `json:"githubRepos"`
-	SlackEnabled bool              `json:"slackEnabled"`
 	SafeWorking  SafeWorkingConfig `json:"safeWorking"`
+	APIPort      int               `json:"apiPort"`
+	APIKey       string            `json:"apiKey"`
+	APIEnabled   bool              `json:"apiEnabled"`
 }
 
 // ConfigService manages reading and writing the app config file.
@@ -76,15 +81,51 @@ func (cs *ConfigService) SaveConfig(config AppConfig) error {
 	return os.WriteFile(cs.filePath, data, 0o600)
 }
 
-// SetSlackToken updates just the Slack token.
-func (cs *ConfigService) SetSlackToken(token string) error {
+// EnsureAPIKey generates an API key if one doesn't exist and sets default port.
+// Returns the current config after ensuring defaults.
+func (cs *ConfigService) EnsureAPIKey() AppConfig {
 	cs.mu.Lock()
 	cfg := cs.config
+	changed := false
+
+	if cfg.APIPort == 0 {
+		cfg.APIPort = 19876
+		changed = true
+	}
+	if cfg.APIKey == "" {
+		b := make([]byte, 32)
+		_, _ = rand.Read(b)
+		cfg.APIKey = hex.EncodeToString(b)
+		cfg.APIEnabled = true
+		changed = true
+	}
+	if changed {
+		cs.config = cfg
+	}
 	cs.mu.Unlock()
 
-	cfg.SlackToken = token
-	cfg.SlackEnabled = token != ""
-	return cs.SaveConfig(cfg)
+	if changed {
+		_ = cs.SaveConfig(cfg)
+		_ = cs.WriteCLIConfig(cfg)
+	}
+	return cfg
+}
+
+// WriteCLIConfig writes a minimal config file for the CLI companion at ~/.config/koko/cli.json.
+func (cs *ConfigService) WriteCLIConfig(cfg AppConfig) error {
+	configDir, _ := os.UserConfigDir()
+	cliPath := filepath.Join(configDir, "koko", "cli.json")
+	_ = os.MkdirAll(filepath.Dir(cliPath), 0o700)
+
+	cliCfg := map[string]interface{}{
+		"host": fmt.Sprintf("127.0.0.1:%d", cfg.APIPort),
+		"key":  cfg.APIKey,
+	}
+	data, err := json.MarshalIndent(cliCfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cliPath, data, 0o600)
 }
 
 func (cs *ConfigService) load() {

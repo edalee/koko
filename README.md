@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A desktop workspace for Claude Code</strong><br/>
-  Run multiple Claude sessions side-by-side with GitHub, Slack, and git awareness — all in one window.
+  Run multiple Claude sessions side-by-side with GitHub PRs, git awareness, and remote access — all in one window.
 </p>
 
 <p align="center">
@@ -25,20 +25,20 @@
 
 ## What is Kõkõ?
 
-Kõkõ (named after the [Tui bird](https://en.wikipedia.org/wiki/Tui_(bird))) is a native desktop app that wraps Claude Code's interactive terminal in a purpose-built workspace. Instead of switching between your terminal, GitHub, and Slack, Kõkõ keeps everything you need visible while you work.
+Kõkõ (named after the [Tui bird](https://en.wikipedia.org/wiki/Tui_(bird))) is a native desktop app that wraps Claude Code in a purpose-built workspace. Instead of juggling your terminal, GitHub, and Slack, Kõkõ keeps everything visible while you work.
 
-Each session launches Claude Code in a directory you choose. The left sidebar shows your open sessions, and the right sidebar surfaces GitHub PRs, Slack DMs, git file changes, and session context — so you never lose context.
+Each session launches Claude Code in a directory you choose. The left sidebar shows your open sessions, and the right sidebar surfaces GitHub PRs, git file changes, and session context — so you never lose focus. A built-in API server lets you control sessions remotely from Claude Code (via MCP), a Slack bot, or the CLI.
 
 ## Features
 
 ### Claude Code Sessions
 - **Named sessions** — Each session defaults to the directory name, or give it a custom name
-- **Full interactive TUI** — Claude Code renders natively in xterm.js with WebGL
+- **Full interactive TUI** — Claude Code renders natively in xterm.js v6 with WebGL
 - **Session persistence** — Sessions survive app restarts; reconnect with `claude --continue`
 - **Session history** — Recently closed sessions shown in the new session dialog with last message preview
 - **Context display** — Live context window usage percentage and model name per session
 - **Approval detection** — Amber pulse on session icons when Claude is waiting for tool approval
-- **Clipboard support** — Full Cmd+C/V copy-paste in terminal sessions
+- **Clipboard support** — `Cmd+C` (plain + HTML), `Cmd+Shift+C` (Markdown), right-click context menu
 - **Keyboard shortcuts** — `Cmd+N` new session, `Cmd+W` close, `Cmd+1-9` switch
 
 ### Session Context
@@ -50,15 +50,18 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 ### Awareness Panels
 - **GitHub PRs** — Live PR list from your repos with review status, approve/merge actions
 - **GitHub Notifications** — Unread notifications with participating/all filter, mark-as-read
-- **Slack DMs** — Unread direct messages via bot token, deep-links to Slack app
-- **File Changes** — Git diff for the active session's directory (staged/unstaged)
+- **File Changes** — Git diff for the active session's directory (staged/unstaged), click to view full diff
+- **Code Viewer** — GitHub-style split/unified diff with syntax highlighting
+
+### Remote Access
+- **HTTP API** — Control sessions, read output, and stream terminal data over REST/WebSocket on localhost
+- **MCP Server** — Claude Code can interact with Koko sessions as tools (`koko mcp`)
+- **Slack Bot** — DM the bot: `sessions`, `status`, `send <id> <text>` — owner-only access
+- **CLI Companion** — `koko-cli sessions`, `koko-cli tail <id>`, `koko-cli send <id> <text>`
 
 ### Safe Working
-
-Kõkõ includes built-in features to help you maintain healthy working habits:
-
-- **Quiet Hours** — Set a time window (e.g. 23:00–07:00) when the app blocks access with a full-screen overlay. A countdown shows when work resumes. Delay 30 minutes if you're wrapping up.
-- **Break Reminders** — Configure a work/break cycle (e.g. 90 min work, 15 min break). When the timer fires, a visual overlay with a circular progress ring nudges you to step away. Skip if you're in flow, but you'll be reminded again next cycle.
+- **Quiet Hours** — Set a time window (e.g. 23:00–07:00) when the app blocks access with a full-screen overlay
+- **Break Reminders** — Configure a work/break cycle (e.g. 90 min work, 15 min break) with visual nudges
 
 <p align="center">
   <img src="docs/screenshots/quiet-hours.png" alt="Kõkõ — Quiet hours blocker encouraging rest" width="800" />
@@ -123,10 +126,11 @@ npm install -g @anthropic-ai/claude-code
 
 You also need an Anthropic API key or active Claude subscription configured for Claude Code.
 
-### Optional: GitHub & Slack
+### Optional Integrations
 
 - **GitHub PRs** — Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`)
-- **Slack DMs** — Requires a Slack bot token with `im:history`, `im:read`, `users:read` scopes (configure in Settings)
+- **Slack Bot** — Create a Slack app with bot scopes `im:history`, `im:read`, `chat:write` — see [Slack Bot Setup](docs/references/slack-bot-setup.md)
+- **CLI Companion** — Build with `make build-cli`, reads config from `~/Library/Application Support/koko/cli.json`
 
 ## Build from Source
 
@@ -143,6 +147,9 @@ make install-fe
 make build
 cp -R build/bin/Koko.app /Applications/
 
+# Build CLI companion
+make build-cli
+
 # Or run in development mode (hot reload)
 make dev
 
@@ -157,30 +164,41 @@ Locally-built binaries are not flagged by XProtect, so the app will persist acro
 Kõkõ is built with [Wails v2](https://wails.io/) — a Go backend connected to a React frontend running in a native webview.
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Kõkõ Window                                    │
-│                                                 │
-│  ┌──────┐  ┌──────────────────┐  ┌───────────┐  │
-│  │      │  │                  │  │  File      │  │
-│  │  S   │  │   Claude Code    │  │  Changes   │  │
-│  │  e   │  │   Terminal       │  ├───────────┤  │
-│  │  s   │  │   (xterm.js)     │  │  Session   │  │
-│  │  s   │  │                  │  │  Context   │  │
-│  │  i   │  │                  │  ├───────────┤  │
-│  │  o   │  ├──────────────────┤  │  Subagent  │  │
-│  │  n   │  │  Mode │ Ctx: 42% │  │  Monitor   │  │
-│  │  s   │  │                  │  │            │  │
-│  └──────┘  └──────────────────┘  └───────────┘  │
-│  ┌──────────────────────────────────────────┐   │
-│  │  Quick Terminal (Cmd+`)                  │   │
-│  └──────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
+                  ┌──────────────────────────────┐
+                  │         Kõkõ (Wails)          │
+                  │                               │
+                  │  ┌───────────────────────────┐│
+                  │  │  Go Backend               ││
+                  │  │  PTY sessions, GitHub,    ││
+                  │  │  git, config, Slack bot   ││
+                  │  └─────────┬─────────────────┘│
+                  │            │ Wails IPC         │
+                  │  ┌─────────▼─────────────────┐│
+                  │  │  React Frontend           ││
+                  │  │  xterm.js, panels, overlays││
+                  │  └───────────────────────────┘│
+                  │                               │
+                  │  ┌───────────────────────────┐│
+                  │  │  API Server (:19876)      ││
+                  │  │  HTTP + WebSocket         ││
+                  │  └────────┬──────────────────┘│
+                  └───────────┼───────────────────┘
+                       ▲      │      ▲         ▲
+                       │      │      │         │
+                  Claude Code │  Slack bot   koko-cli
+                  (MCP stdio) │  (polling)   (HTTP)
+                              ▼
+                        All services
 ```
 
-- **Go backend** manages PTY sessions, GitHub API calls (via `gh`), Slack API, git operations, Claude CLI parsing, and app config
+- **Go backend** manages PTY sessions, GitHub API calls (via `gh`), git operations, Slack bot, Claude CLI parsing, and app config
 - **React frontend** renders xterm.js terminals, glassmorphism panels, and overlay pages
 - **Wails IPC** bridges Go ↔ JavaScript with type-safe bindings (Go structs become TypeScript classes)
 - **PTY sessions** stream base64-encoded terminal data over Wails events
+- **API server** exposes sessions, output, and git changes over HTTP/WebSocket for remote access
+- **MCP server** (`koko mcp`) lets Claude Code interact with Koko sessions as tools
+- **Slack bot** listens for DMs from the configured owner and responds with session data
+- **Go tests** cover API server, auth, MCP protocol, Slack commands, config, and subscriber fan-out
 - **Vitest** tests guard against terminal resize and state regressions
 
 ## Tech Stack
@@ -190,26 +208,39 @@ Kõkõ is built with [Wails v2](https://wails.io/) — a Go backend connected to
 | Desktop shell | Wails v2 |
 | Backend | Go 1.24 |
 | Frontend | React 19, TypeScript |
-| Terminal | xterm.js v5 + WebGL |
+| Terminal | xterm.js v6 + WebGL |
 | Styling | Tailwind CSS v4, OKLCH dark theme |
-| Testing | Vitest, React Testing Library |
+| Testing | Go test, Vitest, React Testing Library |
+| Remote API | net/http + gorilla/websocket |
+| MCP | JSON-RPC 2.0 over stdio |
+| CLI | koko-cli (Go, standalone binary) |
 | Icons | Lucide React |
 | Panels | react-resizable-panels |
+| Code viewer | @git-diff-view/react + Shiki |
 | PTY | creack/pty |
 
 ## Project Structure
 
 ```
-main.go                    Wails entry point + macOS Edit menu
-app.go                     App lifecycle, update checker, status line
-terminal_manager.go        PTY session management, spawns claude per session
+main.go                    Wails entry point, MCP subcommand detection
+app.go                     App lifecycle, API server, MCP registration, status line
+terminal_manager.go        PTY session management, subscriber fan-out
+api_server.go              HTTP/WebSocket API server (Bearer auth)
+mcp_server.go              MCP stdio server (JSON-RPC 2.0)
+mcp_tools.go               MCP tool definitions and dispatch
+slack_commands.go           Slack bot DM command handler (owner-only)
 claude_service.go          MCP servers, agents, commands, plugin skills
 github_service.go          GitHub PR + notification fetching via gh CLI
-git_service.go             Git file changes + branch info
-slack_service.go           Slack DM fetching via bot token
-config_service.go          App config persistence
+git_service.go             Git file changes, branch info, file diffs
+config_service.go          App config + API key + Slack bot persistence
 process_monitor.go         Child process tree scanning for subagents
 types.go                   Shared Go types
+*_test.go                  Go tests (API, MCP, Slack commands, config, subscriber)
+
+cmd/koko-cli/              CLI companion binary
+  main.go                  Subcommand dispatch (sessions, status, send, output, tail, files)
+  client.go                HTTP + WebSocket client
+  config.go                Reads ~/Library/Application Support/koko/cli.json
 
 frontend/src/
   App.tsx                  App shell with session sidebar + overlay routing
@@ -221,11 +252,11 @@ frontend/src/
     TerminalPane.tsx       xterm.js terminal wrapper (one per session)
     QuickTerminal.tsx      Per-session slide-up zsh shell
     ClaudeModeSwitcher.tsx Context usage bar + mode buttons
+    CodeViewer.tsx         GitHub-style split/unified diff overlay
     GitHubPanel.tsx        PR cards with approve/merge actions
-    SlackPanel.tsx         DM list with deep links
     NotificationsPanel.tsx GitHub notifications with filter + mark-read
     NewSessionDialog.tsx   Session creation with history + directory picker
-    SettingsPanel.tsx      App configuration (Slack, safe working)
+    SettingsPanel.tsx      Slack bot, safe working, remote API config
     SafeWorkingOverlay.tsx Quiet hours + break reminder overlays
     OverlayPage.tsx        Glassmorphism floating overlay wrapper
   hooks/
@@ -233,10 +264,10 @@ frontend/src/
     useSessionActivity.ts  PTY activity monitoring + approval detection
     useSessionContext.ts   MCP servers, agents, commands fetching
     useFileChanges.ts      Git diff polling for active session
+    useCodeViewer.ts       Diff data fetching + view mode state
     useSubagents.ts        Child process tree polling
     useGitHub.ts           PR fetching
     useNotifications.ts    GitHub notification fetching
-    useSlack.ts            Slack DM fetching
     useSafeWorking.ts      Quiet hours + break timer logic
     useOverlay.ts          Floating overlay page management
     useKeyboardShortcuts.ts  Cmd+N/W/1-9 bindings
@@ -246,6 +277,11 @@ frontend/src/
     terminal-resize-guard.test.tsx  Scroll position preservation tests
     quick-terminal-state.test.tsx   Per-session QT state tests
     session-activity.test.ts        Activity tracking tests
+
+docs/
+  plans/                   Implementation plans (001-018)
+  architecture/            ADRs and design system
+  references/              Setup guides (Slack bot)
 ```
 
 ## License

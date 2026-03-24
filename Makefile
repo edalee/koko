@@ -1,4 +1,4 @@
-.PHONY: dev build test lint lint-fe typecheck check clean install-fe setup
+.PHONY: dev build build-cli test lint lint-fe typecheck check clean install-fe setup
 
 WAILS := $(HOME)/go/bin/wails
 
@@ -7,6 +7,9 @@ dev:
 
 build:
 	$(WAILS) build
+
+build-cli:
+	cd cmd/koko-cli && go build -o ../../build/bin/koko-cli .
 
 test:
 	go test ./...

@@ -1,12 +1,10 @@
-import { Check, Eye, EyeOff, Loader2, Zap } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { GetConfig, SetSlackToken } from "../../wailsjs/go/main/ConfigService";
-import { TestConnection } from "../../wailsjs/go/main/SlackService";
+import { GetConfig, SaveConfig } from "../../wailsjs/go/main/ConfigService";
 import type { SafeWorkingConfig } from "../hooks/useSafeWorking";
 import { cn } from "../lib/utils";
 
 interface SettingsPanelProps {
-  onTokenSaved?: () => void;
   safeWorkingConfig: SafeWorkingConfig;
   onSafeWorkingChange: (config: SafeWorkingConfig) => void;
 }
@@ -18,16 +16,18 @@ const BREAK_PRESETS = [
 ];
 
 export default function SettingsPanel({
-  onTokenSaved,
   safeWorkingConfig,
   onSafeWorkingChange,
 }: SettingsPanelProps) {
   const [slackToken, setSlackToken] = useState("");
+  const [slackOwnerID, setSlackOwnerID] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [apiEnabled, setApiEnabled] = useState(true);
+  const [apiPort, setApiPort] = useState(19876);
+  const [apiKey, setApiKey] = useState("");
+  const [keyCopied, setKeyCopied] = useState(false);
 
   useEffect(() => {
     GetConfig()
@@ -35,6 +35,12 @@ export default function SettingsPanel({
         if (config.slackToken) {
           setSlackToken(config.slackToken);
         }
+        if (config.slackOwnerId) {
+          setSlackOwnerID(config.slackOwnerId);
+        }
+        setApiEnabled(config.apiEnabled ?? true);
+        setApiPort(config.apiPort || 19876);
+        setApiKey(config.apiKey || "");
       })
       .catch(() => {});
   }, []);
@@ -43,31 +49,33 @@ export default function SettingsPanel({
     setSaving(true);
     setSaved(false);
     try {
-      await SetSlackToken(slackToken.trim());
+      const config = await GetConfig();
+      config.slackToken = slackToken.trim();
+      config.slackOwnerId = slackOwnerID.trim();
+      await SaveConfig(config);
       setSaved(true);
-      onTokenSaved?.();
       setTimeout(() => setSaved(false), 2000);
     } catch {
       // ignore
     } finally {
       setSaving(false);
     }
-  }, [slackToken, onTokenSaved]);
+  }, [slackToken]);
 
   return (
     <div className="p-4 space-y-6">
-      {/* Slack */}
+      {/* Slack Bot */}
       <div className="space-y-3">
         <div>
-          <h4 className="text-sm text-white font-medium">Slack Integration</h4>
+          <h4 className="text-sm text-white font-medium">Slack Bot</h4>
           <p className="text-xs text-muted-foreground mt-1">
-            Enter a Slack user token (xoxp-...) to see DMs and @mentions.
+            DM the bot to control Koko sessions from Slack.
           </p>
         </div>
 
         <div className="space-y-2">
           <label htmlFor="slack-token" className="text-xs text-muted-foreground">
-            User Token
+            Bot Token
           </label>
           <div className="relative">
             <input
@@ -75,7 +83,7 @@ export default function SettingsPanel({
               type={showToken ? "text" : "password"}
               value={slackToken}
               onChange={(e) => setSlackToken(e.target.value)}
-              placeholder="xoxp-..."
+              placeholder="xoxb-..."
               className="w-full px-3 py-2 pr-10 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSave();
@@ -90,7 +98,24 @@ export default function SettingsPanel({
             </button>
           </div>
           <p className="text-[10px] text-tertiary">
-            Requires scopes: im:history, im:read, users:read, search:read
+            Bot token scopes: im:history, im:read, chat:write
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="slack-owner" className="text-xs text-muted-foreground">
+            Your Slack Member ID
+          </label>
+          <input
+            id="slack-owner"
+            type="text"
+            value={slackOwnerID}
+            onChange={(e) => setSlackOwnerID(e.target.value)}
+            placeholder="U02F4AZV2"
+            className="w-full px-3 py-2 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
+          />
+          <p className="text-[10px] text-tertiary">
+            Only respond to DMs from this user. Find in Slack profile → ⋯ → Copy member ID.
           </p>
         </div>
 
@@ -108,36 +133,7 @@ export default function SettingsPanel({
             ) : null}
             <span className="text-white">{saved ? "Saved" : "Save Token"}</span>
           </button>
-
-          <button
-            type="button"
-            onClick={async () => {
-              setTesting(true);
-              setTestResult(null);
-              try {
-                const result = await TestConnection();
-                setTestResult(result);
-              } catch (err) {
-                setTestResult(`Error: ${err}`);
-              } finally {
-                setTesting(false);
-              }
-            }}
-            disabled={testing || !slackToken.trim()}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-50"
-          >
-            {testing ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
-            <span className="text-white">Test</span>
-          </button>
         </div>
-
-        {testResult && (
-          <pre
-            className={`text-xs whitespace-pre-wrap font-mono p-2 rounded-lg bg-white/[0.04] ${testResult.startsWith("Error") ? "text-red-400" : "text-accent"}`}
-          >
-            {testResult}
-          </pre>
-        )}
       </div>
 
       {/* Safe Working */}
@@ -298,6 +294,100 @@ export default function SettingsPanel({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Remote API */}
+      <div className="space-y-3 pt-3 border-t border-white/[0.06]">
+        <div>
+          <h4 className="text-sm text-white font-medium">Remote API</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            HTTP/WebSocket API for MCP, Slack commands, and CLI access.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <label htmlFor="api-toggle" className="text-xs text-white/80">
+            Enabled
+          </label>
+          <button
+            id="api-toggle"
+            type="button"
+            onClick={async () => {
+              const next = !apiEnabled;
+              setApiEnabled(next);
+              const config = await GetConfig();
+              config.apiEnabled = next;
+              await SaveConfig(config);
+            }}
+            className={cn(
+              "w-8 h-[18px] rounded-full transition-colors relative",
+              apiEnabled ? "bg-accent" : "bg-white/[0.12]",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
+                apiEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
+              )}
+            />
+          </button>
+        </div>
+
+        {apiEnabled && (
+          <>
+            <div className="space-y-1">
+              <label htmlFor="api-port" className="text-[10px] text-tertiary">
+                Port
+              </label>
+              <input
+                id="api-port"
+                type="number"
+                value={apiPort}
+                onChange={async (e) => {
+                  const port = Number.parseInt(e.target.value, 10) || 19876;
+                  setApiPort(port);
+                  const config = await GetConfig();
+                  config.apiPort = port;
+                  await SaveConfig(config);
+                }}
+                className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums font-mono"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="api-key-display" className="text-[10px] text-tertiary">
+                API Key
+              </label>
+              <div className="flex items-center gap-2">
+                <code
+                  id="api-key-display"
+                  className="flex-1 px-2 py-1 text-[10px] bg-white/[0.04] border border-white/[0.06] rounded-md text-white/60 font-mono truncate"
+                >
+                  {apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-8)}` : "generating..."}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(apiKey);
+                    setKeyCopied(true);
+                    setTimeout(() => setKeyCopied(false), 2000);
+                  }}
+                  className="p-1.5 rounded-md border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+                  title="Copy API key"
+                >
+                  {keyCopied ? (
+                    <Check className="size-3 text-accent" />
+                  ) : (
+                    <Copy className="size-3 text-muted-foreground" />
+                  )}
+                </button>
+              </div>
+              <p className="text-[10px] text-tertiary">
+                Used by MCP server and koko-cli. Auto-generated on first run.
+              </p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Config file location */}

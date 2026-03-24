@@ -38,20 +38,26 @@ export namespace main {
 	}
 	export class AppConfig {
 	    slackToken: string;
+	    slackOwnerId: string;
 	    githubRepos: string[];
-	    slackEnabled: boolean;
 	    safeWorking: SafeWorkingConfig;
-	
+	    apiPort: number;
+	    apiKey: string;
+	    apiEnabled: boolean;
+
 	    static createFrom(source: any = {}) {
 	        return new AppConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.slackToken = source["slackToken"];
+	        this.slackOwnerId = source["slackOwnerId"];
 	        this.githubRepos = source["githubRepos"];
-	        this.slackEnabled = source["slackEnabled"];
 	        this.safeWorking = this.convertValues(source["safeWorking"], SafeWorkingConfig);
+	        this.apiPort = source["apiPort"];
+	        this.apiKey = source["apiKey"];
+	        this.apiEnabled = source["apiEnabled"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -340,34 +346,6 @@ export namespace main {
 		    }
 		    return a;
 		}
-	}
-	export class SlackMessage {
-	    type: string;
-	    channel: string;
-	    channelId: string;
-	    user: string;
-	    text: string;
-	    timestamp: string;
-	    teamId: string;
-	    unread: boolean;
-	    time: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new SlackMessage(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.type = source["type"];
-	        this.channel = source["channel"];
-	        this.channelId = source["channelId"];
-	        this.user = source["user"];
-	        this.text = source["text"];
-	        this.timestamp = source["timestamp"];
-	        this.teamId = source["teamId"];
-	        this.unread = source["unread"];
-	        this.time = source["time"];
-	    }
 	}
 	export class UpdateInfo {
 	    available: boolean;

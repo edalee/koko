@@ -162,7 +162,7 @@
 - Message cards: `.glass-card`, DM icon (mint) vs @mention icon (blue), sender, channel, preview, time ago
 - Click opens `slack://` deep link to native Slack app
 - Polls every 60 seconds
-- Required scopes: `im:history`, `im:read`, `users:read`, `search:read`
+- Required scopes: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
 
 ### SettingsPanel
 - Slack token input with show/hide toggle (Eye/EyeOff icons)
@@ -170,11 +170,8 @@
 - Test Connection button (calls `TestConnection()`, shows user@team)
 - Debug API Responses link (dev-only, calls `DebugFetch()`)
 - Results in `<pre>` with green=success / red=error color coding
-
-### MailPanel
-- Notification/mail overlay page
-- Uses `.glass-card` for message items
-- Currently mock data
+- **Remote API section:** enable/disable toggle, port input, API key display (truncated with copy button)
+- Scopes note updated: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
 
 ### OverlayPage
 - Full-panel overlay using `.glass-overlay`

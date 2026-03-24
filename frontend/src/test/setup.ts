@@ -34,7 +34,6 @@ vi.mock("../../wailsjs/go/main/ClaudeService", () => ({
 vi.mock("../../wailsjs/go/main/ConfigService", () => ({
   GetConfig: vi.fn().mockResolvedValue({}),
   SaveConfig: vi.fn().mockResolvedValue(undefined),
-  SetSlackToken: vi.fn().mockResolvedValue(undefined),
   GetSessions: vi.fn().mockResolvedValue({ tabs: [], history: [], recentDirs: [] }),
   SaveSessions: vi.fn().mockResolvedValue(undefined),
 }));
@@ -58,13 +57,6 @@ vi.mock("../../wailsjs/go/main/GitHubService", () => ({
 vi.mock("../../wailsjs/go/main/GitService", () => ({
   GetBranchName: vi.fn().mockResolvedValue("main"),
   GetFileChanges: vi.fn().mockResolvedValue([]),
-}));
-
-vi.mock("../../wailsjs/go/main/SlackService", () => ({
-  GetMessages: vi.fn().mockResolvedValue([]),
-  GetTeamID: vi.fn().mockResolvedValue(""),
-  TestConnection: vi.fn().mockResolvedValue(""),
-  DebugFetch: vi.fn().mockResolvedValue(""),
 }));
 
 vi.mock("../../wailsjs/go/main/ProcessMonitor", () => ({

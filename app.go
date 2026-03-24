@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,16 +19,27 @@ const version = "0.1.0"
 type App struct {
 	ctx context.Context
 	tm  *TerminalManager
+	cfg *ConfigService
+	api *APIServer
 }
 
-func NewApp(tm *TerminalManager) *App {
-	return &App{tm: tm}
+func NewApp(tm *TerminalManager, cfg *ConfigService, api *APIServer) *App {
+	return &App{tm: tm, cfg: cfg, api: api}
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.tm.setContext(ctx)
 	a.installStatusLine()
+
+	// Ensure API key exists and start API server
+	a.cfg.EnsureAPIKey()
+	if err := a.api.Start(); err != nil {
+		log.Printf("[api] failed to start: %v", err)
+	}
+
+	// Install MCP server registration
+	a.installMCPServer()
 }
 
 func (a *App) installStatusLine() {
@@ -59,7 +71,61 @@ echo "${MODEL} · ${USED_PCT}% context"
 	_ = a.EnsureStatusLine()
 }
 
-func (a *App) shutdown(ctx context.Context) {}
+func (a *App) shutdown(_ context.Context) {
+	if a.api != nil {
+		a.api.Stop()
+	}
+}
+
+// installMCPServer registers Koko as an MCP server in Claude Code's settings.
+func (a *App) installMCPServer() {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("[mcp] could not determine executable path: %v", err)
+		return
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	var settings map[string]interface{}
+
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		_ = json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]interface{})
+	}
+
+	mcpServers, _ := settings["mcpServers"].(map[string]interface{})
+	if mcpServers == nil {
+		mcpServers = make(map[string]interface{})
+	}
+
+	// Check if already registered with correct path
+	if existing, ok := mcpServers["koko"].(map[string]interface{}); ok {
+		if cmd, _ := existing["command"].(string); cmd == exe {
+			return // Already registered
+		}
+	}
+
+	mcpServers["koko"] = map[string]interface{}{
+		"command": exe,
+		"args":    []string{"mcp"},
+	}
+	settings["mcpServers"] = mcpServers
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(settingsPath, out, 0o644)
+	log.Printf("[mcp] registered koko MCP server: %s mcp", exe)
+}
 
 func (a *App) GetVersion() string {
 	return version

@@ -1,4 +1,4 @@
-import { ArrowUpCircle, Bell, GitPullRequest, MessageSquare, Settings, X } from "lucide-react";
+import { ArrowUpCircle, Bell, GitPullRequest, Settings, X } from "lucide-react";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import kokoLogo from "../assets/koko_logo.svg";
 import type { OverlayModule } from "../hooks/useOverlay";
@@ -10,7 +10,6 @@ interface ToolbarProps {
   activeOverlay: OverlayModule | null;
   onToggleOverlay: (module: OverlayModule) => void;
   githubCount: number;
-  slackCount: number;
   notifCount: number;
   update: UpdateInfo | null;
   onDismissUpdate: () => void;
@@ -20,7 +19,6 @@ export default function Toolbar({
   activeOverlay,
   onToggleOverlay,
   githubCount,
-  slackCount,
   notifCount,
   update,
   onDismissUpdate,
@@ -83,21 +81,6 @@ export default function Toolbar({
         >
           <GitPullRequest className="size-4" />
           <NotificationBadge count={githubCount} />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onToggleOverlay("slack")}
-          className={cn(
-            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
-            activeOverlay === "slack"
-              ? "text-accent bg-white/10"
-              : "text-white/70 hover:text-white hover:bg-white/5",
-          )}
-          title="Slack Messages"
-        >
-          <MessageSquare className="size-4" />
-          <NotificationBadge count={slackCount} color="var(--color-badge-slack)" />
         </button>
 
         <button

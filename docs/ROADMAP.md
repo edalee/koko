@@ -42,7 +42,8 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Auto-update** — check for new versions and prompt to update
 - [ ] **Linux support** — test and fix Linux-specific issues
 - [ ] **Homebrew distribution** — `brew install koko`
+- [ ] **Remote API enhancements** — file diffs, GitHub PRs, notifications endpoints
 
 ## Completed
 
-See `docs/plans/` for detailed implementation plans of completed features (001-016).
+See `docs/plans/` for detailed implementation plans of completed features (001-017).

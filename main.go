@@ -17,6 +17,12 @@ import (
 var assets embed.FS
 
 func main() {
+	// MCP subcommand — runs as stdio MCP server, no GUI
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		runMCPServer()
+		return
+	}
+
 	// Log to file so we can debug Finder launches
 	configDir, _ := os.UserConfigDir()
 	logPath := filepath.Join(configDir, "koko", "koko.log")
@@ -26,13 +32,17 @@ func main() {
 	}
 
 	tm := NewTerminalManager()
-	app := NewApp(tm)
 	gh := NewGitHubService()
 	git := NewGitService()
 	cfg := NewConfigService()
-	slack := NewSlackService(cfg)
 	pm := NewProcessMonitor()
 	claude := NewClaudeService()
+	api := NewAPIServer(tm, git, cfg)
+	app := NewApp(tm, cfg, api)
+	slackCmd := NewSlackCommandHandler(cfg, tm, git)
+
+	// Start Slack bot command listener if configured
+	go slackCmd.Start()
 
 	// macOS Edit menu enables Cmd+C/V/X/A in the webview
 	editMenu := menu.NewMenu()
@@ -66,7 +76,6 @@ func main() {
 			gh,
 			git,
 			cfg,
-			slack,
 			pm,
 			claude,
 		},

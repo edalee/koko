@@ -1,4 +1,4 @@
-import { Bell, GitPullRequest, MessageSquare, Settings } from "lucide-react";
+import { Bell, GitPullRequest, Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Write } from "../wailsjs/go/main/TerminalManager";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
@@ -12,7 +12,6 @@ import RightSidebar from "./components/RightSidebar";
 import SafeWorkingOverlay from "./components/SafeWorkingOverlay";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsPanel from "./components/SettingsPanel";
-import SlackPanel from "./components/SlackPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
@@ -26,7 +25,6 @@ import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionActivity } from "./hooks/useSessionActivity";
 import { useSessionContext } from "./hooks/useSessionContext";
 import { useSessionTabs } from "./hooks/useSessionTabs";
-import { useSlack } from "./hooks/useSlack";
 import { useSubagents } from "./hooks/useSubagents";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
@@ -58,15 +56,6 @@ export default function App() {
   } = useFileChanges(activeTab?.directory ?? null);
   const codeViewer = useCodeViewer();
   const { activeOverlay, toggleOverlay, closeOverlay } = useOverlay();
-  const {
-    messages: slackMessages,
-    loading: slackLoading,
-    configured: slackConfigured,
-    unreadCount: slackCount,
-    refresh: refreshSlack,
-    openMessage: openSlackMessage,
-    dismissMessage: dismissSlackMessage,
-  } = useSlack();
   const {
     notifications,
     unreadCount: notifCount,
@@ -146,7 +135,6 @@ export default function App() {
         activeOverlay={activeOverlay}
         onToggleOverlay={toggleOverlay}
         githubCount={prs.length}
-        slackCount={slackCount}
         notifCount={notifCount}
         update={update}
         onDismissUpdate={dismissUpdate}
@@ -280,23 +268,6 @@ export default function App() {
         </OverlayPage>
 
         <OverlayPage
-          open={activeOverlay === "slack"}
-          onClose={closeOverlay}
-          title="Slack Messages"
-          icon={<MessageSquare className="size-4" />}
-        >
-          <SlackPanel
-            messages={slackMessages}
-            loading={slackLoading}
-            configured={slackConfigured}
-            onRefresh={refreshSlack}
-            onOpenMessage={openSlackMessage}
-            onDismissMessage={dismissSlackMessage}
-            onOpenSettings={() => toggleOverlay("settings")}
-          />
-        </OverlayPage>
-
-        <OverlayPage
           open={activeOverlay === "notifications"}
           onClose={closeOverlay}
           title="Notifications"
@@ -319,7 +290,6 @@ export default function App() {
           icon={<Settings className="size-4" />}
         >
           <SettingsPanel
-            onTokenSaved={refreshSlack}
             safeWorkingConfig={safeWorkingConfig}
             onSafeWorkingChange={updateSafeWorking}
           />
