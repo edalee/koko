@@ -186,7 +186,7 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 		ptmx:        ptmx,
 		cmd:         cmd,
 		done:        make(chan struct{}),
-		tailText:    newRingBuffer(2048),
+		tailText:    newRingBuffer(32 * 1024),
 		subscribers: make(map[chan []byte]struct{}),
 	}
 

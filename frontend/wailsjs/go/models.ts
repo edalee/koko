@@ -44,11 +44,11 @@ export namespace main {
 	    apiPort: number;
 	    apiKey: string;
 	    apiEnabled: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AppConfig(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.slackToken = source["slackToken"];
