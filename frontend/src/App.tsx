@@ -182,13 +182,26 @@ export default function App() {
                       {!tab.connected && (
                         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
                         <div
-                          className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground cursor-pointer hover:text-white transition-colors bg-[#0f1117]/90"
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0f1117]/90 cursor-pointer"
                           onClick={() => switchTab(tab.id)}
                         >
-                          <p className="text-sm">Session disconnected</p>
-                          <p className="text-xs text-tertiary">
-                            Click to reconnect with claude --continue
-                          </p>
+                          <div className="max-w-sm w-full mx-auto glass-card rounded-xl p-5 border border-white/[0.08] space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="size-2 rounded-full bg-white/20" />
+                              <h3 className="text-sm text-white font-medium truncate">
+                                {tab.name}
+                              </h3>
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {tab.directory.replace(/^\/Users\/[^/]+/, "~")}
+                            </p>
+                            {tab.lastMsg && (
+                              <p className="text-xs text-white/40 italic line-clamp-3 leading-relaxed">
+                                {tab.lastMsg}
+                              </p>
+                            )}
+                            <p className="text-xs text-accent pt-1">Click to reconnect</p>
+                          </div>
                         </div>
                       )}
                     </div>

@@ -292,9 +292,23 @@ export function useSessionTabs() {
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, name: newName } : t)));
   }, []);
 
-  const handleSessionExit = useCallback((tabId: string) => {
-    setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, connected: false } : t)));
-  }, []);
+  const handleSessionExit = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, connected: false } : t)));
+      // Capture last message for the context card on reconnect
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab) {
+        GetLastMessage(tab.directory)
+          .then((msg) => {
+            if (msg) {
+              setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, lastMsg: msg } : t)));
+            }
+          })
+          .catch(() => {});
+      }
+    },
+    [tabs],
+  );
 
   const clearHistoryEntry = useCallback(
     (directory: string) => {
