@@ -1,12 +1,20 @@
-import { ChevronLeft, ChevronRight, Plus, Search, SquareTerminal, X } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Folder,
+  Plus,
+  Search,
+  SquareTerminal,
+  X,
+} from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { SessionState } from "../hooks/useSessionActivity";
 import type { SessionTab } from "../types";
 
-function shortenPath(path: string): string {
-  const home = path.match(/^\/Users\/[^/]+/)?.[0];
-  if (home) return path.replace(home, "~");
-  return path;
+function dirBasename(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || path;
 }
 
 interface SessionSidebarProps {
@@ -19,6 +27,12 @@ interface SessionSidebarProps {
   onRenameSession: (sessionId: string, newName: string) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+}
+
+interface DirGroup {
+  directory: string;
+  dirName: string;
+  sessions: SessionTab[];
 }
 
 export default function SessionSidebar({
@@ -35,6 +49,7 @@ export default function SessionSidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filteredSessions = searchQuery
@@ -44,6 +59,33 @@ export default function SessionSidebar({
           s.directory.toLowerCase().includes(searchQuery.toLowerCase()),
       )
     : sessions;
+
+  // Group sessions by directory
+  const groups: DirGroup[] = useMemo(() => {
+    const map = new Map<string, SessionTab[]>();
+    for (const s of filteredSessions) {
+      const existing = map.get(s.directory) || [];
+      existing.push(s);
+      map.set(s.directory, existing);
+    }
+    return Array.from(map.entries()).map(([dir, sess]) => ({
+      directory: dir,
+      dirName: dirBasename(dir),
+      sessions: sess,
+    }));
+  }, [filteredSessions]);
+
+  const toggleDirCollapsed = useCallback((dir: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dir)) {
+        next.delete(dir);
+      } else {
+        next.add(dir);
+      }
+      return next;
+    });
+  }, []);
 
   const startRename = useCallback((session: SessionTab) => {
     setEditingId(session.id);
@@ -57,6 +99,17 @@ export default function SessionSidebar({
     }
     setEditingId(null);
   }, [editingId, editValue, onRenameSession]);
+
+  // Flat index for keyboard shortcuts (⌘1-9)
+  const flatIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    let idx = 0;
+    for (const s of sessions) {
+      map.set(s.id, idx);
+      idx++;
+    }
+    return map;
+  }, [sessions]);
 
   return (
     <div
@@ -95,99 +148,152 @@ export default function SessionSidebar({
             </button>
           </div>
 
-          {/* Session list */}
-          <div className="flex-1 overflow-auto px-2 pt-2 pb-10">
-            <div className="space-y-2">
-              {filteredSessions.map((session, index) => {
-                const isActive = activeSessionId === session.id;
-                const isEditing = editingId === session.id;
-                const state = session.connected
-                  ? (sessionStates.get(session.id) ?? "active")
-                  : "disconnected";
-                const shortcutKey = index < 9 ? index + 1 : null;
+          {/* Grouped session list */}
+          <div className="flex-1 overflow-auto px-2 pt-1 pb-10">
+            <div className="space-y-1">
+              {groups.map((group) => {
+                const isMulti = group.sessions.length > 1;
+                const isDirCollapsed = isMulti && collapsedDirs.has(group.directory);
+                const hasApproval = group.sessions.some(
+                  (s) => s.connected && sessionStates.get(s.id) === "approval",
+                );
+                const activeCount = group.sessions.filter((s) => s.connected).length;
+
                 return (
-                  // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: nested interactive elements require div wrapper
-                  <div
-                    key={session.id}
-                    className={`group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
-                      isActive
-                        ? "bg-white/[0.08] border border-accent/20 glow-accent"
-                        : state === "approval"
-                          ? "hover:bg-white/[0.05] border border-amber-400/30"
-                          : "hover:bg-white/[0.05] border border-transparent"
-                    }`}
-                    onClick={() => onSessionSelect(session.id)}
-                  >
-                    <div className="relative mt-0.5 shrink-0">
-                      <SquareTerminal
-                        className={`size-5 transition-colors ${
-                          state === "approval"
-                            ? "text-amber-400 animate-pulse"
-                            : state === "disconnected"
-                              ? "text-tertiary"
-                              : isActive
-                                ? "text-accent"
-                                : "text-muted-foreground group-hover:text-accent"
-                        }`}
-                      />
-                      {state === "approval" && (
-                        <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-400 animate-ping" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      {isEditing ? (
-                        <input
-                          ref={inputRef}
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onBlur={commitRename}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") commitRename();
-                            if (e.key === "Escape") setEditingId(null);
-                            e.stopPropagation();
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-sm text-white bg-white/[0.08] border border-accent/20 rounded-lg px-1.5 py-0.5 w-full outline-none"
-                        />
-                      ) : (
-                        <h3
-                          className="text-sm text-white truncate mb-1"
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            startRename(session);
-                          }}
-                        >
-                          {session.name}
-                        </h3>
-                      )}
-                      <p className="text-xs text-muted-foreground truncate">
-                        {shortenPath(session.directory)}
-                      </p>
-                      {!session.connected && (
-                        <p className="text-[10px] text-tertiary mt-0.5">Click to resume</p>
-                      )}
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteSession(session.id);
-                        }}
-                        className="p-1 hover:bg-white/10 rounded transition-opacity"
-                        title="Close session (⌘W)"
+                  <div key={group.directory}>
+                    {/* Directory header — only shown for multi-session directories */}
+                    {isMulti && (
+                      // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: directory group toggle
+                      <div
+                        className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-white/[0.04] transition-colors"
+                        onClick={() => toggleDirCollapsed(group.directory)}
                       >
-                        <X className="size-4 text-muted-foreground hover:text-[#F14D4C]" />
-                      </button>
-                      {shortcutKey && (
-                        <kbd className="text-[10px] text-tertiary font-mono px-1 rounded bg-white/[0.04] border border-white/[0.06] leading-relaxed">
-                          ⌘{shortcutKey}
-                        </kbd>
-                      )}
-                    </div>
+                        <ChevronDown
+                          className={`size-3 text-tertiary transition-transform ${isDirCollapsed ? "-rotate-90" : ""}`}
+                        />
+                        <Folder className="size-3.5 text-muted-foreground" />
+                        <span className="text-xs text-white/70 font-medium truncate flex-1">
+                          {group.dirName}
+                        </span>
+                        {isDirCollapsed && (
+                          <span className="text-[10px] text-tertiary tabular-nums">
+                            {group.sessions.length}
+                          </span>
+                        )}
+                        {hasApproval && (
+                          <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+                        )}
+                        {!hasApproval && activeCount > 0 && (
+                          <span className="size-2 rounded-full bg-accent/60" />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Sessions — indented under folder header when multi, flat otherwise */}
+                    {!isDirCollapsed &&
+                      group.sessions.map((session) => {
+                        const isActive = activeSessionId === session.id;
+                        const isEditing = editingId === session.id;
+                        const state = session.connected
+                          ? (sessionStates.get(session.id) ?? "active")
+                          : "disconnected";
+                        const shortcutIdx = flatIndex.get(session.id);
+                        const shortcutKey =
+                          shortcutIdx !== undefined && shortcutIdx < 9 ? shortcutIdx + 1 : null;
+
+                        return (
+                          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: session item
+                          <div
+                            key={session.id}
+                            className={`group flex items-center gap-2.5 ${isMulti ? "ml-4" : ""} pl-3 pr-2 py-2 rounded-lg cursor-pointer transition-all ${
+                              isActive
+                                ? "bg-white/[0.08] border border-accent/20 glow-accent"
+                                : state === "approval"
+                                  ? "hover:bg-white/[0.05] border border-amber-400/30"
+                                  : "hover:bg-white/[0.05] border border-transparent"
+                            }`}
+                            onClick={() => onSessionSelect(session.id)}
+                          >
+                            {/* Status dot */}
+                            <span
+                              className={`size-2 rounded-full shrink-0 ${
+                                state === "approval"
+                                  ? "bg-amber-400 animate-pulse"
+                                  : state === "disconnected"
+                                    ? "bg-white/20"
+                                    : "bg-accent/70"
+                              }`}
+                            />
+
+                            {/* Name */}
+                            <div className="flex-1 min-w-0">
+                              {isEditing ? (
+                                <input
+                                  ref={inputRef}
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onBlur={commitRename}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") commitRename();
+                                    if (e.key === "Escape") setEditingId(null);
+                                    e.stopPropagation();
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-sm text-white bg-white/[0.08] border border-accent/20 rounded px-1.5 py-0.5 w-full outline-none"
+                                />
+                              ) : (
+                                // biome-ignore lint/a11y/noStaticElementInteractions: double-click rename
+                                <span
+                                  className={`text-sm truncate block ${
+                                    state === "disconnected" ? "text-white/50" : "text-white"
+                                  }`}
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation();
+                                    startRename(session);
+                                  }}
+                                >
+                                  {session.name}
+                                </span>
+                              )}
+                              {!session.connected && (
+                                <span className="text-[10px] text-tertiary">Click to resume</span>
+                              )}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              {shortcutKey && (
+                                <kbd className="text-[10px] text-tertiary font-mono px-1 rounded bg-white/[0.04] border border-white/[0.06] leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity">
+                                  ⌘{shortcutKey}
+                                </kbd>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteSession(session.id);
+                                }}
+                                className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Close session"
+                              >
+                                <X className="size-3.5 text-muted-foreground hover:text-[#F14D4C]" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                   </div>
                 );
               })}
+
+              {filteredSessions.length === 0 && (
+                <div className="text-center py-8">
+                  <SquareTerminal className="size-8 text-tertiary mx-auto mb-2" />
+                  <p className="text-xs text-tertiary">
+                    {searchQuery ? "No matching sessions" : "No sessions"}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </>

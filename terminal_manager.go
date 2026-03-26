@@ -53,17 +53,19 @@ func (rb *ringBuffer) Bytes() []byte {
 }
 
 type session struct {
-	id       string
-	name     string
-	dir      string
-	ptmx     *os.File
-	cmd      *exec.Cmd
-	mu           sync.Mutex
-	done         chan struct{}
-	buf          *ringBuffer // buffered PTY output for late-connecting frontends
-	tailText     *ringBuffer // last 2KB of ANSI-stripped text for state detection
-	lastOutputAt time.Time   // when PTY last produced output
-	subscribers  map[chan []byte]struct{}
+	id              string
+	slug            string
+	name            string
+	dir             string
+	claudeSessionID string // Claude Code session UUID for --resume
+	ptmx            *os.File
+	cmd             *exec.Cmd
+	mu              sync.Mutex
+	done            chan struct{}
+	buf             *ringBuffer // buffered PTY output for late-connecting frontends
+	tailText        *ringBuffer // last 32KB of ANSI-stripped text for state detection
+	lastOutputAt    time.Time   // when PTY last produced output
+	subscribers     map[chan []byte]struct{}
 }
 
 type TerminalManager struct {
@@ -71,15 +73,39 @@ type TerminalManager struct {
 	sessions  map[string]*session
 	mu        sync.Mutex
 	nextID    int
-	loginPath string // full PATH from login shell, resolved once at startup
+	slugCount map[string]int // per-directory slug counter: dir -> next number
+	loginPath string         // full PATH from login shell, resolved once at startup
 }
 
 func NewTerminalManager() *TerminalManager {
 	tm := &TerminalManager{
-		sessions: make(map[string]*session),
+		sessions:  make(map[string]*session),
+		slugCount: make(map[string]int),
 	}
 	tm.loginPath = resolveLoginPath()
 	return tm
+}
+
+// dirSlug returns a human-friendly slug for a directory path.
+// e.g. "/Users/ed/Projects/koko" → "koko"
+func dirSlug(dir string) string {
+	dir = strings.TrimRight(dir, "/")
+	parts := strings.Split(dir, "/")
+	if len(parts) == 0 {
+		return "session"
+	}
+	slug := parts[len(parts)-1]
+	if slug == "" {
+		return "session"
+	}
+	return slug
+}
+
+// nextSlug generates the next slug for a directory, e.g. "koko/1", "koko/2".
+func (tm *TerminalManager) nextSlug(dir string) string {
+	base := dirSlug(dir)
+	tm.slugCount[dir]++
+	return fmt.Sprintf("%s/%d", base, tm.slugCount[dir])
 }
 
 // resolveLoginPath gets the full PATH from an interactive login shell.
@@ -147,56 +173,150 @@ func resolveClaudePath() string {
 	return "claude"
 }
 
+// CreateSessionOpts holds options for creating a session.
+type CreateSessionOpts struct {
+	Name            string `json:"name"`
+	Dir             string `json:"dir"`
+	Cols            int    `json:"cols"`
+	Rows            int    `json:"rows"`
+	Resume          bool   `json:"resume"`
+	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume (empty = --continue)
+}
+
 func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
+	return tm.CreateSessionWithOpts(CreateSessionOpts{
+		Name:   name,
+		Dir:    dir,
+		Cols:   cols,
+		Rows:   rows,
+		Resume: resume,
+	})
+}
+
+// CreateSessionWithOpts creates a session with full options including Claude session ID for --resume.
+func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string, error) {
 	tm.mu.Lock()
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
+	slug := tm.nextSlug(opts.Dir)
 	tm.mu.Unlock()
+
+	if opts.Cols == 0 {
+		opts.Cols = 120
+	}
+	if opts.Rows == 0 {
+		opts.Rows = 40
+	}
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/zsh"
 	}
 
-	// Build environment: filter CLAUDECODE, inject login PATH + terminal vars.
 	env := tm.buildEnv()
 
-	// Resolve claude path via login shell (GUI apps have minimal PATH).
 	claudePath := resolveClaudePath()
 	claudeCmd := fmt.Sprintf("exec %s", claudePath)
-	if resume {
-		claudeCmd = fmt.Sprintf("exec %s --continue", claudePath)
+	if opts.Resume {
+		if opts.ClaudeSessionID != "" {
+			// Resume specific session by UUID
+			claudeCmd = fmt.Sprintf("exec %s --resume %s", claudePath, opts.ClaudeSessionID)
+		} else {
+			// Fall back to most recent session in directory
+			claudeCmd = fmt.Sprintf("exec %s --continue", claudePath)
+		}
 	}
 	cmd := exec.Command(shell, "-l", "-c", claudeCmd)
-	cmd.Dir = dir
+	cmd.Dir = opts.Dir
 	cmd.Env = env
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Rows: uint16(rows),
-		Cols: uint16(cols),
+		Rows: uint16(opts.Rows),
+		Cols: uint16(opts.Cols),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to start PTY: %w", err)
 	}
 
 	s := &session{
-		id:          id,
-		name:        name,
-		dir:         dir,
-		ptmx:        ptmx,
-		cmd:         cmd,
-		done:        make(chan struct{}),
-		tailText:    newRingBuffer(32 * 1024),
-		subscribers: make(map[chan []byte]struct{}),
+		id:              id,
+		slug:            slug,
+		name:            opts.Name,
+		dir:             opts.Dir,
+		claudeSessionID: opts.ClaudeSessionID,
+		ptmx:            ptmx,
+		cmd:             cmd,
+		done:            make(chan struct{}),
+		tailText:        newRingBuffer(32 * 1024),
+		subscribers:     make(map[chan []byte]struct{}),
 	}
 
 	tm.mu.Lock()
 	tm.sessions[id] = s
 	tm.mu.Unlock()
 
+	// Capture Claude session UUID in background
+	if !opts.Resume || opts.ClaudeSessionID == "" {
+		go tm.detectClaudeSessionID(s)
+	}
+
 	go tm.readLoop(s)
 
 	return id, nil
+}
+
+// detectClaudeSessionID watches the Claude projects dir for a new .jsonl file
+// and stores the UUID (filename) on the session.
+func (tm *TerminalManager) detectClaudeSessionID(s *session) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	projectKey := strings.ReplaceAll(s.dir, "/", "-")
+	sessionDir := filepath.Join(home, ".claude", "projects", projectKey)
+
+	// Record existing files before Claude starts
+	existing := make(map[string]bool)
+	if entries, err := os.ReadDir(sessionDir); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".jsonl") {
+				existing[e.Name()] = true
+			}
+		}
+	}
+
+	// Poll for a new .jsonl file (Claude creates it on first message)
+	for i := 0; i < 60; i++ { // up to 30 seconds
+		time.Sleep(500 * time.Millisecond)
+
+		select {
+		case <-s.done:
+			return // session ended
+		default:
+		}
+
+		entries, err := os.ReadDir(sessionDir)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".jsonl") {
+				continue
+			}
+			if existing[e.Name()] {
+				continue
+			}
+			// New file found — extract UUID from filename
+			uuid := strings.TrimSuffix(e.Name(), ".jsonl")
+			s.mu.Lock()
+			s.claudeSessionID = uuid
+			s.mu.Unlock()
+			log.Printf("[pty] captured Claude session UUID: %s for %s", uuid, s.slug)
+			return
+		}
+	}
 }
 
 func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (string, error) {
@@ -348,11 +468,35 @@ func (tm *TerminalManager) GetSessions() []SessionInfo {
 	for _, s := range tm.sessions {
 		sessions = append(sessions, SessionInfo{
 			ID:   s.id,
+			Slug: s.slug,
 			Name: s.name,
 			Dir:  s.dir,
 		})
 	}
 	return sessions
+}
+
+// GetClaudeSessionID returns the Claude Code session UUID for a session.
+func (tm *TerminalManager) GetClaudeSessionID(sessionID string) (string, error) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.claudeSessionID, nil
+}
+
+// GetSessionBySlug finds a session by its slug (e.g. "koko/1").
+func (tm *TerminalManager) GetSessionBySlug(slug string) *SessionInfo {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, s := range tm.sessions {
+		if s.slug == slug {
+			return &SessionInfo{ID: s.id, Slug: s.slug, Name: s.name, Dir: s.dir}
+		}
+	}
+	return nil
 }
 
 func (tm *TerminalManager) GetSessionPID(sessionID string) (int, error) {

@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GetLastMessage } from "../../wailsjs/go/main/ClaudeService";
 import { GetSessions, SaveSessions } from "../../wailsjs/go/main/ConfigService";
-import { CloseSession, CreateSession } from "../../wailsjs/go/main/TerminalManager";
+import {
+  CloseSession,
+  CreateSessionWithOpts,
+  GetClaudeSessionID,
+} from "../../wailsjs/go/main/TerminalManager";
 import type { SessionHistoryEntry, SessionTab } from "../types";
 
-const MAX_HISTORY = 20;
+const MAX_HISTORY = 50;
 
 export function useSessionTabs() {
   const [tabs, setTabs] = useState<SessionTab[]>([]);
@@ -12,6 +16,7 @@ export function useSessionTabs() {
   const [history, setHistory] = useState<SessionHistoryEntry[]>([]);
   const historyRef = useRef<SessionHistoryEntry[]>([]);
   const loadedRef = useRef(false);
+  const hasLoadedSessions = useRef(false);
 
   // Load sessions from Go backend on mount
   useEffect(() => {
@@ -20,71 +25,132 @@ export function useSessionTabs() {
 
     GetSessions()
       .then((sessions) => {
-        // Assign unique placeholder IDs — saved IDs are stale PTY session IDs
-        // that may collide after app restart (Go's nextID resets to 0).
+        // New format: sessions.sessions contains SessionRecord[]
+        const records = sessions.sessions || [];
         let nextPlaceholder = 0;
-        const savedTabs = (sessions.tabs || []).map(
-          (t: { id: string; name: string; directory: string; createdAt: number }) => ({
-            ...t,
-            id: `saved-${++nextPlaceholder}`,
-            connected: false,
-          }),
-        );
+
+        const savedTabs = records
+          .filter((r: { status: string }) => r.status === "active" || r.status === "disconnected")
+          .map(
+            (r: {
+              slug: string;
+              name: string;
+              directory: string;
+              createdAt: number;
+              claudeSessionId?: string;
+              lastMsg?: string;
+            }) => ({
+              id: `saved-${++nextPlaceholder}`,
+              slug: r.slug || "",
+              name: r.name,
+              directory: r.directory,
+              createdAt: r.createdAt,
+              connected: false,
+              claudeSessionId: r.claudeSessionId || "",
+              lastMsg: r.lastMsg || "",
+            }),
+          );
+
+        const closedHistory: SessionHistoryEntry[] = records
+          .filter((r: { status: string }) => r.status === "closed")
+          .map((r) => ({
+            slug: r.slug || "",
+            name: r.name,
+            directory: r.directory,
+            createdAt: r.createdAt,
+            closedAt: r.closedAt || 0,
+            lastMessage: r.lastMsg || "",
+            claudeSessionId: r.claudeSessionId || "",
+          }));
+
         setTabs(savedTabs);
         if (savedTabs.length > 0) {
           setActiveTabId(savedTabs[0].id);
         }
-        const h = sessions.history || [];
-        setHistory(h);
-        historyRef.current = h;
+        setHistory(closedHistory);
+        historyRef.current = closedHistory;
         hasLoadedSessions.current = true;
       })
       .catch(() => {
-        // No sessions yet — still allow saving from this point
         hasLoadedSessions.current = true;
       });
   }, []);
 
-  // Persist tabs to Go backend on every change.
-  // Skip until GetSessions has resolved to avoid overwriting saved data
-  // with the initial empty state (race condition on hot-reload / slow load).
-  const hasLoadedSessions = useRef(false);
+  // Persist sessions on every tab change
   useEffect(() => {
     if (!hasLoadedSessions.current) return;
-    SaveSessions({
-      tabs: tabs.map(({ id, name, directory, createdAt }) => ({
-        id,
-        name,
-        directory,
-        createdAt,
+    const records = [
+      ...tabs.map((t) => ({
+        slug: t.slug,
+        name: t.name,
+        directory: t.directory,
+        claudeSessionId: t.claudeSessionId || "",
+        createdAt: t.createdAt,
+        status: t.connected ? "active" : "disconnected",
+        lastMsg: t.lastMsg || "",
       })),
-      history: historyRef.current,
-      recentDirs: [...new Set(tabs.map((t) => t.directory))].slice(0, 5),
-      // biome-ignore lint/suspicious/noExplicitAny: Wails-generated SessionsData class requires convertValues but plain objects work at runtime
+      ...historyRef.current.map((h) => ({
+        slug: h.slug,
+        name: h.name,
+        directory: h.directory,
+        claudeSessionId: h.claudeSessionId || "",
+        createdAt: h.createdAt,
+        closedAt: h.closedAt,
+        status: "closed",
+        lastMsg: h.lastMessage || "",
+      })),
+    ];
+    SaveSessions({
+      sessions: records,
+      recentDirs: [...new Set(tabs.map((t) => t.directory))].slice(0, 10),
+      // biome-ignore lint/suspicious/noExplicitAny: Wails-generated type mismatch
     } as any).catch(() => {});
   }, [tabs]);
 
   const saveCurrentState = useCallback(
     (newTabs: SessionTab[], newHistory: SessionHistoryEntry[]) => {
-      SaveSessions({
-        tabs: newTabs.map(({ id, name, directory, createdAt }) => ({
-          id,
-          name,
-          directory,
-          createdAt,
+      const records = [
+        ...newTabs.map((t) => ({
+          slug: t.slug,
+          name: t.name,
+          directory: t.directory,
+          claudeSessionId: t.claudeSessionId || "",
+          createdAt: t.createdAt,
+          status: t.connected ? "active" : "disconnected",
+          lastMsg: t.lastMsg || "",
         })),
-        history: newHistory,
-        recentDirs: [...new Set(newTabs.map((t) => t.directory))].slice(0, 5),
-        // biome-ignore lint/suspicious/noExplicitAny: Wails-generated SessionsData class requires convertValues but plain objects work at runtime
+        ...newHistory.map((h) => ({
+          slug: h.slug,
+          name: h.name,
+          directory: h.directory,
+          claudeSessionId: h.claudeSessionId || "",
+          createdAt: h.createdAt,
+          closedAt: h.closedAt,
+          status: "closed",
+          lastMsg: h.lastMessage || "",
+        })),
+      ];
+      SaveSessions({
+        sessions: records,
+        recentDirs: [...new Set(newTabs.map((t) => t.directory))].slice(0, 10),
+        // biome-ignore lint/suspicious/noExplicitAny: Wails-generated type mismatch
       } as any).catch(() => {});
     },
     [],
   );
 
   const createTab = useCallback(async (name: string, directory: string) => {
-    const sessionId = await CreateSession(name, directory, 80, 24, false);
+    const sessionId = await CreateSessionWithOpts({
+      name,
+      dir: directory,
+      cols: 80,
+      rows: 24,
+      resume: false,
+      claudeSessionId: "",
+    });
     const newTab: SessionTab = {
       id: sessionId,
+      slug: "", // will be populated from GetSessions or after capture
       name,
       directory,
       createdAt: Date.now(),
@@ -92,6 +158,21 @@ export function useSessionTabs() {
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionId);
+
+    // Capture Claude session UUID and slug after a short delay
+    setTimeout(async () => {
+      try {
+        const claudeId = await GetClaudeSessionID(sessionId);
+        if (claudeId) {
+          setTabs((prev) =>
+            prev.map((t) => (t.id === sessionId ? { ...t, claudeSessionId: claudeId } : t)),
+          );
+        }
+      } catch {
+        // ignore
+      }
+    }, 5000);
+
     return sessionId;
   }, []);
 
@@ -100,13 +181,35 @@ export function useSessionTabs() {
     if (reconnectingRef.current.has(tab.id)) return "";
     reconnectingRef.current.add(tab.id);
     try {
-      const sessionId = await CreateSession(tab.name, tab.directory, 80, 24, true);
+      const sessionId = await CreateSessionWithOpts({
+        name: tab.name,
+        dir: tab.directory,
+        cols: 80,
+        rows: 24,
+        resume: true,
+        claudeSessionId: tab.claudeSessionId || "",
+      });
       setTabs((prev) =>
         prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
       );
-      // Update activeTabId to the new session ID only if this tab is still
-      // the active one (user may have switched away during the async reconnect).
       setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
+
+      // Capture new Claude session UUID if we didn't have one
+      if (!tab.claudeSessionId) {
+        setTimeout(async () => {
+          try {
+            const claudeId = await GetClaudeSessionID(sessionId);
+            if (claudeId) {
+              setTabs((prev) =>
+                prev.map((t) => (t.id === sessionId ? { ...t, claudeSessionId: claudeId } : t)),
+              );
+            }
+          } catch {
+            // ignore
+          }
+        }, 5000);
+      }
+
       return sessionId;
     } catch (err) {
       console.error("reconnectTab failed:", err);
@@ -120,22 +223,34 @@ export function useSessionTabs() {
     async (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
       if (tab) {
-        // Add to history
         let lastMessage = "";
         try {
           lastMessage = await GetLastMessage(tab.directory);
         } catch {
           // ignore
         }
-        const filtered = historyRef.current.filter((h) => h.directory !== tab.directory);
-        filtered.unshift({
+
+        // Capture Claude session ID before closing
+        let claudeId = tab.claudeSessionId || "";
+        if (!claudeId && tab.connected) {
+          try {
+            claudeId = await GetClaudeSessionID(tabId);
+          } catch {
+            // ignore
+          }
+        }
+
+        const newEntry: SessionHistoryEntry = {
+          slug: tab.slug,
           name: tab.name,
           directory: tab.directory,
           createdAt: tab.createdAt,
           closedAt: Date.now(),
           lastMessage,
-        });
-        const newHistory = filtered.slice(0, MAX_HISTORY);
+          claudeSessionId: claudeId,
+        };
+
+        const newHistory = [newEntry, ...historyRef.current].slice(0, MAX_HISTORY);
         historyRef.current = newHistory;
         setHistory(newHistory);
 
@@ -143,7 +258,6 @@ export function useSessionTabs() {
           await CloseSession(tabId);
         }
 
-        // Save with updated history
         const remaining = tabs.filter((t) => t.id !== tabId);
         saveCurrentState(remaining, newHistory);
       }

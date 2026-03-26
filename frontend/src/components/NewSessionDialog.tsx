@@ -195,11 +195,11 @@ export default function NewSessionDialog({
                     </span>
                     {history
                       .filter((h) => !activeDirs.includes(h.directory))
-                      .slice(0, 5)
-                      .map((entry) => (
+                      .slice(0, 8)
+                      .map((entry, idx) => (
                         <button
                           type="button"
-                          key={entry.directory}
+                          key={`${entry.directory}-${entry.closedAt}-${idx}`}
                           onClick={() => {
                             onCreate(entry.name, entry.directory);
                           }}

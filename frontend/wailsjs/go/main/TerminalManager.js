@@ -10,8 +10,20 @@ export function CreateSession(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['TerminalManager']['CreateSession'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function CreateSessionWithOpts(arg1) {
+  return window['go']['main']['TerminalManager']['CreateSessionWithOpts'](arg1);
+}
+
 export function CreateShellSession(arg1, arg2, arg3) {
   return window['go']['main']['TerminalManager']['CreateShellSession'](arg1, arg2, arg3);
+}
+
+export function GetClaudeSessionID(arg1) {
+  return window['go']['main']['TerminalManager']['GetClaudeSessionID'](arg1);
+}
+
+export function GetSessionBySlug(arg1) {
+  return window['go']['main']['TerminalManager']['GetSessionBySlug'](arg1);
 }
 
 export function GetSessionPID(arg1) {

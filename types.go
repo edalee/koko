@@ -1,28 +1,68 @@
 package main
 
-// SessionInfo represents metadata about a terminal session.
+// SessionInfo represents metadata about a running terminal session.
 type SessionInfo struct {
-	ID   string `json:"id"`
+	ID   string `json:"id"`   // PTY session ID (transient)
+	Slug string `json:"slug"` // human-friendly slug e.g. "koko/1"
 	Name string `json:"name"`
 	Dir  string `json:"dir"`
+}
+
+// SessionRecord is the unified persisted session model.
+// Replaces SavedSessionTab and SavedSessionHistory.
+type SessionRecord struct {
+	Slug            string `json:"slug"`                      // e.g. "koko/1"
+	Name            string `json:"name"`                      // display name
+	Directory       string `json:"directory"`                 // full path
+	ClaudeSessionID string `json:"claudeSessionId,omitempty"` // UUID from Claude Code JSONL
+	CreatedAt       int64  `json:"createdAt"`
+	ClosedAt        int64  `json:"closedAt,omitempty"`
+	Status          string `json:"status"`          // "active", "disconnected", "closed"
+	LastMsg         string `json:"lastMsg,omitempty"` // last assistant message snippet
+}
+
+// SessionsData holds all persisted session state.
+type SessionsData struct {
+	Sessions   []SessionRecord `json:"sessions"`   // all sessions (active + disconnected + closed)
+	RecentDirs []string        `json:"recentDirs"` // for new session dialog
+	// Legacy fields for migration
+	Tabs    []SavedSessionTab     `json:"tabs,omitempty"`
+	History []SavedSessionHistory `json:"history,omitempty"`
+}
+
+// SavedSessionTab is the legacy persisted session tab (pre-019).
+type SavedSessionTab struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Directory string `json:"directory"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+// SavedSessionHistory is the legacy closed session entry (pre-019).
+type SavedSessionHistory struct {
+	Name        string `json:"name"`
+	Directory   string `json:"directory"`
+	CreatedAt   int64  `json:"createdAt"`
+	ClosedAt    int64  `json:"closedAt"`
+	LastMessage string `json:"lastMessage,omitempty"`
 }
 
 // ProcessInfo represents a child process of a Claude session.
 type ProcessInfo struct {
 	PID       int    `json:"pid"`
-	Command   string `json:"command"`   // short display name
-	FullCmd   string `json:"fullCmd"`   // full command line
-	Type      string `json:"type"`      // "subagent", "mcp", "infrastructure", "tool"
-	Elapsed   string `json:"elapsed"`   // human-readable duration
-	ElapsedMs int64  `json:"elapsedMs"` // for sorting
-	Children  int    `json:"children"`  // number of grandchild processes
+	Command   string `json:"command"`
+	FullCmd   string `json:"fullCmd"`
+	Type      string `json:"type"`
+	Elapsed   string `json:"elapsed"`
+	ElapsedMs int64  `json:"elapsedMs"`
+	Children  int    `json:"children"`
 }
 
 // MCPServer represents a configured MCP server and its connection status.
 type MCPServer struct {
 	Name    string `json:"name"`
 	Command string `json:"command"`
-	Status  string `json:"status"` // "connected", "auth_needed", "error"
+	Status  string `json:"status"`
 }
 
 // AgentInfo represents a built-in Claude agent.
@@ -34,33 +74,9 @@ type AgentInfo struct {
 // CommandInfo represents a slash command or custom agent definition.
 type CommandInfo struct {
 	Name        string `json:"name"`
-	Source      string `json:"source"` // "project", "global"
-	Type        string `json:"type"`   // "command", "agent"
+	Source      string `json:"source"`
+	Type        string `json:"type"`
 	Description string `json:"description"`
-}
-
-// SavedSessionTab represents a persisted session tab.
-type SavedSessionTab struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Directory string `json:"directory"`
-	CreatedAt int64  `json:"createdAt"`
-}
-
-// SavedSessionHistory represents a closed session entry.
-type SavedSessionHistory struct {
-	Name        string `json:"name"`
-	Directory   string `json:"directory"`
-	CreatedAt   int64  `json:"createdAt"`
-	ClosedAt    int64  `json:"closedAt"`
-	LastMessage string `json:"lastMessage,omitempty"`
-}
-
-// SessionsData holds all persisted session state.
-type SessionsData struct {
-	Tabs       []SavedSessionTab     `json:"tabs"`
-	History    []SavedSessionHistory `json:"history"`
-	RecentDirs []string              `json:"recentDirs"`
 }
 
 // FileDiffData represents diff data for a single file.
@@ -69,10 +85,10 @@ type FileDiffData struct {
 	OldContent  string `json:"oldContent"`
 	NewFileName string `json:"newFileName"`
 	NewContent  string `json:"newContent"`
-	Hunks       string `json:"hunks"`    // raw unified diff hunks
-	Language    string `json:"language"`  // inferred from extension
-	Additions   int    `json:"additions"` // number of added lines
-	Deletions   int    `json:"deletions"` // number of removed lines
+	Hunks       string `json:"hunks"`
+	Language    string `json:"language"`
+	Additions   int    `json:"additions"`
+	Deletions   int    `json:"deletions"`
 }
 
 // FileContentData represents raw file content.
@@ -96,10 +112,10 @@ type GitHubPR struct {
 type GitHubNotification struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
-	Type      string `json:"type"`   // "PullRequest", "Issue", "Release", etc.
-	Reason    string `json:"reason"` // "review_requested", "mention", "subscribed", etc.
+	Type      string `json:"type"`
+	Reason    string `json:"reason"`
 	Repo      string `json:"repo"`
-	URL       string `json:"url"` // HTML URL for opening in browser
+	URL       string `json:"url"`
 	Unread    bool   `json:"unread"`
 	UpdatedAt string `json:"updatedAt"`
 }

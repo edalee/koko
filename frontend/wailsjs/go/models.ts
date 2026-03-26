@@ -112,6 +112,28 @@ export namespace main {
 	        this.model = source["model"];
 	    }
 	}
+	export class CreateSessionOpts {
+	    name: string;
+	    dir: string;
+	    cols: number;
+	    rows: number;
+	    resume: boolean;
+	    claudeSessionId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateSessionOpts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.dir = source["dir"];
+	        this.cols = source["cols"];
+	        this.rows = source["rows"];
+	        this.resume = source["resume"];
+	        this.claudeSessionId = source["claudeSessionId"];
+	    }
+	}
 	export class FileChange {
 	    path: string;
 	    status: string;
@@ -299,6 +321,7 @@ export namespace main {
 	}
 	export class SessionInfo {
 	    id: string;
+	    slug: string;
 	    name: string;
 	    dir: string;
 	
@@ -309,14 +332,42 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.slug = source["slug"];
 	        this.name = source["name"];
 	        this.dir = source["dir"];
 	    }
 	}
+	export class SessionRecord {
+	    slug: string;
+	    name: string;
+	    directory: string;
+	    claudeSessionId?: string;
+	    createdAt: number;
+	    closedAt?: number;
+	    status: string;
+	    lastMsg?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.slug = source["slug"];
+	        this.name = source["name"];
+	        this.directory = source["directory"];
+	        this.claudeSessionId = source["claudeSessionId"];
+	        this.createdAt = source["createdAt"];
+	        this.closedAt = source["closedAt"];
+	        this.status = source["status"];
+	        this.lastMsg = source["lastMsg"];
+	    }
+	}
 	export class SessionsData {
-	    tabs: SavedSessionTab[];
-	    history: SavedSessionHistory[];
+	    sessions: SessionRecord[];
 	    recentDirs: string[];
+	    tabs?: SavedSessionTab[];
+	    history?: SavedSessionHistory[];
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionsData(source);
@@ -324,9 +375,10 @@ export namespace main {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessions = this.convertValues(source["sessions"], SessionRecord);
+	        this.recentDirs = source["recentDirs"];
 	        this.tabs = this.convertValues(source["tabs"], SavedSessionTab);
 	        this.history = this.convertValues(source["history"], SavedSessionHistory);
-	        this.recentDirs = source["recentDirs"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

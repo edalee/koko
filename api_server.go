@@ -160,16 +160,38 @@ func (api *APIServer) handleSessionRoute(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func (api *APIServer) handleSessionDetail(w http.ResponseWriter, sessionID string) {
+// resolveSessionID resolves a session ID or slug to a PTY session ID.
+func (api *APIServer) resolveSessionID(idOrSlug string) string {
 	sessions := api.tm.GetSessions()
 	for _, s := range sessions {
-		if s.ID == sessionID {
-			state := api.tm.GetSessionState(sessionID)
+		if s.ID == idOrSlug {
+			return s.ID
+		}
+	}
+	if info := api.tm.GetSessionBySlug(idOrSlug); info != nil {
+		return info.ID
+	}
+	return ""
+}
+
+func (api *APIServer) handleSessionDetail(w http.ResponseWriter, sessionID string) {
+	resolved := api.resolveSessionID(sessionID)
+	if resolved == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	sessions := api.tm.GetSessions()
+	for _, s := range sessions {
+		if s.ID == resolved {
+			state := api.tm.GetSessionState(resolved)
+			claudeID, _ := api.tm.GetClaudeSessionID(resolved)
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"id":    s.ID,
-				"name":  s.Name,
-				"dir":   s.Dir,
-				"state": state,
+				"id":              s.ID,
+				"slug":            s.Slug,
+				"name":            s.Name,
+				"dir":             s.Dir,
+				"state":           state,
+				"claudeSessionId": claudeID,
 			})
 			return
 		}

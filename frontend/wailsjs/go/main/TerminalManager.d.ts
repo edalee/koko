@@ -6,7 +6,13 @@ export function CloseSession(arg1:string):Promise<void>;
 
 export function CreateSession(arg1:string,arg2:string,arg3:number,arg4:number,arg5:boolean):Promise<string>;
 
+export function CreateSessionWithOpts(arg1:main.CreateSessionOpts):Promise<string>;
+
 export function CreateShellSession(arg1:string,arg2:number,arg3:number):Promise<string>;
+
+export function GetClaudeSessionID(arg1:string):Promise<string>;
+
+export function GetSessionBySlug(arg1:string):Promise<main.SessionInfo>;
 
 export function GetSessionPID(arg1:string):Promise<number>;
 
