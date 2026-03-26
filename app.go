@@ -38,8 +38,9 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("[api] failed to start: %v", err)
 	}
 
-	// Install MCP server registration
+	// Install MCP server registration and permission hook
 	a.installMCPServer()
+	a.installPermissionHook()
 }
 
 func (a *App) installStatusLine() {
@@ -125,6 +126,73 @@ func (a *App) installMCPServer() {
 	}
 	_ = os.WriteFile(settingsPath, out, 0o644)
 	log.Printf("[mcp] registered koko MCP server: %s mcp", exe)
+}
+
+// installPermissionHook registers a PermissionRequest hook in Claude Code settings
+// that calls back to Koko's API server when Claude is waiting for tool approval.
+func (a *App) installPermissionHook() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	cfg := a.cfg.GetConfig()
+	hookURL := fmt.Sprintf("http://127.0.0.1:%d/api/hooks/permission-request", cfg.APIPort)
+
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	var settings map[string]interface{}
+
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		_ = json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = make(map[string]interface{})
+	}
+
+	// Build the hook config for PermissionRequest
+	hookEntry := map[string]interface{}{
+		"type":       "http",
+		"url":        hookURL,
+		"timeout_ms": 5000,
+	}
+
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	if hooks == nil {
+		hooks = make(map[string]interface{})
+	}
+
+	// Check if already installed with correct URL
+	if existing, ok := hooks["PermissionRequest"].([]interface{}); ok {
+		for _, e := range existing {
+			if entry, ok := e.(map[string]interface{}); ok {
+				if entryHooks, ok := entry["hooks"].([]interface{}); ok {
+					for _, h := range entryHooks {
+						if hm, ok := h.(map[string]interface{}); ok {
+							if hm["url"] == hookURL {
+								return // Already installed
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	hooks["PermissionRequest"] = []interface{}{
+		map[string]interface{}{
+			"matcher": "",
+			"hooks":   []interface{}{hookEntry},
+		},
+	}
+	settings["hooks"] = hooks
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(settingsPath, out, 0o644)
+	log.Printf("[hooks] installed PermissionRequest hook → %s", hookURL)
 }
 
 func (a *App) GetVersion() string {

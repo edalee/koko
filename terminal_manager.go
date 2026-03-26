@@ -63,9 +63,11 @@ type session struct {
 	mu              sync.Mutex
 	done            chan struct{}
 	buf             *ringBuffer // buffered PTY output for late-connecting frontends
-	tailText        *ringBuffer // last 32KB of ANSI-stripped text for state detection
+	tailText        *ringBuffer // last 32KB of ANSI-stripped text for API ReadOutput
 	lastOutputAt    time.Time   // when PTY last produced output
 	subscribers     map[chan []byte]struct{}
+	waitingApproval bool   // set by PermissionRequest hook, cleared on next PTY output
+	approvalTool    string // tool name waiting for approval (e.g. "Bash", "Edit")
 }
 
 type TerminalManager struct {
@@ -443,6 +445,9 @@ func (tm *TerminalManager) readLoop(s *session) {
 				s.tailText.Write(stripped)
 			}
 			s.lastOutputAt = time.Now()
+			// Clear approval state — output means the user responded
+			s.waitingApproval = false
+			s.approvalTool = ""
 			// Fan out to API subscribers (non-blocking)
 			for ch := range s.subscribers {
 				select {
@@ -510,8 +515,8 @@ func (tm *TerminalManager) GetSessionPID(sessionID string) (int, error) {
 	return s.cmd.Process.Pid, nil
 }
 
-// GetSessionState returns "approval" if the session appears to be waiting for
-// tool approval, or "idle" otherwise. Called by frontend when PTY output stops.
+// GetSessionState returns "approval" if the session is waiting for tool
+// approval (set by PermissionRequest hook), or "idle" otherwise.
 func (tm *TerminalManager) GetSessionState(sessionID string) string {
 	s, err := tm.getSession(sessionID)
 	if err != nil {
@@ -520,42 +525,34 @@ func (tm *TerminalManager) GetSessionState(sessionID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.tailText == nil {
-		return "idle"
+	if s.waitingApproval {
+		return "approval"
 	}
+	return "idle"
+}
 
-	// Only check if the session produced output recently (within 30 seconds).
-	// Approval prompts are interactive — if nothing happened for 30s, it's stale.
-	if time.Since(s.lastOutputAt) > 30*time.Second {
-		return "idle"
-	}
-
-	// Only check the last ~500 bytes (roughly the current screen).
-	// The 32KB tail buffer retains too much history — old approval text
-	// from earlier in the conversation causes false positives.
-	raw := s.tailText.Bytes()
-	if len(raw) > 500 {
-		raw = raw[len(raw)-500:]
-	}
-	text := strings.ToLower(string(raw))
-
-	// Claude Code approval prompt patterns — must be specific to avoid
-	// false positives from normal output containing "allow" or "permission".
-	approvalPatterns := []string{
-		"yes, allow",
-		"yes, during this session",
-		"allow once",
-		"allow always",
-		"do you want to proceed",
-	}
-
-	for _, p := range approvalPatterns {
-		if strings.Contains(text, p) {
-			return "approval"
+// SetApprovalState is called by the PermissionRequest hook endpoint
+// to mark a session as waiting for tool approval.
+func (tm *TerminalManager) SetApprovalState(sessionID, toolName string) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		// Try matching by directory (hook doesn't know PTY session ID)
+		tm.mu.Lock()
+		for _, sess := range tm.sessions {
+			if sess.dir == sessionID {
+				s = sess
+				break
+			}
+		}
+		tm.mu.Unlock()
+		if s == nil {
+			return
 		}
 	}
-
-	return "idle"
+	s.mu.Lock()
+	s.waitingApproval = true
+	s.approvalTool = toolName
+	s.mu.Unlock()
 }
 
 // Subscribe returns a channel that receives raw PTY output for the given session.

@@ -37,6 +37,7 @@ func (api *APIServer) Start() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", api.handleHealth)
+	mux.HandleFunc("/api/hooks/permission-request", api.handlePermissionRequest) // no auth — called by Claude hook
 	mux.HandleFunc("/api/sessions", api.authMiddleware(api.handleSessions))
 	mux.HandleFunc("/api/sessions/", api.authMiddleware(api.handleSessionRoute))
 	mux.HandleFunc("/api/files", api.authMiddleware(api.handleFiles))
@@ -302,6 +303,50 @@ func (api *APIServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, changes)
+}
+
+// handlePermissionRequest is called by Claude Code's PermissionRequest hook.
+// It marks the session (matched by working directory) as waiting for approval.
+// No auth required — this is called by the Claude process running locally.
+func (api *APIServer) handlePermissionRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ToolName  string `json:"tool_name"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	// Match by session_id (Claude session UUID) or fall back to directory matching
+	matched := false
+	sessions := api.tm.GetSessions()
+
+	if req.SessionID != "" {
+		// Try matching by Claude session UUID
+		for _, s := range sessions {
+			claudeID, _ := api.tm.GetClaudeSessionID(s.ID)
+			if claudeID == req.SessionID {
+				api.tm.SetApprovalState(s.ID, req.ToolName)
+				matched = true
+				break
+			}
+		}
+	}
+
+	if !matched {
+		// Mark all active sessions — the hook doesn't reliably identify which one
+		for _, s := range sessions {
+			api.tm.SetApprovalState(s.ID, req.ToolName)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
