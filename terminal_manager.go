@@ -524,23 +524,29 @@ func (tm *TerminalManager) GetSessionState(sessionID string) string {
 		return "idle"
 	}
 
-	// Only check for approval patterns if the session produced output recently.
-	// Stale sessions (no output for >30s) should not flash — the approval prompt
-	// text stays in the ring buffer forever but isn't relevant anymore.
-	if time.Since(s.lastOutputAt) > 30*time.Minute {
+	// Only check if the session produced output recently (within 30 seconds).
+	// Approval prompts are interactive — if nothing happened for 30s, it's stale.
+	if time.Since(s.lastOutputAt) > 30*time.Second {
 		return "idle"
 	}
 
-	text := strings.ToLower(string(s.tailText.Bytes()))
+	// Only check the last ~500 bytes (roughly the current screen).
+	// The 32KB tail buffer retains too much history — old approval text
+	// from earlier in the conversation causes false positives.
+	raw := s.tailText.Bytes()
+	if len(raw) > 500 {
+		raw = raw[len(raw)-500:]
+	}
+	text := strings.ToLower(string(raw))
 
-	// Claude Code approval prompt patterns
+	// Claude Code approval prompt patterns — must be specific to avoid
+	// false positives from normal output containing "allow" or "permission".
 	approvalPatterns := []string{
-		"allow",
 		"yes, allow",
 		"yes, during this session",
-		"deny",
-		"permission",
-		"do you want to",
+		"allow once",
+		"allow always",
+		"do you want to proceed",
 	}
 
 	for _, p := range approvalPatterns {
