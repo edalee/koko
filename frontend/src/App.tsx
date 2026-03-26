@@ -116,7 +116,12 @@ export default function App() {
   const handleInjectCommand = useCallback(
     (command: string) => {
       if (activeTabId) {
-        Write(activeTabId, btoa(command));
+        const bytes = new TextEncoder().encode(command);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        Write(activeTabId, btoa(binary));
       }
     },
     [activeTabId],

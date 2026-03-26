@@ -148,8 +148,10 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     container.addEventListener("contextmenu", onContextMenu);
 
     // User input → PTY (uses ref so it always targets current session)
+    // Uses TextEncoder for UTF-8 safety — btoa() fails on characters > U+00FF
+    // (e.g. em dashes, smart quotes, non-Latin text).
     const onDataDisposable = term.onData((data: string) => {
-      Write(sessionIdRef.current, btoa(data));
+      Write(sessionIdRef.current, utf8ToBase64(data));
     });
 
     const onBinaryDisposable = term.onBinary((data: string) => {
@@ -157,7 +159,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
       }
-      Write(sessionIdRef.current, btoa(String.fromCharCode(...bytes)));
+      Write(sessionIdRef.current, uint8ToBase64(bytes));
     });
 
     // Resize — debounce to avoid rapid SIGWINCH during drag.
@@ -277,7 +279,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
           }}
           onPaste={async () => {
             const text = await navigator.clipboard.readText();
-            if (text && termRef.current) Write(sessionIdRef.current, btoa(text));
+            if (text && termRef.current) Write(sessionIdRef.current, utf8ToBase64(text));
             setCtxMenu(null);
           }}
           onSelectAll={() => {
@@ -421,4 +423,19 @@ function htmlToMarkdown(html: string): string {
     .map((line) => line.trimEnd())
     .join("\n")
     .trim();
+}
+
+/** Encode a UTF-8 string to base64 (safe for Unicode — btoa fails on chars > U+00FF). */
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  return uint8ToBase64(bytes);
+}
+
+/** Encode a Uint8Array to base64. */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
