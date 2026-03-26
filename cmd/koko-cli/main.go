@@ -72,7 +72,7 @@ Commands:
   files [dir]           Git file changes in a directory
   help                  Show this help
 
-Slugs look like "koko/1", "drumstick/2". Use "sessions" to see them.`)
+Slugs look like "koko-1", "drumstick-2". Use "sessions" to see them.`)
 }
 
 func cmdSessions(client *apiClient) {

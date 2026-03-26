@@ -217,9 +217,9 @@ func dirSlugFromPath(dir string) string {
 	dir = strings.TrimRight(dir, "/")
 	parts := strings.Split(dir, "/")
 	if len(parts) == 0 {
-		return "session/1"
+		return "session-1"
 	}
-	return parts[len(parts)-1] + "/1"
+	return parts[len(parts)-1] + "-1"
 }
 
 // SaveSessions persists session state to disk with atomic write + backup.

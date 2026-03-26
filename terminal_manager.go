@@ -103,11 +103,11 @@ func dirSlug(dir string) string {
 	return slug
 }
 
-// nextSlug generates the next slug for a directory, e.g. "koko/1", "koko/2".
+// nextSlug generates the next slug for a directory, e.g. "koko-1", "koko-2".
 func (tm *TerminalManager) nextSlug(dir string) string {
 	base := dirSlug(dir)
 	tm.slugCount[dir]++
-	return fmt.Sprintf("%s/%d", base, tm.slugCount[dir])
+	return fmt.Sprintf("%s-%d", base, tm.slugCount[dir])
 }
 
 // resolveLoginPath gets the full PATH from an interactive login shell.
@@ -492,7 +492,7 @@ func (tm *TerminalManager) GetClaudeSessionID(sessionID string) (string, error) 
 	return s.claudeSessionID, nil
 }
 
-// GetSessionBySlug finds a session by its slug (e.g. "koko/1").
+// GetSessionBySlug finds a session by its slug (e.g. "koko-1").
 func (tm *TerminalManager) GetSessionBySlug(slug string) *SessionInfo {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()

@@ -3,7 +3,7 @@ package main
 // SessionInfo represents metadata about a running terminal session.
 type SessionInfo struct {
 	ID   string `json:"id"`   // PTY session ID (transient)
-	Slug string `json:"slug"` // human-friendly slug e.g. "koko/1"
+	Slug string `json:"slug"` // human-friendly slug e.g. "koko-1"
 	Name string `json:"name"`
 	Dir  string `json:"dir"`
 }
@@ -11,7 +11,7 @@ type SessionInfo struct {
 // SessionRecord is the unified persisted session model.
 // Replaces SavedSessionTab and SavedSessionHistory.
 type SessionRecord struct {
-	Slug            string `json:"slug"`                      // e.g. "koko/1"
+	Slug            string `json:"slug"`                      // e.g. "koko-1"
 	Name            string `json:"name"`                      // display name
 	Directory       string `json:"directory"`                 // full path
 	ClaudeSessionID string `json:"claudeSessionId,omitempty"` // UUID from Claude Code JSONL

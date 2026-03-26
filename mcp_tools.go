@@ -25,7 +25,7 @@ func mcpToolDefinitions() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"session_id": map[string]string{
 						"type":        "string",
-						"description": "Session slug (e.g. koko/1) or PTY ID",
+						"description": "Session slug (e.g. koko-1) or PTY ID",
 					},
 				},
 				"required": []string{"session_id"},
@@ -39,7 +39,7 @@ func mcpToolDefinitions() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"session_id": map[string]string{
 						"type":        "string",
-						"description": "Session slug (e.g. koko/1) or PTY ID",
+						"description": "Session slug (e.g. koko-1) or PTY ID",
 					},
 				},
 				"required": []string{"session_id"},
@@ -53,7 +53,7 @@ func mcpToolDefinitions() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"session_id": map[string]string{
 						"type":        "string",
-						"description": "Session slug (e.g. koko/1) or PTY ID",
+						"description": "Session slug (e.g. koko-1) or PTY ID",
 					},
 					"text": map[string]string{
 						"type":        "string",
@@ -93,7 +93,7 @@ func mcpToolDefinitions() []map[string]interface{} {
 				"properties": map[string]interface{}{
 					"session_id": map[string]string{
 						"type":        "string",
-						"description": "Session slug (e.g. koko/1) or PTY ID",
+						"description": "Session slug (e.g. koko-1) or PTY ID",
 					},
 				},
 				"required": []string{"session_id"},

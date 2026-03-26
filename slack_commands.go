@@ -299,7 +299,7 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 			"`files <slug>` — Git file changes\n" +
 			"`output [slug]` — Last ~50 lines of output\n" +
 			"`help` — This message\n" +
-			"_Slugs look like `koko/1`, `drumstick/2`_"
+			"_Slugs look like `koko-1`, `drumstick-2`_"
 
 	default:
 		return fmt.Sprintf("Unknown command: `%s`. Type `help` for available commands.", cmd)
@@ -315,7 +315,7 @@ func (h *SlackCommandHandler) resolveSessionID(parts []string) string {
 		}
 		return ""
 	}
-	// Accept slug (e.g. "koko/1") or PTY ID (e.g. "session-1")
+	// Accept slug (e.g. "koko-1") or PTY ID (e.g. "session-1")
 	resolved := h.tm.ResolveSession(parts[1])
 	if resolved != "" {
 		return resolved

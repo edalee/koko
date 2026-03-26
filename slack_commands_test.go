@@ -43,7 +43,7 @@ func TestSlackCommand_SessionsWithData(t *testing.T) {
 
 	s := &session{
 		id:          "session-1",
-		slug:        "project/1",
+		slug:        "project-1",
 		name:        "My Session",
 		dir:         "/tmp/project",
 		done:        make(chan struct{}),
@@ -59,7 +59,7 @@ func TestSlackCommand_SessionsWithData(t *testing.T) {
 	if !strings.Contains(reply, "My Session") {
 		t.Fatalf("expected session name in reply, got %q", reply)
 	}
-	if !strings.Contains(reply, "project/1") {
+	if !strings.Contains(reply, "project-1") {
 		t.Fatalf("expected slug in reply, got %q", reply)
 	}
 }
@@ -69,7 +69,7 @@ func TestSlackCommand_ResolveBySlug(t *testing.T) {
 
 	s := &session{
 		id:          "session-1",
-		slug:        "koko/1",
+		slug:        "koko-1",
 		name:        "Test",
 		dir:         "/tmp",
 		done:        make(chan struct{}),
@@ -82,7 +82,7 @@ func TestSlackCommand_ResolveBySlug(t *testing.T) {
 	h.tm.mu.Unlock()
 
 	// Resolve by slug
-	reply := h.handleCommand("status koko/1")
+	reply := h.handleCommand("status koko-1")
 	if !strings.Contains(reply, "output from koko") {
 		t.Fatalf("expected output via slug, got %q", reply)
 	}
