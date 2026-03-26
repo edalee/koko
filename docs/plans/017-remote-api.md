@@ -26,6 +26,8 @@ Exposes Koko's functionality via HTTP/WebSocket API, enabling remote access thro
 ## MCP Tools
 list_sessions, get_session_state, read_output, send_input, create_session, close_session, list_file_changes
 
+The MCP server is a general-purpose integration point — not limited to Claude Code. Any MCP-compatible Claude client can use these tools: Claude Code, custom apps built with the Claude SDK, Telegram/Discord bots running Claude, or any tool that speaks MCP. The server auto-registers in `~/.claude/settings.json` on app startup.
+
 ## Slack Commands
 All commands require a `koko` prefix to avoid responding to normal DMs:
 `koko sessions`, `koko status`, `koko send`, `koko files`, `koko output`, `koko help`

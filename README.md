@@ -55,9 +55,9 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 
 ### Remote Access
 - **HTTP API** — Control sessions, read output, and stream terminal data over REST/WebSocket on localhost
-- **MCP Server** — Claude Code can interact with Koko sessions as tools (`koko mcp`)
-- **Slack Bot** — DM the bot: `sessions`, `status`, `send <id> <text>` — owner-only access
-- **CLI Companion** — `koko-cli sessions`, `koko-cli tail <id>`, `koko-cli send <id> <text>`
+- **MCP Server** — Any Claude instance with the Koko MCP configured can list sessions, read output, send input, and manage files. Works with Claude Code, Claude in custom apps, Telegram bots, or any MCP-compatible client. Auto-registered on startup (`koko mcp`)
+- **Slack Bot** — DM the bot: `sessions`, `status`, `send <slug> <text>` — owner-only access
+- **CLI Companion** — `koko-cli sessions`, `koko-cli tail <slug>`, `koko-cli send <slug> <text>`
 
 ### Safe Working
 - **Quiet Hours** — Set a time window (e.g. 23:00–07:00) when the app blocks access with a full-screen overlay
@@ -196,7 +196,7 @@ Kõkõ is built with [Wails v2](https://wails.io/) — a Go backend connected to
 - **Wails IPC** bridges Go ↔ JavaScript with type-safe bindings (Go structs become TypeScript classes)
 - **PTY sessions** stream base64-encoded terminal data over Wails events
 - **API server** exposes sessions, output, and git changes over HTTP/WebSocket for remote access
-- **MCP server** (`koko mcp`) lets Claude Code interact with Koko sessions as tools
+- **MCP server** (`koko mcp`) exposes 7 tools for session management — usable by any MCP-compatible Claude client (Claude Code, custom apps, bots)
 - **Slack bot** listens for DMs from the configured owner and responds with session data
 - **Go tests** cover API server, auth, MCP protocol, Slack commands, config, and subscriber fan-out
 - **Vitest** tests guard against terminal resize and state regressions
