@@ -504,6 +504,23 @@ func (tm *TerminalManager) GetSessionBySlug(slug string) *SessionInfo {
 	return nil
 }
 
+// ResolveSession finds a session by slug or PTY ID. Returns the PTY session ID.
+func (tm *TerminalManager) ResolveSession(idOrSlug string) string {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	// Try direct ID
+	if _, ok := tm.sessions[idOrSlug]; ok {
+		return idOrSlug
+	}
+	// Try slug
+	for _, s := range tm.sessions {
+		if s.slug == idOrSlug {
+			return s.id
+		}
+	}
+	return ""
+}
+
 func (tm *TerminalManager) GetSessionPID(sessionID string) (int, error) {
 	s, err := tm.getSession(sessionID)
 	if err != nil {

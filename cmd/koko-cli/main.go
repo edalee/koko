@@ -65,12 +65,14 @@ func printUsage() {
 
 Commands:
   sessions              List active sessions
-  status [session-id]   Session state + output snippet
-  send <id> <text>      Send input to a session
-  output [session-id]   Recent terminal output
-  tail [session-id]     Stream output (WebSocket, Ctrl+C to stop)
+  status [slug]         Session state + output snippet
+  send <slug> <text>    Send input to a session
+  output [slug]         Recent terminal output
+  tail [slug]           Stream output (WebSocket, Ctrl+C to stop)
   files [dir]           Git file changes in a directory
-  help                  Show this help`)
+  help                  Show this help
+
+Slugs look like "koko/1", "drumstick/2". Use "sessions" to see them.`)
 }
 
 func cmdSessions(client *apiClient) {
@@ -81,6 +83,7 @@ func cmdSessions(client *apiClient) {
 
 	var sessions []struct {
 		ID   string `json:"id"`
+		Slug string `json:"slug"`
 		Name string `json:"name"`
 		Dir  string `json:"dir"`
 	}
@@ -94,11 +97,15 @@ func cmdSessions(client *apiClient) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tDIRECTORY")
+	fmt.Fprintln(w, "SLUG\tNAME\tDIRECTORY")
 	for _, s := range sessions {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", s.ID, s.Name, s.Dir)
+		slug := s.Slug
+		if slug == "" {
+			slug = s.ID
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", slug, s.Name, s.Dir)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func cmdStatus(client *apiClient, id string) {
@@ -106,7 +113,7 @@ func cmdStatus(client *apiClient, id string) {
 		id = defaultSession(client)
 	}
 	if id == "" {
-		fmt.Fprintln(os.Stderr, "Usage: koko-cli status [session-id]")
+		fmt.Fprintln(os.Stderr, "Usage: koko-cli status [slug]")
 		os.Exit(1)
 	}
 
@@ -116,14 +123,19 @@ func cmdStatus(client *apiClient, id string) {
 	}
 
 	var detail struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Dir   string `json:"dir"`
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+		Dir  string `json:"dir"`
 		State string `json:"state"`
 	}
 	_ = json.Unmarshal(body, &detail)
 
-	fmt.Printf("Session: %s (%s)\n", detail.Name, detail.ID)
+	slug := detail.Slug
+	if slug == "" {
+		slug = detail.ID
+	}
+	fmt.Printf("Session: %s (%s)\n", detail.Name, slug)
 	fmt.Printf("Dir:     %s\n", detail.Dir)
 	fmt.Printf("State:   %s\n", detail.State)
 
@@ -163,7 +175,7 @@ func cmdOutput(client *apiClient, id string) {
 		id = defaultSession(client)
 	}
 	if id == "" {
-		fmt.Fprintln(os.Stderr, "Usage: koko-cli output [session-id]")
+		fmt.Fprintln(os.Stderr, "Usage: koko-cli output [slug]")
 		os.Exit(1)
 	}
 
@@ -188,7 +200,7 @@ func cmdTail(client *apiClient, id string) {
 		id = defaultSession(client)
 	}
 	if id == "" {
-		fmt.Fprintln(os.Stderr, "Usage: koko-cli tail [session-id]")
+		fmt.Fprintln(os.Stderr, "Usage: koko-cli tail [slug]")
 		os.Exit(1)
 	}
 
@@ -240,17 +252,21 @@ func cmdFiles(client *apiClient, dir string) {
 	}
 }
 
-// defaultSession returns the first session ID if there's exactly one.
+// defaultSession returns the slug (or ID) of the first session if there's exactly one.
 func defaultSession(client *apiClient) string {
 	body, err := client.get("/api/sessions")
 	if err != nil {
 		return ""
 	}
 	var sessions []struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
 	}
 	_ = json.Unmarshal(body, &sessions)
 	if len(sessions) == 1 {
+		if sessions[0].Slug != "" {
+			return sessions[0].Slug
+		}
 		return sessions[0].ID
 	}
 	return ""

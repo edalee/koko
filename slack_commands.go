@@ -187,7 +187,11 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 		var lines []string
 		for _, s := range sessions {
 			state := h.tm.GetSessionState(s.ID)
-			lines = append(lines, fmt.Sprintf("*%s* (`%s`) — %s\n  `%s`", s.Name, s.ID, state, s.Dir))
+			label := s.Slug
+			if label == "" {
+				label = s.ID
+			}
+			lines = append(lines, fmt.Sprintf("*%s* (`%s`) — %s\n  `%s`", s.Name, label, state, s.Dir))
 		}
 		return strings.Join(lines, "\n")
 
@@ -209,25 +213,32 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 
 	case "send":
 		if len(parts) < 3 {
-			return "Usage: `send <session-id> <text>`"
+			return "Usage: `send <slug> <text>`"
 		}
-		id := parts[1]
+		id := h.tm.ResolveSession(parts[1])
+		if id == "" {
+			return fmt.Sprintf("Session `%s` not found.", parts[1])
+		}
 		text := strings.Join(parts[2:], " ") + "\n"
 		encoded := slackEncodeBase64([]byte(text))
 		if err := h.tm.Write(id, encoded); err != nil {
 			return fmt.Sprintf("Error: %v", err)
 		}
-		return fmt.Sprintf("Sent to `%s`.", id)
+		return fmt.Sprintf("Sent to `%s`.", parts[1])
 
 	case "files":
 		if len(parts) < 2 {
-			return "Usage: `files <session-id>`"
+			return "Usage: `files <slug>`"
 		}
-		// Get directory from session
+		// Resolve slug/ID and get directory
+		resolved := h.tm.ResolveSession(parts[1])
+		if resolved == "" {
+			return fmt.Sprintf("Session `%s` not found.", parts[1])
+		}
 		sessions := h.tm.GetSessions()
 		var dir string
 		for _, s := range sessions {
-			if s.ID == parts[1] {
+			if s.ID == resolved {
 				dir = s.Dir
 				break
 			}
@@ -283,11 +294,12 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 	case "help":
 		return "*Koko Commands:*\n" +
 			"`sessions` — List active sessions\n" +
-			"`status <id>` — Session state + output snippet\n" +
-			"`send <id> <text>` — Send text to session\n" +
-			"`files <id>` — Git file changes\n" +
-			"`output <id>` — Last ~50 lines of output\n" +
-			"`help` — This message"
+			"`status [slug]` — Session state + output snippet\n" +
+			"`send <slug> <text>` — Send text to session\n" +
+			"`files <slug>` — Git file changes\n" +
+			"`output [slug]` — Last ~50 lines of output\n" +
+			"`help` — This message\n" +
+			"_Slugs look like `koko/1`, `drumstick/2`_"
 
 	default:
 		return fmt.Sprintf("Unknown command: `%s`. Type `help` for available commands.", cmd)
@@ -303,7 +315,12 @@ func (h *SlackCommandHandler) resolveSessionID(parts []string) string {
 		}
 		return ""
 	}
-	return parts[1]
+	// Accept slug (e.g. "koko/1") or PTY ID (e.g. "session-1")
+	resolved := h.tm.ResolveSession(parts[1])
+	if resolved != "" {
+		return resolved
+	}
+	return parts[1] // pass through for error handling downstream
 }
 
 func (h *SlackCommandHandler) sendMessage(token, channel, text string) {

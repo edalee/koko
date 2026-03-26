@@ -43,6 +43,7 @@ func TestSlackCommand_SessionsWithData(t *testing.T) {
 
 	s := &session{
 		id:          "session-1",
+		slug:        "project/1",
 		name:        "My Session",
 		dir:         "/tmp/project",
 		done:        make(chan struct{}),
@@ -58,8 +59,38 @@ func TestSlackCommand_SessionsWithData(t *testing.T) {
 	if !strings.Contains(reply, "My Session") {
 		t.Fatalf("expected session name in reply, got %q", reply)
 	}
-	if !strings.Contains(reply, "session-1") {
-		t.Fatalf("expected session ID in reply, got %q", reply)
+	if !strings.Contains(reply, "project/1") {
+		t.Fatalf("expected slug in reply, got %q", reply)
+	}
+}
+
+func TestSlackCommand_ResolveBySlug(t *testing.T) {
+	h := newTestSlackHandler(t)
+
+	s := &session{
+		id:          "session-1",
+		slug:        "koko/1",
+		name:        "Test",
+		dir:         "/tmp",
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
+	}
+	s.tailText.Write([]byte("output from koko"))
+	h.tm.mu.Lock()
+	h.tm.sessions["session-1"] = s
+	h.tm.mu.Unlock()
+
+	// Resolve by slug
+	reply := h.handleCommand("status koko/1")
+	if !strings.Contains(reply, "output from koko") {
+		t.Fatalf("expected output via slug, got %q", reply)
+	}
+
+	// Resolve by PTY ID still works
+	reply = h.handleCommand("status session-1")
+	if !strings.Contains(reply, "output from koko") {
+		t.Fatalf("expected output via PTY ID, got %q", reply)
 	}
 }
 
