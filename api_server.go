@@ -405,8 +405,9 @@ done:
 var ansiStripRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[()][0-9A-B]|\x1b\[[\?]?[0-9;]*[hlmsu]`)
 
 // handlePermissionRequest is called by Claude Code's PermissionRequest hook.
-// It marks the session (matched by working directory) as waiting for approval.
-// No auth required — this is called by the Claude process running locally.
+// It marks the matching session as waiting for approval, then returns an empty
+// response so Claude Code still shows the permission prompt to the user.
+// No auth required — called by the Claude process running locally.
 func (api *APIServer) handlePermissionRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -416,18 +417,20 @@ func (api *APIServer) handlePermissionRequest(w http.ResponseWriter, r *http.Req
 	var req struct {
 		ToolName  string `json:"tool_name"`
 		SessionID string `json:"session_id"`
+		CWD       string `json:"cwd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
 
-	// Match by session_id (Claude session UUID) or fall back to directory matching
-	matched := false
+	log.Printf("[hooks] PermissionRequest: tool=%s session=%s cwd=%s", req.ToolName, req.SessionID, req.CWD)
+
+	// Match session by Claude UUID first, then by working directory
 	sessions := api.tm.GetSessions()
+	matched := false
 
 	if req.SessionID != "" {
-		// Try matching by Claude session UUID
 		for _, s := range sessions {
 			claudeID, _ := api.tm.GetClaudeSessionID(s.ID)
 			if claudeID == req.SessionID {
@@ -438,14 +441,18 @@ func (api *APIServer) handlePermissionRequest(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if !matched {
-		// Mark all active sessions — the hook doesn't reliably identify which one
+	if !matched && req.CWD != "" {
 		for _, s := range sessions {
-			api.tm.SetApprovalState(s.ID, req.ToolName)
+			if s.Dir == req.CWD {
+				api.tm.SetApprovalState(s.ID, req.ToolName)
+				break
+			}
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	// Return empty JSON object — tells Claude Code "no decision, show the prompt"
+	// Returning a decision would auto-approve/deny without showing the user.
+	writeJSON(w, http.StatusOK, map[string]interface{}{})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
