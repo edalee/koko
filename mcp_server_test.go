@@ -57,8 +57,8 @@ func TestMCPToolsList(t *testing.T) {
 		t.Fatal("expected tools array")
 	}
 
-	if len(tools) != 7 {
-		t.Fatalf("expected 7 tools, got %d", len(tools))
+	if len(tools) != 8 {
+		t.Fatalf("expected 8 tools, got %d", len(tools))
 	}
 
 	// Verify expected tool names
@@ -67,6 +67,7 @@ func TestMCPToolsList(t *testing.T) {
 		"get_session_state": true,
 		"read_output":       true,
 		"send_input":        true,
+		"interact":          true,
 		"create_session":    true,
 		"close_session":     true,
 		"list_file_changes": true,

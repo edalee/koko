@@ -100,6 +100,32 @@ func mcpToolDefinitions() []map[string]interface{} {
 			},
 		},
 		{
+			"name":        "interact",
+			"description": "Send text to a session and wait for the response. Blocks until output settles (no new data for quiet_ms). Returns ANSI-stripped text. Use this instead of send_input + read_output for conversational interaction.",
+			"inputSchema": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]string{
+						"type":        "string",
+						"description": "Session slug (e.g. koko-1) or PTY ID",
+					},
+					"text": map[string]string{
+						"type":        "string",
+						"description": "Text to send (newline appended automatically)",
+					},
+					"timeout_ms": map[string]interface{}{
+						"type":        "number",
+						"description": "Max wait time in ms (default 120000)",
+					},
+					"quiet_ms": map[string]interface{}{
+						"type":        "number",
+						"description": "Output settle time in ms — response is complete when no output for this long (default 3000)",
+					},
+				},
+				"required": []string{"session_id", "text"},
+			},
+		},
+		{
 			"name":        "list_file_changes",
 			"description": "List git file changes (staged and unstaged) in a directory",
 			"inputSchema": map[string]interface{}{
@@ -170,6 +196,37 @@ func callMCPTool(client *mcpClient, name string, args map[string]interface{}) (s
 			return "", err
 		}
 		return "Input sent successfully", nil
+
+	case "interact":
+		id, _ := args["session_id"].(string)
+		text, _ := args["text"].(string)
+		if id == "" {
+			return "", fmt.Errorf("session_id is required")
+		}
+		if text == "" {
+			return "", fmt.Errorf("text is required")
+		}
+		payload := map[string]interface{}{
+			"text": text,
+		}
+		if timeoutMs, ok := args["timeout_ms"].(float64); ok && timeoutMs > 0 {
+			payload["timeout_ms"] = int(timeoutMs)
+		}
+		if quietMs, ok := args["quiet_ms"].(float64); ok && quietMs > 0 {
+			payload["quiet_ms"] = int(quietMs)
+		}
+		body, err := client.post("/api/sessions/"+id+"/interact", payload)
+		if err != nil {
+			return "", err
+		}
+		var result struct {
+			Output string `json:"output"`
+		}
+		_ = json.Unmarshal(body, &result)
+		if result.Output == "" {
+			return "(no output)", nil
+		}
+		return result.Output, nil
 
 	case "create_session":
 		dir, _ := args["dir"].(string)

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -138,6 +140,16 @@ func (api *APIServer) handleSessionRoute(w http.ResponseWriter, r *http.Request)
 		action = parts[1]
 	}
 
+	// Resolve slug or PTY ID upfront — all sub-handlers use the resolved PTY ID
+	resolved := api.resolveSessionID(sessionID)
+	if resolved == "" && action != "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	if resolved != "" {
+		sessionID = resolved
+	}
+
 	switch action {
 	case "":
 		switch r.Method {
@@ -156,6 +168,8 @@ func (api *APIServer) handleSessionRoute(w http.ResponseWriter, r *http.Request)
 		api.handleSessionState(w, sessionID)
 	case "stream":
 		api.handleSessionStream(w, r, sessionID)
+	case "interact":
+		api.handleSessionInteract(w, r, sessionID)
 	default:
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}
@@ -304,6 +318,91 @@ func (api *APIServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, changes)
 }
+
+// handleSessionInteract sends text to a session and waits for the response.
+// Blocks until output settles (no new output for the specified quiet period).
+// This is the "one-shot send+receive" pattern for bots and scripts.
+func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Text       string `json:"text"`
+		TimeoutMs  int    `json:"timeout_ms"`  // max wait time (default 120000)
+		QuietMs    int    `json:"quiet_ms"`    // output settle time (default 3000)
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.TimeoutMs == 0 {
+		req.TimeoutMs = 120000
+	}
+	if req.QuietMs == 0 {
+		req.QuietMs = 3000
+	}
+
+	// Subscribe to output before sending input
+	ch := api.tm.Subscribe(sessionID)
+	if ch == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+	defer api.tm.Unsubscribe(sessionID, ch)
+
+	// Send the input
+	text := req.Text
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte(text))
+	if err := api.tm.Write(sessionID, encoded); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Wait for output to settle — collect all output until quiet period elapses
+	timeout := time.After(time.Duration(req.TimeoutMs) * time.Millisecond)
+	quiet := time.Duration(req.QuietMs) * time.Millisecond
+	quietTimer := time.NewTimer(quiet)
+	defer quietTimer.Stop()
+
+	var collected []byte
+	for {
+		select {
+		case data, ok := <-ch:
+			if !ok {
+				goto done
+			}
+			collected = append(collected, data...)
+			// Reset quiet timer — more output is coming
+			if !quietTimer.Stop() {
+				select {
+				case <-quietTimer.C:
+				default:
+				}
+			}
+			quietTimer.Reset(quiet)
+		case <-quietTimer.C:
+			goto done
+		case <-timeout:
+			goto done
+		}
+	}
+
+done:
+	// Strip ANSI for clean text output
+	stripped := ansiStripRegex.ReplaceAll(collected, nil)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"output":  string(stripped),
+		"raw":     string(collected),
+		"length":  len(collected),
+	})
+}
+
+var ansiStripRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[()][0-9A-B]|\x1b\[[\?]?[0-9;]*[hlmsu]`)
 
 // handlePermissionRequest is called by Claude Code's PermissionRequest hook.
 // It marks the session (matched by working directory) as waiting for approval.
