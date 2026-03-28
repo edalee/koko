@@ -1,16 +1,13 @@
-import { ArrowUpCircle, Bell, GitPullRequest, Settings, X } from "lucide-react";
+import { ArrowUpCircle, Settings, X } from "lucide-react";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import kokoLogo from "../assets/koko_logo.svg";
 import type { OverlayModule } from "../hooks/useOverlay";
 import type { UpdateInfo } from "../hooks/useUpdateCheck";
 import { cn } from "../lib/utils";
-import NotificationBadge from "./NotificationBadge";
 
 interface ToolbarProps {
   activeOverlay: OverlayModule | null;
   onToggleOverlay: (module: OverlayModule) => void;
-  githubCount: number;
-  notifCount: number;
   update: UpdateInfo | null;
   onDismissUpdate: () => void;
 }
@@ -18,8 +15,6 @@ interface ToolbarProps {
 export default function Toolbar({
   activeOverlay,
   onToggleOverlay,
-  githubCount,
-  notifCount,
   update,
   onDismissUpdate,
 }: ToolbarProps) {
@@ -63,43 +58,11 @@ export default function Toolbar({
         </div>
       )}
 
-      {/* Notification icons + Settings */}
+      {/* Settings */}
       <div
         className="flex items-center gap-1"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <button
-          type="button"
-          onClick={() => onToggleOverlay("github")}
-          className={cn(
-            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
-            activeOverlay === "github"
-              ? "text-accent bg-white/10"
-              : "text-white/70 hover:text-white hover:bg-white/5",
-          )}
-          title="GitHub PRs"
-        >
-          <GitPullRequest className="size-4" />
-          <NotificationBadge count={githubCount} />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onToggleOverlay("notifications")}
-          className={cn(
-            "relative flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-colors",
-            activeOverlay === "notifications"
-              ? "text-accent bg-white/10"
-              : "text-white/70 hover:text-white hover:bg-white/5",
-          )}
-          title="Notifications"
-        >
-          <Bell className="size-4" />
-          <NotificationBadge count={notifCount} color="var(--color-badge-mail)" />
-        </button>
-
-        <div className="w-px h-4 bg-white/10 mx-1" />
-
         <button
           type="button"
           onClick={() => onToggleOverlay("settings")}

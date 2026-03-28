@@ -8,6 +8,8 @@ export function FetchNotifications(arg1:string):Promise<Array<main.GitHubNotific
 
 export function FetchPRs():Promise<Array<main.GitHubPR>>;
 
+export function MarkAllNotificationsRead():Promise<void>;
+
 export function MarkNotificationRead(arg1:string):Promise<void>;
 
 export function MergePR(arg1:string,arg2:number):Promise<void>;

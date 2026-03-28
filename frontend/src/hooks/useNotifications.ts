@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FetchNotifications, MarkNotificationRead } from "../../wailsjs/go/main/GitHubService";
+import {
+  FetchNotifications,
+  MarkAllNotificationsRead,
+  MarkNotificationRead,
+} from "../../wailsjs/go/main/GitHubService";
 
 export interface GitHubNotification {
   id: string;
@@ -22,6 +26,7 @@ interface UseNotificationsResult {
   setFilter: (f: NotifFilter) => void;
   refresh: () => void;
   markRead: (id: string) => void;
+  markAllRead: () => void;
 }
 
 export function useNotifications(): UseNotificationsResult {
@@ -77,5 +82,15 @@ export function useNotifications(): UseNotificationsResult {
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
-  return { notifications, unreadCount, loading, filter, setFilter, refresh, markRead };
+  const markAllRead = useCallback(async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+    try {
+      await MarkAllNotificationsRead();
+      fetchData(false);
+    } catch {
+      fetchData(false);
+    }
+  }, [fetchData]);
+
+  return { notifications, unreadCount, loading, filter, setFilter, refresh, markRead, markAllRead };
 }

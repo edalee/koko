@@ -28,6 +28,24 @@ type ghPRJSON struct {
 	} `json:"author"`
 	ReviewDecision string `json:"reviewDecision"`
 	URL            string `json:"url"`
+	Body           string `json:"body"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	ChangedFiles   int    `json:"changedFiles"`
+	HeadRefName    string `json:"headRefName"`
+	BaseRefName    string `json:"baseRefName"`
+	CreatedAt      string `json:"createdAt"`
+	UpdatedAt      string `json:"updatedAt"`
+	Mergeable      string `json:"mergeable"`
+	IsDraft        bool   `json:"isDraft"`
+	Labels         []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	StatusCheckRollup []struct {
+		Name       string `json:"name"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	} `json:"statusCheckRollup"`
 }
 
 type ghNotificationJSON struct {
@@ -84,6 +102,15 @@ func (g *GitHubService) FetchNotifications(filter string) ([]GitHubNotification,
 	}
 
 	return notifications, nil
+}
+
+// MarkAllNotificationsRead marks all notifications as read.
+func (g *GitHubService) MarkAllNotificationsRead() error {
+	err := exec.Command("gh", "api", "--method", "PUT", "/notifications").Run()
+	if err != nil {
+		return fmt.Errorf("failed to mark all notifications read: %w", err)
+	}
+	return nil
 }
 
 // MarkNotificationRead marks a single notification thread as read.
@@ -146,7 +173,7 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 	for _, repo := range trackedRepos {
 		out, err := exec.Command("gh", "pr", "list",
 			"--repo", "epidemicsound/"+repo,
-			"--json", "number,title,author,reviewDecision,url",
+			"--json", "number,title,author,reviewDecision,url,body,additions,deletions,changedFiles,headRefName,baseRefName,createdAt,updatedAt,mergeable,isDraft,labels,statusCheckRollup",
 			"--limit", "10",
 		).Output()
 		if err != nil {
@@ -157,6 +184,18 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 			continue
 		}
 		for _, pr := range prs {
+			var labels []string
+			for _, l := range pr.Labels {
+				labels = append(labels, l.Name)
+			}
+			var checks []PRCheck
+			for _, c := range pr.StatusCheckRollup {
+				checks = append(checks, PRCheck{
+					Name:       c.Name,
+					Status:     c.Status,
+					Conclusion: c.Conclusion,
+				})
+			}
 			allPRs = append(allPRs, GitHubPR{
 				Repo:           repo,
 				Number:         pr.Number,
@@ -164,6 +203,18 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 				Author:         pr.Author.Login,
 				ReviewDecision: pr.ReviewDecision,
 				URL:            pr.URL,
+				Body:           pr.Body,
+				Additions:      pr.Additions,
+				Deletions:      pr.Deletions,
+				ChangedFiles:   pr.ChangedFiles,
+				HeadRef:        pr.HeadRefName,
+				BaseRef:        pr.BaseRefName,
+				CreatedAt:      pr.CreatedAt,
+				UpdatedAt:      pr.UpdatedAt,
+				Mergeable:      pr.Mergeable,
+				IsDraft:        pr.IsDraft,
+				Labels:         labels,
+				Checks:         checks,
 			})
 		}
 	}

@@ -14,6 +14,10 @@ export function FetchPRs() {
   return window['go']['main']['GitHubService']['FetchPRs']();
 }
 
+export function MarkAllNotificationsRead() {
+  return window['go']['main']['GitHubService']['MarkAllNotificationsRead']();
+}
+
 export function MarkNotificationRead(arg1) {
   return window['go']['main']['GitHubService']['MarkNotificationRead'](arg1);
 }

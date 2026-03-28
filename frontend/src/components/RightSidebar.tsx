@@ -1,5 +1,7 @@
 import {
+  Bell,
   Bot,
+  CheckCheck,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -8,6 +10,7 @@ import {
   FileMinus,
   FilePlus,
   FileText,
+  GitPullRequest,
   Plug,
   RefreshCw,
   Sparkles,
@@ -16,9 +19,14 @@ import {
 import { useState } from "react";
 import type { main } from "../../wailsjs/go/models";
 import type { FileChange } from "../hooks/useFileChanges";
+import type { GitHubNotification, NotifFilter } from "../hooks/useNotifications";
 import type { SubagentProcess } from "../hooks/useSubagents";
+import type { GitHubPR } from "../types";
+import GitHubPanel from "./GitHubPanel";
+import NotificationBadge from "./NotificationBadge";
+import NotificationsPanel from "./NotificationsPanel";
 
-type SidebarModule = "files" | "context";
+type SidebarModule = "files" | "context" | "prs" | "notifications";
 
 interface RightSidebarProps {
   isCollapsed: boolean;
@@ -37,6 +45,17 @@ interface RightSidebarProps {
   onInjectCommand: (command: string) => void;
   hasActiveSession: boolean;
   onFileClick?: (path: string, staged: boolean) => void;
+  prs: GitHubPR[];
+  prsLoading: boolean;
+  onRefreshPRs: () => void;
+  notifications: GitHubNotification[];
+  notifCount: number;
+  notifLoading: boolean;
+  notifFilter: NotifFilter;
+  onNotifFilterChange: (f: NotifFilter) => void;
+  onRefreshNotifications: () => void;
+  onMarkNotifRead: (id: string) => void;
+  onMarkAllNotifRead: () => void;
 }
 
 function changeColor(change: FileChange): string {
@@ -158,6 +177,17 @@ export default function RightSidebar({
   onInjectCommand,
   hasActiveSession,
   onFileClick,
+  prs,
+  prsLoading,
+  onRefreshPRs,
+  notifications,
+  notifCount,
+  notifLoading,
+  notifFilter,
+  onNotifFilterChange,
+  onRefreshNotifications,
+  onMarkNotifRead,
+  onMarkAllNotifRead,
 }: RightSidebarProps) {
   const [activeModule, setActiveModule] = useState<SidebarModule>("files");
 
@@ -204,6 +234,37 @@ export default function RightSidebar({
           <Bot className="size-4" />
           {agentCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-accent" />
+          )}
+        </button>
+
+        <div className="w-5 border-t border-white/[0.06] my-1" />
+
+        <button
+          type="button"
+          onClick={() => handleModuleClick("prs")}
+          className={`relative p-1.5 rounded-md transition-colors ${
+            activeModule === "prs"
+              ? "text-accent bg-white/[0.08]"
+              : "text-muted-foreground hover:text-white hover:bg-white/5"
+          }`}
+          title="Pull Requests"
+        >
+          <GitPullRequest className="size-4" />
+          {prs.length > 0 && <NotificationBadge count={prs.length} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleModuleClick("notifications")}
+          className={`relative p-1.5 rounded-md transition-colors ${
+            activeModule === "notifications"
+              ? "text-accent bg-white/[0.08]"
+              : "text-muted-foreground hover:text-white hover:bg-white/5"
+          }`}
+          title="Notifications"
+        >
+          <Bell className="size-4" />
+          {notifCount > 0 && (
+            <NotificationBadge count={notifCount} color="var(--color-badge-mail)" />
           )}
         </button>
       </div>
@@ -271,6 +332,55 @@ export default function RightSidebar({
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+          {activeModule === "prs" && (
+            <div className="h-full flex flex-col">
+              <div className="border-b border-border px-4 py-3 flex items-center justify-between">
+                <h3 className="text-white text-sm">Pull Requests</h3>
+                <button
+                  type="button"
+                  onClick={onRefreshPRs}
+                  className="p-1 hover:bg-white/10 rounded transition-colors shrink-0"
+                  title="Refresh"
+                >
+                  <RefreshCw
+                    className={`size-3.5 text-muted-foreground ${prsLoading ? "animate-spin" : ""}`}
+                  />
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto">
+                <GitHubPanel prs={prs} loading={prsLoading} refresh={onRefreshPRs} />
+              </div>
+            </div>
+          )}
+          {activeModule === "notifications" && (
+            <div className="h-full flex flex-col">
+              <div className="border-b border-border px-4 py-3 flex items-center justify-between">
+                <h3 className="text-white text-sm">Notifications</h3>
+                <div className="flex items-center gap-1">
+                  {notifCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={onMarkAllNotifRead}
+                      className="p-1 hover:bg-white/10 rounded transition-colors"
+                      title="Mark all as read"
+                    >
+                      <CheckCheck className="size-3.5 text-muted-foreground" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto">
+                <NotificationsPanel
+                  notifications={notifications}
+                  loading={notifLoading}
+                  refresh={onRefreshNotifications}
+                  filter={notifFilter}
+                  onFilterChange={onNotifFilterChange}
+                  onMarkRead={onMarkNotifRead}
+                />
               </div>
             </div>
           )}

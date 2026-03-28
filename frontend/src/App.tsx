@@ -1,11 +1,9 @@
-import { Bell, GitPullRequest, Settings } from "lucide-react";
+import { Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Write } from "../wailsjs/go/main/TerminalManager";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
-import GitHubPanel from "./components/GitHubPanel";
 import NewSessionDialog from "./components/NewSessionDialog";
-import NotificationsPanel from "./components/NotificationsPanel";
 import OverlayPage from "./components/OverlayPage";
 import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
@@ -64,6 +62,7 @@ export default function App() {
     setFilter: setNotifFilter,
     refresh: refreshNotifications,
     markRead: markNotifRead,
+    markAllRead: markAllNotifRead,
   } = useNotifications();
   const { processes, agentCount } = useSubagents(activeTabId);
   const {
@@ -139,8 +138,6 @@ export default function App() {
       <Toolbar
         activeOverlay={activeOverlay}
         onToggleOverlay={toggleOverlay}
-        githubCount={prs.length}
-        notifCount={notifCount}
         update={update}
         onDismissUpdate={dismissUpdate}
       />
@@ -271,36 +268,22 @@ export default function App() {
                   codeViewer.openDiff(activeTab.directory, path, staged);
                 }
               }}
+              prs={prs}
+              prsLoading={loading}
+              onRefreshPRs={refresh}
+              notifications={notifications}
+              notifCount={notifCount}
+              notifLoading={notifLoading}
+              notifFilter={notifFilter}
+              onNotifFilterChange={setNotifFilter}
+              onRefreshNotifications={refreshNotifications}
+              onMarkNotifRead={markNotifRead}
+              onMarkAllNotifRead={markAllNotifRead}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
 
         {/* Floating Overlays */}
-        <OverlayPage
-          open={activeOverlay === "github"}
-          onClose={closeOverlay}
-          title="Pull Requests"
-          icon={<GitPullRequest className="size-4" />}
-        >
-          <GitHubPanel prs={prs} loading={loading} refresh={refresh} />
-        </OverlayPage>
-
-        <OverlayPage
-          open={activeOverlay === "notifications"}
-          onClose={closeOverlay}
-          title="Notifications"
-          icon={<Bell className="size-4" />}
-        >
-          <NotificationsPanel
-            notifications={notifications}
-            loading={notifLoading}
-            refresh={refreshNotifications}
-            filter={notifFilter}
-            onFilterChange={setNotifFilter}
-            onMarkRead={markNotifRead}
-          />
-        </OverlayPage>
-
         <OverlayPage
           open={activeOverlay === "settings"}
           onClose={closeOverlay}

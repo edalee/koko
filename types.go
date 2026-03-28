@@ -100,12 +100,31 @@ type FileContentData struct {
 
 // GitHubPR represents a pull request from a tracked repository.
 type GitHubPR struct {
-	Repo           string `json:"repo"`
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	Author         string `json:"author"`
-	ReviewDecision string `json:"reviewDecision"`
-	URL            string `json:"url"`
+	Repo           string        `json:"repo"`
+	Number         int           `json:"number"`
+	Title          string        `json:"title"`
+	Author         string        `json:"author"`
+	ReviewDecision string        `json:"reviewDecision"`
+	URL            string        `json:"url"`
+	Body           string        `json:"body"`
+	Additions      int           `json:"additions"`
+	Deletions      int           `json:"deletions"`
+	ChangedFiles   int           `json:"changedFiles"`
+	HeadRef        string        `json:"headRef"`
+	BaseRef        string        `json:"baseRef"`
+	CreatedAt      string        `json:"createdAt"`
+	UpdatedAt      string        `json:"updatedAt"`
+	Mergeable      string        `json:"mergeable"`
+	IsDraft        bool          `json:"isDraft"`
+	Labels         []string      `json:"labels"`
+	Checks         []PRCheck     `json:"checks"`
+}
+
+// PRCheck represents a CI status check on a PR.
+type PRCheck struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`     // COMPLETED, IN_PROGRESS, QUEUED
+	Conclusion string `json:"conclusion"` // SUCCESS, FAILURE, CANCELLED, etc.
 }
 
 // GitHubNotification represents a GitHub notification.
