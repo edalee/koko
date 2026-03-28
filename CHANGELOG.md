@@ -6,17 +6,30 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ### Added
 - **Remote API** — HTTP/WebSocket API server on localhost:19876 with Bearer token auth
-- **MCP Server** — `koko mcp` subcommand for Claude Code integration (7 tools: list_sessions, get_session_state, read_output, send_input, create_session, close_session, list_file_changes)
-- **Slack Bot** — DM the bot to control sessions (`sessions`, `status`, `send`, `output`, `files`, `help`). Owner-only access via configured Slack member ID
+- **MCP Server** — `koko mcp` subcommand, 8 tools including `interact` (send+receive in one call with output settle detection)
+- **Slack Bot** — DM the bot to control sessions. Owner-only access via Slack member ID
 - **CLI Companion** — `koko-cli` binary with `sessions`, `status`, `send`, `output`, `tail` (WebSocket streaming), `files`
-- **API Settings** — Settings panel shows API toggle, port, and API key with copy button
-- **Terminal subscriber fan-out** — WebSocket and external consumers receive real-time PTY output
-- **Go test suite** — 44 tests covering API server, auth middleware, MCP protocol, Slack commands, config persistence, ring buffer, and subscriber mechanism
-- **Bot setup guide** — `docs/references/slack-bot-setup.md` with step-by-step Slack app creation
+- **Session identity** — Directory-scoped slugs (koko-1, drumstick-2) replace transient session-N IDs. Slugs work across all clients (API, MCP, Slack, CLI)
+- **Claude UUID recovery** — Captures Claude Code session UUID from JSONL files. `claude --resume <uuid>` for precise reconnects instead of `--continue`
+- **Session context card** — Disconnected sessions show glass card with last assistant message, directory path, and "Click to reconnect" over semi-transparent mesh gradient
+- **Grouped sidebar** — Sessions grouped under directory headers when multiple sessions share a directory, flat otherwise. Collapsible with status dots and count badges
+- **Atomic session writes** — Write-ahead with .bak backup for crash recovery
+- **`/interact` endpoint** — Send text and block until output settles (configurable quiet_ms/timeout_ms). Returns ANSI-stripped response
+- **PermissionRequest hook** — HTTP callback from Claude Code for deterministic approval detection. Replaces fragile terminal pattern matching
+- **Go test suite** — 44+ tests covering API, auth, MCP, Slack commands, config, terminal manager
+- **CHANGELOG.md** — Version history
 
 ### Changed
-- **Slack integration** — Replaced user token awareness panel (DMs, @mentions sidebar) with dedicated bot token command handler. Scopes reduced from 5 to 3 (`im:history`, `im:read`, `chat:write`)
-- **Settings panel** — Slack section now shows bot token input + owner ID field instead of user token + test connection
+- **Slack integration** — Replaced user token awareness panel with dedicated bot token command handler. Scopes reduced from 5 to 3
+- **Approval detection** — PermissionRequest hook replaces terminal output pattern matching (no more false positive amber icons)
+- **Session history** — Expanded to 50 entries, not deduplicated by directory. Multiple sessions per directory preserved
+- **tailText buffer** — Increased from 2KB to 32KB for richer API output
+- **lastMsg extraction** — Handles current Claude Code JSONL format (type:"assistant") in addition to legacy (type:"progress")
+
+### Fixed
+- **Unicode paste** — `btoa()` crashes on chars > U+00FF (em dashes, smart quotes). Now uses TextEncoder for UTF-8 safe base64
+- **Ghost amber icons** — False positive approval detection from broad pattern matching against 32KB buffer
+- **Slug URL collision** — Changed separator from `/` to `-` (koko/1 → koko-1) to avoid API route conflicts
 
 ### Removed
 - **Slack awareness panel** — `slack_service.go`, `SlackPanel.tsx`, `useSlack.ts` removed (~400 lines)
