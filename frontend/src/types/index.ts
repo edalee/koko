@@ -1,3 +1,9 @@
+export interface PRCheck {
+  name: string;
+  status: string;
+  conclusion: string;
+}
+
 export interface GitHubPR {
   repo: string;
   number: number;
@@ -5,6 +11,18 @@ export interface GitHubPR {
   author: string;
   reviewDecision: string;
   url: string;
+  body: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  headRef: string;
+  baseRef: string;
+  createdAt: string;
+  updatedAt: string;
+  mergeable: string;
+  isDraft: boolean;
+  labels: string[];
+  checks: PRCheck[];
 }
 
 export interface SessionTab {

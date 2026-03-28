@@ -56,6 +56,7 @@ interface RightSidebarProps {
   onRefreshNotifications: () => void;
   onMarkNotifRead: (id: string) => void;
   onMarkAllNotifRead: () => void;
+  onPRClick?: (pr: GitHubPR) => void;
 }
 
 function changeColor(change: FileChange): string {
@@ -188,6 +189,7 @@ export default function RightSidebar({
   onRefreshNotifications,
   onMarkNotifRead,
   onMarkAllNotifRead,
+  onPRClick,
 }: RightSidebarProps) {
   const [activeModule, setActiveModule] = useState<SidebarModule>("files");
 
@@ -351,7 +353,12 @@ export default function RightSidebar({
                 </button>
               </div>
               <div className="flex-1 overflow-auto">
-                <GitHubPanel prs={prs} loading={prsLoading} refresh={onRefreshPRs} />
+                <GitHubPanel
+                  prs={prs}
+                  loading={prsLoading}
+                  refresh={onRefreshPRs}
+                  onPRClick={onPRClick}
+                />
               </div>
             </div>
           )}

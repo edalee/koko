@@ -5,6 +5,7 @@ import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
 import NewSessionDialog from "./components/NewSessionDialog";
 import OverlayPage from "./components/OverlayPage";
+import PRDetailOverlay from "./components/PRDetailOverlay";
 import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
 import SafeWorkingOverlay from "./components/SafeWorkingOverlay";
@@ -41,6 +42,7 @@ export default function App() {
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   const [quickTerminalTabs, setQuickTerminalTabs] = useState<Set<string>>(new Set());
+  const [selectedPR, setSelectedPR] = useState<import("./types").GitHubPR | null>(null);
 
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
   const sessionStates = useSessionActivity(connectedIds);
@@ -279,6 +281,7 @@ export default function App() {
               onRefreshNotifications={refreshNotifications}
               onMarkNotifRead={markNotifRead}
               onMarkAllNotifRead={markAllNotifRead}
+              onPRClick={setSelectedPR}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -322,6 +325,15 @@ export default function App() {
           }}
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
+        />
+
+        <PRDetailOverlay
+          open={!!selectedPR}
+          prs={prs}
+          selectedPR={selectedPR}
+          onSelectPR={setSelectedPR}
+          onClose={() => setSelectedPR(null)}
+          onRefresh={refresh}
         />
       </div>
 

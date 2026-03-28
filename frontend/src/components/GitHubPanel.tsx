@@ -34,9 +34,10 @@ interface GitHubPanelProps {
   prs: GitHubPR[];
   loading: boolean;
   refresh: () => void;
+  onPRClick?: (pr: GitHubPR) => void;
 }
 
-export default function GitHubPanel({ prs, loading, refresh }: GitHubPanelProps) {
+export default function GitHubPanel({ prs, loading, refresh, onPRClick }: GitHubPanelProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
   async function handleApprove(pr: GitHubPR) {
@@ -91,9 +92,11 @@ export default function GitHubPanel({ prs, loading, refresh }: GitHubPanelProps)
         const isApproved = pr.reviewDecision === "APPROVED";
 
         return (
+          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR card click
           <div
             key={`${pr.repo}-${pr.number}`}
-            className="p-3 bg-white/[0.06] glass-card rounded-xl border border-border inset-highlight hover:bg-white/[0.09] hover:border-white/[0.12] transition-all group"
+            className="p-3 bg-white/[0.06] glass-card rounded-xl border border-border inset-highlight hover:bg-white/[0.09] hover:border-white/[0.12] transition-all group cursor-pointer"
+            onClick={() => onPRClick?.(pr)}
           >
             <div className="flex items-start gap-3">
               <GitPullRequest className="size-4 text-accent mt-0.5 shrink-0" />
