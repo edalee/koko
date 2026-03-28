@@ -187,7 +187,7 @@ export default function App() {
                       {!tab.connected && (
                         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
                         <div
-                          className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#0f1117]/90 cursor-pointer"
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-base/60 backdrop-blur-sm cursor-pointer"
                           onClick={() => switchTab(tab.id)}
                         >
                           <div className="max-w-sm w-full mx-auto glass-card rounded-xl p-5 border border-white/[0.08] space-y-3">

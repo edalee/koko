@@ -303,15 +303,24 @@ func lastAssistantText(path string) string {
 	return lastText
 }
 
-// extractAssistantText extracts text content from a JSONL progress entry.
+// extractAssistantText extracts text content from a JSONL entry.
+// Handles both formats:
+//   - type:"assistant" with message.content[] (current Claude Code format)
+//   - type:"progress" with data.message.message.content[] (legacy format)
 func extractAssistantText(line []byte) string {
-	// Quick reject — avoid parsing non-assistant lines
 	if !strings.Contains(string(line), `"assistant"`) {
 		return ""
 	}
 
 	var entry struct {
-		Type string `json:"type"`
+		Type    string `json:"type"`
+		Message struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
 		Data struct {
 			Message struct {
 				Message struct {
@@ -329,15 +338,24 @@ func extractAssistantText(line []byte) string {
 		return ""
 	}
 
-	if entry.Type != "progress" || entry.Data.Message.Message.Role != "assistant" {
-		return ""
-	}
-
-	for _, block := range entry.Data.Message.Message.Content {
-		if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
-			return strings.TrimSpace(block.Text)
+	// Current format: type:"assistant", message.role:"assistant"
+	if entry.Type == "assistant" && entry.Message.Role == "assistant" {
+		for _, block := range entry.Message.Content {
+			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+				return strings.TrimSpace(block.Text)
+			}
 		}
 	}
+
+	// Legacy format: type:"progress", data.message.message.role:"assistant"
+	if entry.Type == "progress" && entry.Data.Message.Message.Role == "assistant" {
+		for _, block := range entry.Data.Message.Message.Content {
+			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+				return strings.TrimSpace(block.Text)
+			}
+		}
+	}
+
 	return ""
 }
 
