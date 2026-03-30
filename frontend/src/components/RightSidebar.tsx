@@ -22,11 +22,10 @@ import type { FileChange } from "../hooks/useFileChanges";
 import type { GitHubNotification, NotifFilter } from "../hooks/useNotifications";
 import type { SubagentProcess } from "../hooks/useSubagents";
 import type { GitHubPR } from "../types";
-import GitHubPanel from "./GitHubPanel";
 import NotificationBadge from "./NotificationBadge";
 import NotificationsPanel from "./NotificationsPanel";
 
-type SidebarModule = "files" | "context" | "prs" | "notifications";
+type SidebarModule = "files" | "context" | "notifications";
 
 interface RightSidebarProps {
   isCollapsed: boolean;
@@ -179,8 +178,6 @@ export default function RightSidebar({
   hasActiveSession,
   onFileClick,
   prs,
-  prsLoading,
-  onRefreshPRs,
   notifications,
   notifCount,
   notifLoading,
@@ -243,12 +240,10 @@ export default function RightSidebar({
 
         <button
           type="button"
-          onClick={() => handleModuleClick("prs")}
-          className={`relative p-1.5 rounded-md transition-colors ${
-            activeModule === "prs"
-              ? "text-accent bg-white/[0.08]"
-              : "text-muted-foreground hover:text-white hover:bg-white/5"
-          }`}
+          onClick={() => {
+            if (prs.length > 0) onPRClick?.(prs[0]);
+          }}
+          className="relative p-1.5 rounded-md transition-colors text-muted-foreground hover:text-white hover:bg-white/5"
           title="Pull Requests"
         >
           <GitPullRequest className="size-4" />
@@ -334,31 +329,6 @@ export default function RightSidebar({
                     ))}
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-          {activeModule === "prs" && (
-            <div className="h-full flex flex-col">
-              <div className="border-b border-border px-4 py-3 flex items-center justify-between">
-                <h3 className="text-white text-sm">Pull Requests</h3>
-                <button
-                  type="button"
-                  onClick={onRefreshPRs}
-                  className="p-1 hover:bg-white/10 rounded transition-colors shrink-0"
-                  title="Refresh"
-                >
-                  <RefreshCw
-                    className={`size-3.5 text-muted-foreground ${prsLoading ? "animate-spin" : ""}`}
-                  />
-                </button>
-              </div>
-              <div className="flex-1 overflow-auto">
-                <GitHubPanel
-                  prs={prs}
-                  loading={prsLoading}
-                  refresh={onRefreshPRs}
-                  onPRClick={onPRClick}
-                />
               </div>
             </div>
           )}
