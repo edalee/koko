@@ -10,6 +10,18 @@ export function FetchNotifications(arg1) {
   return window['go']['main']['GitHubService']['FetchNotifications'](arg1);
 }
 
+export function FetchPRCommits(arg1, arg2) {
+  return window['go']['main']['GitHubService']['FetchPRCommits'](arg1, arg2);
+}
+
+export function FetchPRFiles(arg1, arg2) {
+  return window['go']['main']['GitHubService']['FetchPRFiles'](arg1, arg2);
+}
+
+export function FetchPRReviews(arg1, arg2) {
+  return window['go']['main']['GitHubService']['FetchPRReviews'](arg1, arg2);
+}
+
 export function FetchPRs() {
   return window['go']['main']['GitHubService']['FetchPRs']();
 }

@@ -10,8 +10,16 @@ export function GetConfig() {
   return window['go']['main']['ConfigService']['GetConfig']();
 }
 
+export function GetHiddenPRs() {
+  return window['go']['main']['ConfigService']['GetHiddenPRs']();
+}
+
 export function GetSessions() {
   return window['go']['main']['ConfigService']['GetSessions']();
+}
+
+export function HidePR(arg1, arg2) {
+  return window['go']['main']['ConfigService']['HidePR'](arg1, arg2);
 }
 
 export function SaveConfig(arg1) {
@@ -20,6 +28,10 @@ export function SaveConfig(arg1) {
 
 export function SaveSessions(arg1) {
   return window['go']['main']['ConfigService']['SaveSessions'](arg1);
+}
+
+export function UnhidePR(arg1, arg2) {
+  return window['go']['main']['ConfigService']['UnhidePR'](arg1, arg2);
 }
 
 export function WriteCLIConfig(arg1) {

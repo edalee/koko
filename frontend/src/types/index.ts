@@ -20,9 +20,31 @@ export interface GitHubPR {
   createdAt: string;
   updatedAt: string;
   mergeable: string;
+  mergeStateStatus: string;
   isDraft: boolean;
   labels: string[];
+  assignees: string[];
   checks: PRCheck[];
+}
+
+export interface PRFile {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface PRReview {
+  author: string;
+  state: string;
+  submittedAt: string;
+  body: string;
+}
+
+export interface PRCommit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
 }
 
 export interface SessionTab {

@@ -46,6 +46,7 @@ interface RightSidebarProps {
   onFileClick?: (path: string, staged: boolean) => void;
   prs: GitHubPR[];
   prsLoading: boolean;
+  visiblePRCount: number;
   onRefreshPRs: () => void;
   notifications: GitHubNotification[];
   notifCount: number;
@@ -178,6 +179,7 @@ export default function RightSidebar({
   hasActiveSession,
   onFileClick,
   prs,
+  visiblePRCount,
   notifications,
   notifCount,
   notifLoading,
@@ -247,7 +249,7 @@ export default function RightSidebar({
           title="Pull Requests"
         >
           <GitPullRequest className="size-4" />
-          {prs.length > 0 && <NotificationBadge count={prs.length} />}
+          {visiblePRCount > 0 && <NotificationBadge count={visiblePRCount} />}
         </button>
         <button
           type="button"

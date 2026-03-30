@@ -114,10 +114,12 @@ type GitHubPR struct {
 	BaseRef        string        `json:"baseRef"`
 	CreatedAt      string        `json:"createdAt"`
 	UpdatedAt      string        `json:"updatedAt"`
-	Mergeable      string        `json:"mergeable"`
-	IsDraft        bool          `json:"isDraft"`
-	Labels         []string      `json:"labels"`
-	Checks         []PRCheck     `json:"checks"`
+	Mergeable        string    `json:"mergeable"`
+	MergeStateStatus string    `json:"mergeStateStatus"` // BLOCKED, DIRTY, UNSTABLE, BEHIND, etc.
+	IsDraft          bool      `json:"isDraft"`
+	Labels           []string  `json:"labels"`
+	Assignees        []string  `json:"assignees"`
+	Checks           []PRCheck `json:"checks"`
 }
 
 // PRCheck represents a CI status check on a PR.
@@ -125,6 +127,29 @@ type PRCheck struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`     // COMPLETED, IN_PROGRESS, QUEUED
 	Conclusion string `json:"conclusion"` // SUCCESS, FAILURE, CANCELLED, etc.
+}
+
+// PRFile represents a changed file in a PR.
+type PRFile struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// PRReview represents a review on a PR.
+type PRReview struct {
+	Author      string `json:"author"`
+	State       string `json:"state"`       // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+	SubmittedAt string `json:"submittedAt"`
+	Body        string `json:"body"`
+}
+
+// PRCommit represents a commit in a PR.
+type PRCommit struct {
+	SHA     string `json:"sha"`
+	Message string `json:"message"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
 }
 
 // GitHubNotification represents a GitHub notification.

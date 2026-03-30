@@ -6,10 +6,16 @@ export function EnsureAPIKey():Promise<main.AppConfig>;
 
 export function GetConfig():Promise<main.AppConfig>;
 
+export function GetHiddenPRs():Promise<Record<string, boolean>>;
+
 export function GetSessions():Promise<main.SessionsData>;
+
+export function HidePR(arg1:string,arg2:number):Promise<void>;
 
 export function SaveConfig(arg1:main.AppConfig):Promise<void>;
 
 export function SaveSessions(arg1:main.SessionsData):Promise<void>;
+
+export function UnhidePR(arg1:string,arg2:number):Promise<void>;
 
 export function WriteCLIConfig(arg1:main.AppConfig):Promise<void>;

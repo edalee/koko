@@ -32,6 +32,7 @@ type AppConfig struct {
 	APIPort      int               `json:"apiPort"`
 	APIKey       string            `json:"apiKey"`
 	APIEnabled   bool              `json:"apiEnabled"`
+	HiddenPRs    map[string]bool   `json:"hiddenPrs,omitempty"` // key: "repo#number"
 }
 
 // ConfigService manages reading and writing the app config file.
@@ -126,6 +127,40 @@ func (cs *ConfigService) WriteCLIConfig(cfg AppConfig) error {
 		return err
 	}
 	return os.WriteFile(cliPath, data, 0o600)
+}
+
+// HidePR marks a PR as hidden so it won't appear in the list.
+func (cs *ConfigService) HidePR(repo string, number int) error {
+	cs.mu.Lock()
+	key := fmt.Sprintf("%s#%d", repo, number)
+	if cs.config.HiddenPRs == nil {
+		cs.config.HiddenPRs = make(map[string]bool)
+	}
+	cs.config.HiddenPRs[key] = true
+	cfg := cs.config
+	cs.mu.Unlock()
+	return cs.SaveConfig(cfg)
+}
+
+// UnhidePR removes the hidden flag from a PR.
+func (cs *ConfigService) UnhidePR(repo string, number int) error {
+	cs.mu.Lock()
+	key := fmt.Sprintf("%s#%d", repo, number)
+	delete(cs.config.HiddenPRs, key)
+	cfg := cs.config
+	cs.mu.Unlock()
+	return cs.SaveConfig(cfg)
+}
+
+// GetHiddenPRs returns the set of hidden PR keys.
+func (cs *ConfigService) GetHiddenPRs() map[string]bool {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	result := make(map[string]bool, len(cs.config.HiddenPRs))
+	for k, v := range cs.config.HiddenPRs {
+		result[k] = v
+	}
+	return result
 }
 
 func (cs *ConfigService) load() {

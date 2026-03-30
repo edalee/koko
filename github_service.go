@@ -36,11 +36,15 @@ type ghPRJSON struct {
 	BaseRefName    string `json:"baseRefName"`
 	CreatedAt      string `json:"createdAt"`
 	UpdatedAt      string `json:"updatedAt"`
-	Mergeable      string `json:"mergeable"`
-	IsDraft        bool   `json:"isDraft"`
-	Labels         []struct {
+	Mergeable        string `json:"mergeable"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	IsDraft          bool   `json:"isDraft"`
+	Labels           []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
 	StatusCheckRollup []struct {
 		Name       string `json:"name"`
 		Status     string `json:"status"`
@@ -168,12 +172,139 @@ func (g *GitHubService) MergePR(repo string, number int) error {
 	return nil
 }
 
+// FetchPRFiles returns the list of changed files for a specific PR.
+func (g *GitHubService) FetchPRFiles(repo string, number int) ([]PRFile, error) {
+	out, err := exec.Command("gh", "pr", "view",
+		"--repo", "epidemicsound/"+repo,
+		"--json", "files",
+		fmt.Sprintf("%d", number),
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view failed: %w", err)
+	}
+
+	var result struct {
+		Files []struct {
+			Path      string `json:"path"`
+			Additions int    `json:"additions"`
+			Deletions int    `json:"deletions"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	var files []PRFile
+	for _, f := range result.Files {
+		files = append(files, PRFile{Path: f.Path, Additions: f.Additions, Deletions: f.Deletions})
+	}
+	return files, nil
+}
+
+// FetchPRReviews returns reviews and requested reviewers for a specific PR.
+func (g *GitHubService) FetchPRReviews(repo string, number int) ([]PRReview, error) {
+	out, err := exec.Command("gh", "pr", "view",
+		"--repo", "epidemicsound/"+repo,
+		"--json", "latestReviews,reviewRequests",
+		fmt.Sprintf("%d", number),
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view failed: %w", err)
+	}
+
+	var result struct {
+		LatestReviews []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			State       string `json:"state"`
+			SubmittedAt string `json:"submittedAt"`
+			Body        string `json:"body"`
+		} `json:"latestReviews"`
+		ReviewRequests []struct {
+			Login string `json:"login"`
+			Name  string `json:"name"`
+			Slug  string `json:"slug"`
+		} `json:"reviewRequests"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	var reviews []PRReview
+	for _, r := range result.LatestReviews {
+		reviews = append(reviews, PRReview{
+			Author:      r.Author.Login,
+			State:       r.State,
+			SubmittedAt: r.SubmittedAt,
+			Body:        r.Body,
+		})
+	}
+	// Add pending reviewers as PENDING state
+	for _, rr := range result.ReviewRequests {
+		name := rr.Login
+		if name == "" {
+			name = rr.Slug // team review request
+		}
+		reviews = append(reviews, PRReview{
+			Author: name,
+			State:  "PENDING",
+		})
+	}
+	return reviews, nil
+}
+
+// FetchPRCommits returns the commit list for a specific PR.
+func (g *GitHubService) FetchPRCommits(repo string, number int) ([]PRCommit, error) {
+	out, err := exec.Command("gh", "pr", "view",
+		"--repo", "epidemicsound/"+repo,
+		"--json", "commits",
+		fmt.Sprintf("%d", number),
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view failed: %w", err)
+	}
+
+	var result struct {
+		Commits []struct {
+			OID     string `json:"oid"`
+			Authors []struct {
+				Login string `json:"login"`
+				Name  string `json:"name"`
+			} `json:"authors"`
+			MessageHeadline string `json:"messageHeadline"`
+			CommittedDate   string `json:"committedDate"`
+		} `json:"commits"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	var commits []PRCommit
+	for _, c := range result.Commits {
+		author := ""
+		if len(c.Authors) > 0 {
+			author = c.Authors[0].Login
+			if author == "" {
+				author = c.Authors[0].Name
+			}
+		}
+		commits = append(commits, PRCommit{
+			SHA:     c.OID,
+			Message: c.MessageHeadline,
+			Author:  author,
+			Date:    c.CommittedDate,
+		})
+	}
+	return commits, nil
+}
+
 func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 	var allPRs []GitHubPR
 	for _, repo := range trackedRepos {
 		out, err := exec.Command("gh", "pr", "list",
 			"--repo", "epidemicsound/"+repo,
-			"--json", "number,title,author,reviewDecision,url,body,additions,deletions,changedFiles,headRefName,baseRefName,createdAt,updatedAt,mergeable,isDraft,labels,statusCheckRollup",
+			"--json", "number,title,author,reviewDecision,url,body,additions,deletions,changedFiles,headRefName,baseRefName,createdAt,updatedAt,mergeable,mergeStateStatus,isDraft,labels,statusCheckRollup,assignees",
 			"--limit", "10",
 		).Output()
 		if err != nil {
@@ -188,6 +319,10 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 			for _, l := range pr.Labels {
 				labels = append(labels, l.Name)
 			}
+			var assignees []string
+			for _, a := range pr.Assignees {
+				assignees = append(assignees, a.Login)
+			}
 			var checks []PRCheck
 			for _, c := range pr.StatusCheckRollup {
 				checks = append(checks, PRCheck{
@@ -197,24 +332,26 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 				})
 			}
 			allPRs = append(allPRs, GitHubPR{
-				Repo:           repo,
-				Number:         pr.Number,
-				Title:          pr.Title,
-				Author:         pr.Author.Login,
-				ReviewDecision: pr.ReviewDecision,
-				URL:            pr.URL,
-				Body:           pr.Body,
-				Additions:      pr.Additions,
-				Deletions:      pr.Deletions,
-				ChangedFiles:   pr.ChangedFiles,
-				HeadRef:        pr.HeadRefName,
-				BaseRef:        pr.BaseRefName,
-				CreatedAt:      pr.CreatedAt,
-				UpdatedAt:      pr.UpdatedAt,
-				Mergeable:      pr.Mergeable,
-				IsDraft:        pr.IsDraft,
-				Labels:         labels,
-				Checks:         checks,
+				Repo:             repo,
+				Number:           pr.Number,
+				Title:            pr.Title,
+				Author:           pr.Author.Login,
+				ReviewDecision:   pr.ReviewDecision,
+				URL:              pr.URL,
+				Body:             pr.Body,
+				Additions:        pr.Additions,
+				Deletions:        pr.Deletions,
+				ChangedFiles:     pr.ChangedFiles,
+				HeadRef:          pr.HeadRefName,
+				BaseRef:          pr.BaseRefName,
+				CreatedAt:        pr.CreatedAt,
+				UpdatedAt:        pr.UpdatedAt,
+				Mergeable:        pr.Mergeable,
+				MergeStateStatus: pr.MergeStateStatus,
+				IsDraft:          pr.IsDraft,
+				Labels:           labels,
+				Assignees:        assignees,
+				Checks:           checks,
 			})
 		}
 	}

@@ -6,6 +6,12 @@ export function ApprovePR(arg1:string,arg2:number):Promise<void>;
 
 export function FetchNotifications(arg1:string):Promise<Array<main.GitHubNotification>>;
 
+export function FetchPRCommits(arg1:string,arg2:number):Promise<Array<main.PRCommit>>;
+
+export function FetchPRFiles(arg1:string,arg2:number):Promise<Array<main.PRFile>>;
+
+export function FetchPRReviews(arg1:string,arg2:number):Promise<Array<main.PRReview>>;
+
 export function FetchPRs():Promise<Array<main.GitHubPR>>;
 
 export function MarkAllNotificationsRead():Promise<void>;

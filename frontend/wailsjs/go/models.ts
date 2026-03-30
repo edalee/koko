@@ -44,6 +44,7 @@ export namespace main {
 	    apiPort: number;
 	    apiKey: string;
 	    apiEnabled: boolean;
+	    hiddenPrs?: Record<string, boolean>;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppConfig(source);
@@ -58,6 +59,7 @@ export namespace main {
 	        this.apiPort = source["apiPort"];
 	        this.apiKey = source["apiKey"];
 	        this.apiEnabled = source["apiEnabled"];
+	        this.hiddenPrs = source["hiddenPrs"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -250,8 +252,10 @@ export namespace main {
 	    createdAt: string;
 	    updatedAt: string;
 	    mergeable: string;
+	    mergeStateStatus: string;
 	    isDraft: boolean;
 	    labels: string[];
+	    assignees: string[];
 	    checks: PRCheck[];
 	
 	    static createFrom(source: any = {}) {
@@ -275,8 +279,10 @@ export namespace main {
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	        this.mergeable = source["mergeable"];
+	        this.mergeStateStatus = source["mergeStateStatus"];
 	        this.isDraft = source["isDraft"];
 	        this.labels = source["labels"];
+	        this.assignees = source["assignees"];
 	        this.checks = this.convertValues(source["checks"], PRCheck);
 	    }
 	
@@ -315,6 +321,58 @@ export namespace main {
 	    }
 	}
 	
+	export class PRCommit {
+	    sha: string;
+	    message: string;
+	    author: string;
+	    date: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PRCommit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sha = source["sha"];
+	        this.message = source["message"];
+	        this.author = source["author"];
+	        this.date = source["date"];
+	    }
+	}
+	export class PRFile {
+	    path: string;
+	    additions: number;
+	    deletions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PRFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.additions = source["additions"];
+	        this.deletions = source["deletions"];
+	    }
+	}
+	export class PRReview {
+	    author: string;
+	    state: string;
+	    submittedAt: string;
+	    body: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PRReview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.author = source["author"];
+	        this.state = source["state"];
+	        this.submittedAt = source["submittedAt"];
+	        this.body = source["body"];
+	    }
+	}
 	export class ProcessInfo {
 	    pid: number;
 	    command: string;

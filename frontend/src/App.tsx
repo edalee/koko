@@ -1,5 +1,6 @@
 import { Settings } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { GetHiddenPRs } from "../wailsjs/go/main/ConfigService";
 import { Write } from "../wailsjs/go/main/TerminalManager";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
@@ -43,10 +44,20 @@ export default function App() {
   const [showNewSession, setShowNewSession] = useState(false);
   const [quickTerminalTabs, setQuickTerminalTabs] = useState<Set<string>>(new Set());
   const [selectedPR, setSelectedPR] = useState<import("./types").GitHubPR | null>(null);
+  const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
+
+  const loadHiddenPRs = useCallback(() => {
+    GetHiddenPRs().then((map) => setHiddenPRs(new Set(Object.keys(map || {}))));
+  }, []);
+
+  useEffect(() => {
+    loadHiddenPRs();
+  }, [loadHiddenPRs]);
 
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
   const sessionStates = useSessionActivity(connectedIds);
   const { prs, loading, refresh } = useGitHub();
+  const visiblePRCount = prs.filter((p) => !hiddenPRs.has(`${p.repo}#${p.number}`)).length;
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const {
     changes: fileChanges,
@@ -272,6 +283,7 @@ export default function App() {
               }}
               prs={prs}
               prsLoading={loading}
+              visiblePRCount={visiblePRCount}
               onRefreshPRs={refresh}
               notifications={notifications}
               notifCount={notifCount}
@@ -334,6 +346,8 @@ export default function App() {
           onSelectPR={setSelectedPR}
           onClose={() => setSelectedPR(null)}
           onRefresh={refresh}
+          hiddenPRs={hiddenPRs}
+          onHiddenChange={loadHiddenPRs}
         />
       </div>
 
