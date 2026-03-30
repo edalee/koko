@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import Markdown from "react-markdown";
 import { ApprovePR, MergePR } from "../../wailsjs/go/main/GitHubService";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { cn } from "../lib/utils";
@@ -282,8 +283,88 @@ export default function PRDetailOverlay({
                 <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
                   Description
                 </h3>
-                <div className="text-sm text-white/70 leading-relaxed whitespace-pre-wrap bg-white/[0.03] rounded-lg p-4 border border-white/[0.06] max-h-[400px] overflow-auto">
-                  {pr.body}
+                <div className="prose-sm bg-white/[0.03] rounded-lg p-4 border border-white/[0.06] max-h-[400px] overflow-auto">
+                  <Markdown
+                    components={{
+                      h1: ({ children }) => (
+                        <h1 className="text-base text-white font-semibold mt-3 mb-1">{children}</h1>
+                      ),
+                      h2: ({ children }) => (
+                        <h2 className="text-sm text-white font-semibold mt-3 mb-1">{children}</h2>
+                      ),
+                      h3: ({ children }) => (
+                        <h3 className="text-sm text-white/80 font-medium mt-2 mb-1">{children}</h3>
+                      ),
+                      h4: ({ children }) => (
+                        <h4 className="text-xs text-white/70 font-medium mt-2 mb-1">{children}</h4>
+                      ),
+                      p: ({ children }) => (
+                        <p className="text-sm text-white/60 leading-relaxed mb-2">{children}</p>
+                      ),
+                      ul: ({ children }) => (
+                        <ul className="text-sm text-white/60 list-disc pl-5 mb-2 space-y-0.5">
+                          {children}
+                        </ul>
+                      ),
+                      ol: ({ children }) => (
+                        <ol className="text-sm text-white/60 list-decimal pl-5 mb-2 space-y-0.5">
+                          {children}
+                        </ol>
+                      ),
+                      li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                      code: ({ children, className }) =>
+                        className ? (
+                          <code className="block text-xs font-mono bg-white/[0.06] rounded-md p-3 my-2 text-white/70 overflow-auto">
+                            {children}
+                          </code>
+                        ) : (
+                          <code className="text-xs font-mono bg-white/[0.06] rounded px-1 py-0.5 text-accent/80">
+                            {children}
+                          </code>
+                        ),
+                      pre: ({ children }) => <>{children}</>,
+                      a: ({ href, children }) => (
+                        <a
+                          href={href}
+                          className="text-accent hover:underline"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (href) {
+                              import("../../wailsjs/runtime/runtime").then((r) =>
+                                r.BrowserOpenURL(href),
+                              );
+                            }
+                          }}
+                        >
+                          {children}
+                        </a>
+                      ),
+                      strong: ({ children }) => (
+                        <strong className="text-white/80 font-medium">{children}</strong>
+                      ),
+                      blockquote: ({ children }) => (
+                        <blockquote className="border-l-2 border-white/[0.1] pl-3 my-2 text-white/50 italic">
+                          {children}
+                        </blockquote>
+                      ),
+                      hr: () => <hr className="border-white/[0.06] my-3" />,
+                      table: ({ children }) => (
+                        <table className="text-xs text-white/60 border-collapse my-2 w-full">
+                          {children}
+                        </table>
+                      ),
+                      th: ({ children }) => (
+                        <th className="text-left text-white/70 font-medium px-2 py-1 border-b border-white/[0.08]">
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="px-2 py-1 border-b border-white/[0.04]">{children}</td>
+                      ),
+                    }}
+                  >
+                    {pr.body}
+                  </Markdown>
                 </div>
               </div>
             )}
