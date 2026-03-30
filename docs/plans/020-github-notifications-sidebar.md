@@ -48,13 +48,27 @@ baseRefName, createdAt, updatedAt, mergeable, isDraft, statusCheckRollup
 ### Background
 The image background (mesh gradient orbs) should be visible behind the sidebar modules since they use glass transparency. If not showing, the glass-panel CSS may need the backdrop-filter to be properly layered.
 
+## Remaining Work
+- **Compact PR sidebar list** — replace card layout with one-line-per-PR list (title + repo#number, click → overlay). Current cards are too dense at 29 PRs.
+- **Markdown rendering** — PR body is raw text. Need react-markdown or lightweight renderer for headings, lists, code blocks, bold/italic.
+
+## Completed
+- Toolbar: removed GitHub + Notifications buttons
+- Right sidebar: 4 modules (files, context, PRs, notifications) with badge counts
+- Notifications: mark-all-as-read (CheckCheck icon, PUT /notifications)
+- PR detail overlay: full-screen with description, CI, actions, PR list column
+- Expanded PR data from gh CLI (body, additions, deletions, checks, labels, etc.)
+- GitHubPR type expanded in Go + TypeScript
+- Background fix: disconnected overlay uses bg-base/60 with backdrop-blur
+- lastMsg extraction: handles current + legacy JSONL formats
+
 ## Modified Files
-- `Toolbar.tsx` — remove GitHub + Notifications buttons
-- `RightSidebar.tsx` — add PR and Notifications modules to icon bar
-- `GitHubPanel.tsx` — adapt for sidebar module layout
-- `NotificationsPanel.tsx` — add mark-all-as-read, adapt for sidebar
-- `App.tsx` — remove overlay wrappers for GitHub/Notifications, pass data to RightSidebar
-- `useOverlay.ts` — remove "github" and "notifications" from OverlayModule type
-- `github_service.go` — fetch expanded PR fields
-- `types.go` — expand GitHubPR type with new fields
-- New: `PRDetailOverlay.tsx` — full-screen PR detail view with file list
+- `Toolbar.tsx` — simplified to logo + settings
+- `RightSidebar.tsx` — 4 modules with badge counts
+- `GitHubPanel.tsx` — onPRClick callback, will become compact list
+- `NotificationsPanel.tsx` — mark-all-as-read
+- `App.tsx` — PRDetailOverlay wired, overlays removed from toolbar
+- `PRDetailOverlay.tsx` — new full-screen PR detail
+- `useOverlay.ts` — reduced to "settings" only
+- `github_service.go` — expanded PR fields
+- `types.go` — GitHubPR + PRCheck types
