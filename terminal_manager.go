@@ -392,6 +392,9 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// User sent input — clear any pending approval state
+	s.waitingApproval = false
+	s.approvalTool = ""
 	_, err = s.ptmx.Write(decoded)
 	return err
 }
@@ -445,9 +448,6 @@ func (tm *TerminalManager) readLoop(s *session) {
 				s.tailText.Write(stripped)
 			}
 			s.lastOutputAt = time.Now()
-			// Clear approval state — output means the user responded
-			s.waitingApproval = false
-			s.approvalTool = ""
 			// Fan out to API subscribers (non-blocking)
 			for ch := range s.subscribers {
 				select {
