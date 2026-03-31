@@ -356,11 +356,10 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	}
 	defer api.tm.Unsubscribe(sessionID, ch)
 
-	// Send the input
-	text := req.Text
-	if !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
+	// Send the input — PTY requires \r (carriage return) to submit, not just \n.
+	// Strip any trailing newline variants and send a canonical \r\n.
+	text := strings.TrimRight(req.Text, "\r\n")
+	text += "\r\n"
 	encoded := base64.StdEncoding.EncodeToString([]byte(text))
 	if err := api.tm.Write(sessionID, encoded); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
