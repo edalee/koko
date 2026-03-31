@@ -329,9 +329,10 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req struct {
-		Text       string `json:"text"`
-		TimeoutMs  int    `json:"timeout_ms"`  // max wait time (default 120000)
-		QuietMs    int    `json:"quiet_ms"`    // output settle time (default 3000)
+		Text      string `json:"text"`
+		TimeoutMs int    `json:"timeout_ms"`  // max wait time (default 120000)
+		QuietMs   int    `json:"quiet_ms"`    // output settle time once Claude starts responding (default 8000)
+		StartMs   int    `json:"start_ms"`    // max time to wait for first output before giving up (default 30000)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -341,7 +342,10 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 		req.TimeoutMs = 120000
 	}
 	if req.QuietMs == 0 {
-		req.QuietMs = 3000
+		req.QuietMs = 8000
+	}
+	if req.StartMs == 0 {
+		req.StartMs = 30000
 	}
 
 	// Subscribe to output before sending input
@@ -363,17 +367,18 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Wait for output to settle, then confirm session is idle before returning.
-	// quiet_ms is the PTY silence window; we only return once both conditions hold:
-	//   1. No PTY output for quiet_ms
-	//   2. GetSessionState() == "idle" or "approval"
-	// This prevents returning mid-flight when Claude pauses between tool calls.
+	// Phase 1: wait for Claude to start responding (first output chunk).
+	// This prevents the quiet timer from firing on the echo of the input before
+	// Claude Code has even begun processing.
 	timeout := time.After(time.Duration(req.TimeoutMs) * time.Millisecond)
+	startDeadline := time.After(time.Duration(req.StartMs) * time.Millisecond)
 	quiet := time.Duration(req.QuietMs) * time.Millisecond
-	quietTimer := time.NewTimer(quiet)
-	defer quietTimer.Stop()
 
 	var collected []byte
+
+	// Wait for first output before starting the quiet timer.
+	// This prevents the quiet timer firing on input echo before Claude responds.
+waitForStart:
 	for {
 		select {
 		case data, ok := <-ch:
@@ -381,37 +386,50 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 				goto done
 			}
 			collected = append(collected, data...)
-			// Reset quiet timer — more output is arriving
-			if !quietTimer.Stop() {
-				select {
-				case <-quietTimer.C:
-				default:
-				}
-			}
-			quietTimer.Reset(quiet)
-		case <-quietTimer.C:
-			// PTY has been quiet for quiet_ms. Drain any data that arrived
-			// while we were in the select before checking state.
-			for len(ch) > 0 {
-				data := <-ch
-				collected = append(collected, data...)
-			}
-			if len(ch) > 0 {
-				// More output queued after drain — keep collecting
-				quietTimer.Reset(quiet)
-				continue
-			}
-			// Channel empty — check session state before declaring done.
-			// If approval is pending, return immediately so the caller knows.
-			// If still active (e.g. slow tool call gap), keep waiting.
-			state := api.tm.GetSessionState(sessionID)
-			if state == "approval" {
-				goto done
-			}
-			// idle or unknown — truly quiet, return
+			break waitForStart
+		case <-startDeadline:
 			goto done
 		case <-timeout:
 			goto done
+		}
+	}
+
+	// Phase 2: collect output, resetting quiet timer on each chunk.
+	// Only declare done when PTY has been quiet for quiet_ms with no buffered data.
+	{
+		quietTimer := time.NewTimer(quiet)
+		defer quietTimer.Stop()
+
+		for {
+			select {
+			case data, ok := <-ch:
+				if !ok {
+					goto done
+				}
+				collected = append(collected, data...)
+				// Reset quiet timer — more output is arriving
+				if !quietTimer.Stop() {
+					select {
+					case <-quietTimer.C:
+					default:
+					}
+				}
+				quietTimer.Reset(quiet)
+			case <-quietTimer.C:
+				// Drain any data that arrived while we were in the select
+				for len(ch) > 0 {
+					data := <-ch
+					collected = append(collected, data...)
+				}
+				if len(ch) > 0 {
+					quietTimer.Reset(quiet)
+					continue
+				}
+				// Channel empty — done
+				goto done
+			case <-timeout:
+				goto done
+			}
 		}
 	}
 
