@@ -17,6 +17,7 @@ type SlackCommandHandler struct {
 	cfg           *ConfigService
 	tm            *TerminalManager
 	git           *GitService
+	api           *APIServer
 	lastTS        string   // track last processed message timestamp
 	botUserID     string
 	imChannelIDs  []string // cached IM channel IDs (resolved once, refreshed periodically)
@@ -25,12 +26,13 @@ type SlackCommandHandler struct {
 }
 
 // NewSlackCommandHandler creates a new handler.
-func NewSlackCommandHandler(cfg *ConfigService, tm *TerminalManager, git *GitService) *SlackCommandHandler {
+func NewSlackCommandHandler(cfg *ConfigService, tm *TerminalManager, git *GitService, api *APIServer) *SlackCommandHandler {
 	return &SlackCommandHandler{
 		cfg:        cfg,
 		tm:         tm,
 		git:        git,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		api:        api,
+		httpClient: &http.Client{Timeout: 150 * time.Second}, // long timeout for prompt responses
 	}
 }
 
@@ -219,12 +221,35 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 		if id == "" {
 			return fmt.Sprintf("Session `%s` not found.", parts[1])
 		}
-		text := strings.Join(parts[2:], " ") + "\n"
+		// Use \r\n — PTY requires carriage return to submit
+		text := strings.Join(parts[2:], " ") + "\r\n"
 		encoded := slackEncodeBase64([]byte(text))
 		if err := h.tm.Write(id, encoded); err != nil {
 			return fmt.Sprintf("Error: %v", err)
 		}
 		return fmt.Sprintf("Sent to `%s`.", parts[1])
+
+	case "prompt":
+		// Send text to a session and wait for Claude's response via /interact.
+		if len(parts) < 3 {
+			return "Usage: `prompt <slug> <text>`"
+		}
+		slug := parts[1]
+		id := h.tm.ResolveSession(slug)
+		if id == "" {
+			return fmt.Sprintf("Session `%s` not found.", slug)
+		}
+		cfg := h.cfg.GetConfig()
+		promptText := strings.Join(parts[2:], " ")
+		output, state, err := h.interact(cfg.APIPort, cfg.APIKey, id, promptText)
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+		reply := fmt.Sprintf("```\n%s\n```", truncate(output, 2800))
+		if state == "approval" {
+			reply += "\n⚠️ Session is waiting for tool approval in Koko."
+		}
+		return reply
 
 	case "files":
 		if len(parts) < 2 {
@@ -295,7 +320,8 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 		return "*Koko Commands:*\n" +
 			"`sessions` — List active sessions\n" +
 			"`status [slug]` — Session state + output snippet\n" +
-			"`send <slug> <text>` — Send text to session\n" +
+			"`prompt <slug> <text>` — Send prompt and wait for Claude's response\n" +
+			"`send <slug> <text>` — Send raw text to session (no wait)\n" +
 			"`files <slug>` — Git file changes\n" +
 			"`output [slug]` — Last ~50 lines of output\n" +
 			"`help` — This message\n" +
@@ -304,6 +330,41 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 	default:
 		return fmt.Sprintf("Unknown command: `%s`. Type `help` for available commands.", cmd)
 	}
+}
+
+// interact calls the local /interact API endpoint and returns (output, state, error).
+func (h *SlackCommandHandler) interact(port int, apiKey, sessionID, text string) (string, string, error) {
+	payload := map[string]interface{}{
+		"text":       text,
+		"timeout_ms": 120000,
+	}
+	data, _ := json.Marshal(payload)
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/sessions/%s/interact", port, sessionID)
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(data)))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Output string `json:"output"`
+		State  string `json:"state"`
+	}
+	_ = json.Unmarshal(body, &result)
+	return result.Output, result.State, nil
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return "…" + s[len(s)-max:]
 }
 
 func (h *SlackCommandHandler) resolveSessionID(parts []string) string {

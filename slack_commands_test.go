@@ -14,7 +14,7 @@ func newTestSlackHandler(t *testing.T) *SlackCommandHandler {
 	}
 	tm := NewTerminalManager()
 	git := NewGitService()
-	return NewSlackCommandHandler(cfg, tm, git)
+	return NewSlackCommandHandler(cfg, tm, git, nil)
 }
 
 func TestSlackCommand_Help(t *testing.T) {

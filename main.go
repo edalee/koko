@@ -39,7 +39,7 @@ func main() {
 	claude := NewClaudeService()
 	api := NewAPIServer(tm, git, cfg)
 	app := NewApp(tm, cfg, api)
-	slackCmd := NewSlackCommandHandler(cfg, tm, git)
+	slackCmd := NewSlackCommandHandler(cfg, tm, git, api)
 
 	// Start Slack bot command listener if configured
 	go slackCmd.Start()
