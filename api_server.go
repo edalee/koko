@@ -236,8 +236,11 @@ func (api *APIServer) handleSessionWrite(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Normalize newline: PTY requires \r\n to execute input, not just \n.
+	// Normalise here so all callers (CLI, MCP, scripts) get correct behaviour.
+	text := strings.TrimRight(req.Text, "\r\n") + "\r\n"
 	// Encode text as base64 (TerminalManager.Write expects base64)
-	encoded := base64.StdEncoding.EncodeToString([]byte(req.Text))
+	encoded := base64.StdEncoding.EncodeToString([]byte(text))
 	if err := api.tm.Write(sessionID, encoded); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

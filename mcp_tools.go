@@ -187,10 +187,8 @@ func callMCPTool(client *mcpClient, name string, args map[string]interface{}) (s
 		if id == "" {
 			return "", fmt.Errorf("session_id is required")
 		}
-		// Append newline if not already present
-		if !strings.HasSuffix(text, "\n") {
-			text += "\n"
-		}
+		// Normalize newline: PTY requires \r\n to execute input, not just \n.
+		text = strings.TrimRight(text, "\r\n") + "\r\n"
 		_, err := client.post("/api/sessions/"+id+"/write", map[string]string{"text": text})
 		if err != nil {
 			return "", err

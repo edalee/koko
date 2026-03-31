@@ -160,9 +160,9 @@ func cmdStatus(client *apiClient, id string) {
 }
 
 func cmdSend(client *apiClient, id, text string) {
-	if !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
+	// Normalize newline: PTY requires \r\n to execute input, not just \n.
+	// The /write endpoint also normalises, but we do it here too for clarity.
+	text = strings.TrimRight(text, "\r\n") + "\r\n"
 	_, err := client.post("/api/sessions/"+id+"/write", map[string]string{"text": text})
 	if err != nil {
 		fatal(err)

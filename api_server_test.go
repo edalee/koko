@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -219,6 +221,258 @@ func TestSessionsPost_InvalidBody(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/sessions", body)
 	w := httptest.NewRecorder()
 	api.handleSessions(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// newPipeSession creates a session whose ptmx is backed by an os.Pipe so tests
+// can read exactly what bytes were written to the "PTY".  Returns the session
+// and the read-end of the pipe.  The caller must close both ends when done.
+func newPipeSession(t *testing.T, id string) (*session, *os.File, *os.File) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	s := &session{
+		id:          id,
+		slug:        id,
+		name:        "Test",
+		dir:         "/tmp",
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
+		ptmx:        w,
+	}
+	return s, r, w
+}
+
+// TestSessionWrite_NormalizesNewline proves that plain \n sent via /write is
+// upgraded to \r\n before reaching the PTY — the key requirement for commands
+// to execute inside koko terminals.
+func TestSessionWrite_NormalizesNewline(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s, r, w := newPipeSession(t, "write-nl-test")
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	body := strings.NewReader(`{"text":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/sessions/write-nl-test/write", body)
+	rw := httptest.NewRecorder()
+	api.handleSessionWrite(rw, req, s.id)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rw.Code, rw.Body.String())
+	}
+
+	// Close the write end so io.ReadAll returns; the write already completed.
+	_ = w.Close()
+	got, err := io.ReadAll(r)
+	_ = r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(got) != "hello\r\n" {
+		t.Fatalf("expected PTY to receive %q, got %q", "hello\\r\\n", string(got))
+	}
+}
+
+// TestSessionWrite_IdempotentCRLF confirms that text already ending with \r\n
+// is not double-appended.
+func TestSessionWrite_IdempotentCRLF(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s, r, w := newPipeSession(t, "write-crlf-test")
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	// JSON encodes \r\n as \\r\\n
+	body := strings.NewReader("{\"text\":\"hello\\r\\n\"}")
+	req := httptest.NewRequest("POST", "/api/sessions/write-crlf-test/write", body)
+	rw := httptest.NewRecorder()
+	api.handleSessionWrite(rw, req, s.id)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rw.Code)
+	}
+
+	_ = w.Close()
+	got, _ := io.ReadAll(r)
+	_ = r.Close()
+
+	if string(got) != "hello\r\n" {
+		t.Fatalf("expected exactly one \\r\\n, got %q", string(got))
+	}
+}
+
+func TestSessionInteract_NotFound(t *testing.T) {
+	api, _ := newTestAPIServer(t)
+
+	body := strings.NewReader(`{"text":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/sessions/nonexistent/interact", body)
+	w := httptest.NewRecorder()
+	api.handleSessionInteract(w, req, "nonexistent")
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestSessionInteract_InvalidBody(t *testing.T) {
+	api, _ := newTestAPIServer(t)
+
+	body := strings.NewReader(`not json`)
+	req := httptest.NewRequest("POST", "/api/sessions/test/interact", body)
+	w := httptest.NewRecorder()
+	api.handleSessionInteract(w, req, "test")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestSessionInteract_MethodNotAllowed(t *testing.T) {
+	api, _ := newTestAPIServer(t)
+
+	req := httptest.NewRequest("GET", "/api/sessions/test/interact", nil)
+	w := httptest.NewRecorder()
+	api.handleSessionInteract(w, req, "test")
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestSessionState_ExistingSession(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s := &session{
+		id:          "state-test",
+		name:        "Test",
+		dir:         "/tmp",
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
+	}
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	w := httptest.NewRecorder()
+	api.handleSessionState(w, s.id)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var result map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["state"] != "idle" {
+		t.Fatalf("expected 'idle', got %q", result["state"])
+	}
+}
+
+func TestListSessions_WithData(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s := &session{
+		id:          "list-test",
+		slug:        "project-1",
+		name:        "My Project",
+		dir:         "/tmp/project",
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
+	}
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	api.handleSessions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var sessions []SessionInfo
+	if err := json.NewDecoder(w.Body).Decode(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].Slug != "project-1" {
+		t.Fatalf("expected slug 'project-1', got %q", sessions[0].Slug)
+	}
+	if sessions[0].Name != "My Project" {
+		t.Fatalf("expected name 'My Project', got %q", sessions[0].Name)
+	}
+}
+
+func TestPermissionRequest_MatchesByDir(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s := &session{
+		id:          "perm-test",
+		name:        "Test",
+		dir:         "/projects/myapp",
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
+	}
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	body := strings.NewReader(`{"tool_name":"Bash","cwd":"/projects/myapp"}`)
+	req := httptest.NewRequest("POST", "/api/hooks/permission-request", body)
+	w := httptest.NewRecorder()
+	api.handlePermissionRequest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	s.mu.Lock()
+	waiting := s.waitingApproval
+	tool := s.approvalTool
+	s.mu.Unlock()
+
+	if !waiting {
+		t.Fatal("expected session to be in approval state")
+	}
+	if tool != "Bash" {
+		t.Fatalf("expected tool 'Bash', got %q", tool)
+	}
+}
+
+func TestPermissionRequest_MethodNotAllowed(t *testing.T) {
+	api, _ := newTestAPIServer(t)
+
+	req := httptest.NewRequest("GET", "/api/hooks/permission-request", nil)
+	w := httptest.NewRecorder()
+	api.handlePermissionRequest(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestPermissionRequest_InvalidBody(t *testing.T) {
+	api, _ := newTestAPIServer(t)
+
+	body := strings.NewReader(`not json`)
+	req := httptest.NewRequest("POST", "/api/hooks/permission-request", body)
+	w := httptest.NewRecorder()
+	api.handlePermissionRequest(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)

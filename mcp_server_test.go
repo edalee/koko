@@ -2,7 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestMCPInitialize(t *testing.T) {
@@ -168,6 +173,75 @@ func TestCallMCPTool_UnknownTool(t *testing.T) {
 	_, err := callMCPTool(nil, "nonexistent_tool", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown tool")
+	}
+}
+
+// newCaptureMCPClient starts a test HTTP server that records the last request
+// body and returns a 200 with the given responseJSON.
+func newCaptureMCPClient(t *testing.T, responseJSON string) (*mcpClient, func() []byte) {
+	t.Helper()
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		captured = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseJSON))
+	}))
+	t.Cleanup(srv.Close)
+	client := &mcpClient{
+		baseURL:    srv.URL,
+		apiKey:     "test",
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+	}
+	return client, func() []byte { return captured }
+}
+
+// TestCallMCPTool_SendInput_NormalizesNewline proves the full MCP → /write chain
+// sends \r\n so commands execute inside koko terminals (not just echo to cursor).
+func TestCallMCPTool_SendInput_NormalizesNewline(t *testing.T) {
+	client, captured := newCaptureMCPClient(t, `{"status":"ok"}`)
+
+	_, err := callMCPTool(client, "send_input", map[string]interface{}{
+		"session_id": "session-1",
+		"text":       "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(captured(), &req)
+
+	if !strings.HasSuffix(req.Text, "\r\n") {
+		t.Fatalf("MCP send_input must send \\r\\n to execute commands, got %q", req.Text)
+	}
+	if !strings.HasPrefix(req.Text, "hello") {
+		t.Fatalf("text content should be preserved, got %q", req.Text)
+	}
+}
+
+// TestCallMCPTool_SendInput_IdempotentCRLF confirms that text already ending
+// with \r\n is not double-appended.
+func TestCallMCPTool_SendInput_IdempotentCRLF(t *testing.T) {
+	client, captured := newCaptureMCPClient(t, `{"status":"ok"}`)
+
+	_, err := callMCPTool(client, "send_input", map[string]interface{}{
+		"session_id": "session-1",
+		"text":       "hello\r\n",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(captured(), &req)
+
+	if req.Text != "hello\r\n" {
+		t.Fatalf("expected exactly one \\r\\n, got %q", req.Text)
 	}
 }
 
