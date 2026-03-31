@@ -221,8 +221,13 @@ func callMCPTool(client *mcpClient, name string, args map[string]interface{}) (s
 		}
 		var result struct {
 			Output string `json:"output"`
+			State  string `json:"state"`
 		}
 		_ = json.Unmarshal(body, &result)
+		if result.State == "approval" {
+			suffix := "\n\n[Session is waiting for tool approval in Koko — user must approve before Claude can continue.]"
+			return result.Output + suffix, nil
+		}
 		if result.Output == "" {
 			return "(no output)", nil
 		}
