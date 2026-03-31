@@ -363,7 +363,11 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Wait for output to settle — collect all output until quiet period elapses
+	// Wait for output to settle, then confirm session is idle before returning.
+	// quiet_ms is the PTY silence window; we only return once both conditions hold:
+	//   1. No PTY output for quiet_ms
+	//   2. GetSessionState() == "idle" or "approval"
+	// This prevents returning mid-flight when Claude pauses between tool calls.
 	timeout := time.After(time.Duration(req.TimeoutMs) * time.Millisecond)
 	quiet := time.Duration(req.QuietMs) * time.Millisecond
 	quietTimer := time.NewTimer(quiet)
@@ -377,7 +381,7 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 				goto done
 			}
 			collected = append(collected, data...)
-			// Reset quiet timer — more output is coming
+			// Reset quiet timer — more output is arriving
 			if !quietTimer.Stop() {
 				select {
 				case <-quietTimer.C:
@@ -386,6 +390,25 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 			}
 			quietTimer.Reset(quiet)
 		case <-quietTimer.C:
+			// PTY has been quiet for quiet_ms. Drain any data that arrived
+			// while we were in the select before checking state.
+			for len(ch) > 0 {
+				data := <-ch
+				collected = append(collected, data...)
+			}
+			if len(ch) > 0 {
+				// More output queued after drain — keep collecting
+				quietTimer.Reset(quiet)
+				continue
+			}
+			// Channel empty — check session state before declaring done.
+			// If approval is pending, return immediately so the caller knows.
+			// If still active (e.g. slow tool call gap), keep waiting.
+			state := api.tm.GetSessionState(sessionID)
+			if state == "approval" {
+				goto done
+			}
+			// idle or unknown — truly quiet, return
 			goto done
 		case <-timeout:
 			goto done
@@ -395,10 +418,12 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 done:
 	// Strip ANSI for clean text output
 	stripped := ansiStripRegex.ReplaceAll(collected, nil)
+	state := api.tm.GetSessionState(sessionID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"output":  string(stripped),
 		"raw":     string(collected),
 		"length":  len(collected),
+		"state":   state, // "idle" | "approval" — lets caller know if action needed
 	})
 }
 
