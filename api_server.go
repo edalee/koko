@@ -359,13 +359,18 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	}
 	defer api.tm.Unsubscribe(sessionID, ch)
 
-	// Wrap text in bracketed paste sequences so Claude Code's TUI accepts it as
-	// input rather than ignoring it (Claude Code enables bracketed paste mode).
-	// \x1b[200~ = paste start, \x1b[201~ = paste end, \r = Enter to submit.
-	text := "\x1b[200~" + strings.TrimRight(req.Text, "\r\n") + "\x1b[201~\r"
-	encoded := base64.StdEncoding.EncodeToString([]byte(text))
 	log.Printf("[interact] session=%s timeout=%dms quiet=%dms start=%dms prompt=%q", sessionID, req.TimeoutMs, req.QuietMs, req.StartMs, truncateLog(req.Text, 80))
-	if err := api.tm.Write(sessionID, encoded); err != nil {
+
+	// Write paste content and Enter as two separate PTY writes, mirroring how
+	// xterm.js delivers them: paste event first, then a distinct Enter keystroke.
+	// Concatenating them into one write causes Claude Code's TUI to discard the
+	// \r before it finishes processing the bracketed paste sequence.
+	paste := "\x1b[200~" + strings.TrimRight(req.Text, "\r\n") + "\x1b[201~"
+	if err := api.tm.Write(sessionID, base64.StdEncoding.EncodeToString([]byte(paste))); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := api.tm.Write(sessionID, base64.StdEncoding.EncodeToString([]byte("\r"))); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
