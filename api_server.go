@@ -364,6 +364,7 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	text := strings.TrimRight(req.Text, "\r\n")
 	text += "\r\n"
 	encoded := base64.StdEncoding.EncodeToString([]byte(text))
+	log.Printf("[interact] session=%s timeout=%dms quiet=%dms start=%dms prompt=%q", sessionID, req.TimeoutMs, req.QuietMs, req.StartMs, truncateLog(req.Text, 80))
 	if err := api.tm.Write(sessionID, encoded); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -385,13 +386,17 @@ waitForStart:
 		select {
 		case data, ok := <-ch:
 			if !ok {
+				log.Printf("[interact] session=%s channel closed waiting for first output", sessionID)
 				goto done
 			}
 			collected = append(collected, data...)
+			log.Printf("[interact] session=%s first output chunk (%d bytes), starting quiet timer", sessionID, len(data))
 			break waitForStart
 		case <-startDeadline:
+			log.Printf("[interact] session=%s start timeout — no output within start_ms", sessionID)
 			goto done
 		case <-timeout:
+			log.Printf("[interact] session=%s overall timeout hit waiting for first output", sessionID)
 			goto done
 		}
 	}
@@ -427,9 +432,11 @@ waitForStart:
 					quietTimer.Reset(quiet)
 					continue
 				}
-				// Channel empty — done
+				// Channel empty — quiet period elapsed, response is complete
+				log.Printf("[interact] session=%s quiet settle after %d bytes", sessionID, len(collected))
 				goto done
 			case <-timeout:
+				log.Printf("[interact] session=%s overall timeout hit collecting output (%d bytes so far)", sessionID, len(collected))
 				goto done
 			}
 		}
@@ -439,6 +446,7 @@ done:
 	// Strip ANSI for clean text output
 	stripped := ansiStripRegex.ReplaceAll(collected, nil)
 	state := api.tm.GetSessionState(sessionID)
+	log.Printf("[interact] session=%s state=%s raw=%d stripped=%d", sessionID, state, len(collected), len(stripped))
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"output":  string(stripped),
 		"raw":     string(collected),
@@ -448,6 +456,16 @@ done:
 }
 
 var ansiStripRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[()][0-9A-B]|\x1b\[[\?]?[0-9;]*[hlmsu]`)
+
+// truncateLog trims a string to max chars for log lines.
+func truncateLog(s string, max int) string {
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
 
 // handlePermissionRequest is called by Claude Code's PermissionRequest hook.
 // It marks the matching session as waiting for approval, then returns an empty
