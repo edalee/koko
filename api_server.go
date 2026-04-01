@@ -359,10 +359,10 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	}
 	defer api.tm.Unsubscribe(sessionID, ch)
 
-	// Send the input — PTY requires \r (carriage return) to submit, not just \n.
-	// Strip any trailing newline variants and send a canonical \r\n.
-	text := strings.TrimRight(req.Text, "\r\n")
-	text += "\r\n"
+	// Wrap text in bracketed paste sequences so Claude Code's TUI accepts it as
+	// input rather than ignoring it (Claude Code enables bracketed paste mode).
+	// \x1b[200~ = paste start, \x1b[201~ = paste end, \r = Enter to submit.
+	text := "\x1b[200~" + strings.TrimRight(req.Text, "\r\n") + "\x1b[201~\r"
 	encoded := base64.StdEncoding.EncodeToString([]byte(text))
 	log.Printf("[interact] session=%s timeout=%dms quiet=%dms start=%dms prompt=%q", sessionID, req.TimeoutMs, req.QuietMs, req.StartMs, truncateLog(req.Text, 80))
 	if err := api.tm.Write(sessionID, encoded); err != nil {
