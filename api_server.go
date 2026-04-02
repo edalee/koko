@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"regexp"
-	"strings"
+	"os/exec"
+"strings"
 	"sync"
 	"time"
 
@@ -322,9 +322,9 @@ func (api *APIServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, changes)
 }
 
-// handleSessionInteract sends text to a session and waits for the response.
-// Blocks until output settles (no new output for the specified quiet period).
-// This is the "one-shot send+receive" pattern for bots and scripts.
+// handleSessionInteract sends a prompt to a session's Claude instance using
+// `claude -p --resume <uuid>` and returns the structured response.
+// This bypasses the PTY entirely — no bracketed paste, no quiet timers, no ANSI.
 func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Request, sessionID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -333,9 +333,7 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 
 	var req struct {
 		Text      string `json:"text"`
-		TimeoutMs int    `json:"timeout_ms"`  // max wait time (default 120000)
-		QuietMs   int    `json:"quiet_ms"`    // output settle time once Claude starts responding (default 8000)
-		StartMs   int    `json:"start_ms"`    // max time to wait for first output before giving up (default 30000)
+		TimeoutMs int    `json:"timeout_ms"` // max wait time (default 120000)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -344,123 +342,93 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	if req.TimeoutMs == 0 {
 		req.TimeoutMs = 120000
 	}
-	if req.QuietMs == 0 {
-		req.QuietMs = 8000
-	}
-	if req.StartMs == 0 {
-		req.StartMs = 30000
+
+	// Must be idle — don't spawn a second claude process during approval or active work
+	state := api.tm.GetSessionState(sessionID)
+	if state == "approval" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "session is waiting for approval",
+			"state": "approval",
+		})
+		return
 	}
 
-	// Subscribe to output before sending input
-	ch := api.tm.Subscribe(sessionID)
-	if ch == nil {
+	// Need the Claude session UUID to resume
+	claudeID, err := api.tm.GetClaudeSessionID(sessionID)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
 		return
 	}
-	defer api.tm.Unsubscribe(sessionID, ch)
-
-	log.Printf("[interact] session=%s timeout=%dms quiet=%dms start=%dms prompt=%q", sessionID, req.TimeoutMs, req.QuietMs, req.StartMs, truncateLog(req.Text, 80))
-
-	// Write paste content and Enter as two separate PTY writes, mirroring how
-	// xterm.js delivers them: paste event first, then a distinct Enter keystroke.
-	// Concatenating them into one write causes Claude Code's TUI to discard the
-	// \r before it finishes processing the bracketed paste sequence.
-	paste := "\x1b[200~" + strings.TrimRight(req.Text, "\r\n") + "\x1b[201~"
-	if err := api.tm.Write(sessionID, base64.StdEncoding.EncodeToString([]byte(paste))); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if err := api.tm.Write(sessionID, base64.StdEncoding.EncodeToString([]byte("\r"))); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if claudeID == "" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "session not ready — Claude session ID not yet captured",
+		})
 		return
 	}
 
-	// Phase 1: wait for Claude to start responding (first output chunk).
-	// This prevents the quiet timer from firing on the echo of the input before
-	// Claude Code has even begun processing.
-	timeout := time.After(time.Duration(req.TimeoutMs) * time.Millisecond)
-	startDeadline := time.After(time.Duration(req.StartMs) * time.Millisecond)
-	quiet := time.Duration(req.QuietMs) * time.Millisecond
-
-	var collected []byte
-
-	// Wait for first output before starting the quiet timer.
-	// This prevents the quiet timer firing on input echo before Claude responds.
-waitForStart:
-	for {
-		select {
-		case data, ok := <-ch:
-			if !ok {
-				log.Printf("[interact] session=%s channel closed waiting for first output", sessionID)
-				goto done
-			}
-			collected = append(collected, data...)
-			log.Printf("[interact] session=%s first output chunk (%d bytes), starting quiet timer", sessionID, len(data))
-			break waitForStart
-		case <-startDeadline:
-			log.Printf("[interact] session=%s start timeout — no output within start_ms", sessionID)
-			goto done
-		case <-timeout:
-			log.Printf("[interact] session=%s overall timeout hit waiting for first output", sessionID)
-			goto done
+	// Get session directory
+	sessions := api.tm.GetSessions()
+	var dir string
+	for _, s := range sessions {
+		if s.ID == sessionID {
+			dir = s.Dir
+			break
 		}
 	}
 
-	// Phase 2: collect output, resetting quiet timer on each chunk.
-	// Only declare done when PTY has been quiet for quiet_ms with no buffered data.
-	{
-		quietTimer := time.NewTimer(quiet)
-		defer quietTimer.Stop()
+	log.Printf("[interact] session=%s claude=%s timeout=%dms prompt=%q", sessionID, claudeID, req.TimeoutMs, truncateLog(req.Text, 80))
 
-		for {
-			select {
-			case data, ok := <-ch:
-				if !ok {
-					goto done
-				}
-				collected = append(collected, data...)
-				// Reset quiet timer — more output is arriving
-				if !quietTimer.Stop() {
-					select {
-					case <-quietTimer.C:
-					default:
-					}
-				}
-				quietTimer.Reset(quiet)
-			case <-quietTimer.C:
-				// Drain any data that arrived while we were in the select
-				for len(ch) > 0 {
-					data := <-ch
-					collected = append(collected, data...)
-				}
-				if len(ch) > 0 {
-					quietTimer.Reset(quiet)
-					continue
-				}
-				// Channel empty — quiet period elapsed, response is complete
-				log.Printf("[interact] session=%s quiet settle after %d bytes", sessionID, len(collected))
-				goto done
-			case <-timeout:
-				log.Printf("[interact] session=%s overall timeout hit collecting output (%d bytes so far)", sessionID, len(collected))
-				goto done
-			}
+	// Spawn claude -p --resume with timeout
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(req.TimeoutMs)*time.Millisecond)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, resolveClaudePath(),
+		"-p", req.Text,
+		"--resume", claudeID,
+		"--output-format", "json",
+		"--bare",
+	)
+	cmd.Dir = dir
+	cmd.Env = api.tm.buildEnv()
+
+	output, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			log.Printf("[interact] session=%s timeout after %dms", sessionID, req.TimeoutMs)
+			writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "timeout waiting for Claude response"})
+			return
 		}
+		log.Printf("[interact] session=%s error: %v", sessionID, err)
+		// Try to extract stderr for context
+		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": string(exitErr.Stderr)})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 
-done:
-	// Strip ANSI for clean text output
-	stripped := ansiStripRegex.ReplaceAll(collected, nil)
-	state := api.tm.GetSessionState(sessionID)
-	log.Printf("[interact] session=%s state=%s raw=%d stripped=%d", sessionID, state, len(collected), len(stripped))
+	// Parse the JSON response from claude -p
+	var result struct {
+		Result    string `json:"result"`
+		SessionID string `json:"session_id"`
+		IsError   bool   `json:"is_error"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		log.Printf("[interact] session=%s failed to parse claude output: %v", sessionID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to parse Claude response"})
+		return
+	}
+
+	log.Printf("[interact] session=%s done result_len=%d is_error=%v", sessionID, len(result.Result), result.IsError)
+
+	// Check session state after the call (approval may have been triggered during execution)
+	postState := api.tm.GetSessionState(sessionID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"output":  string(stripped),
-		"raw":     string(collected),
-		"length":  len(collected),
-		"state":   state, // "idle" | "approval" — lets caller know if action needed
+		"output": result.Result,
+		"state":  postState,
 	})
 }
-
-var ansiStripRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[()][0-9A-B]|\x1b\[[\?]?[0-9;]*[hlmsu]`)
 
 // truncateLog trims a string to max chars for log lines.
 func truncateLog(s string, max int) string {

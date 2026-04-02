@@ -349,6 +349,59 @@ func TestSessionInteract_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestSessionInteract_ApprovalState(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s := &session{
+		id:              "interact-approval",
+		name:            "Test",
+		dir:             "/tmp",
+		done:            make(chan struct{}),
+		tailText:        newRingBuffer(2048),
+		subscribers:     make(map[chan []byte]struct{}),
+		waitingApproval: true,
+		approvalTool:    "Bash",
+	}
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	body := strings.NewReader(`{"text":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/sessions/interact-approval/interact", body)
+	w := httptest.NewRecorder()
+	api.handleSessionInteract(w, req, s.id)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSessionInteract_NoClaudeUUID(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	s := &session{
+		id:          "interact-no-uuid",
+		name:        "Test",
+		dir:         "/tmp",
+		done:        make(chan struct{}),
+		tailText:    newRingBuffer(2048),
+		subscribers: make(map[chan []byte]struct{}),
+		// claudeSessionID deliberately empty
+	}
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	body := strings.NewReader(`{"text":"hello"}`)
+	req := httptest.NewRequest("POST", "/api/sessions/interact-no-uuid/interact", body)
+	w := httptest.NewRecorder()
+	api.handleSessionInteract(w, req, s.id)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestSessionState_ExistingSession(t *testing.T) {
 	api, tm := newTestAPIServer(t)
 
