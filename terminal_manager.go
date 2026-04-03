@@ -267,8 +267,12 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	return id, nil
 }
 
-// detectClaudeSessionID watches the Claude projects dir for a new .jsonl file
-// and stores the UUID (filename) on the session.
+// detectClaudeSessionID watches the Claude projects dir for the session's .jsonl
+// file and stores the UUID (filename) on the session.
+//
+// Strategy: first look for a new file that wasn't there at startup. If none
+// appears within 30s, fall back to the most recently modified .jsonl file.
+// This handles both fresh sessions (new file) and --continue sessions (reused file).
 func (tm *TerminalManager) detectClaudeSessionID(s *session) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -319,6 +323,44 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session) {
 			return
 		}
 	}
+
+	// No new file appeared — fall back to the most recently modified .jsonl.
+	// This handles --continue sessions where Claude reuses an existing file.
+	uuid := tm.mostRecentJSONL(sessionDir)
+	if uuid != "" {
+		s.mu.Lock()
+		s.claudeSessionID = uuid
+		s.mu.Unlock()
+		log.Printf("[pty] captured Claude session UUID (fallback): %s for %s", uuid, s.slug)
+	} else {
+		log.Printf("[pty] failed to capture Claude session UUID for %s", s.slug)
+	}
+}
+
+// mostRecentJSONL returns the UUID of the most recently modified .jsonl file
+// in the given directory, or "" if none found.
+func (tm *TerminalManager) mostRecentJSONL(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+
+	var newest string
+	var newestTime time.Time
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(newestTime) {
+			newestTime = info.ModTime()
+			newest = strings.TrimSuffix(e.Name(), ".jsonl")
+		}
+	}
+	return newest
 }
 
 func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (string, error) {
