@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
-"strings"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/x/vt"
 	"github.com/gorilla/websocket"
 )
 
@@ -322,9 +322,10 @@ func (api *APIServer) handleFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, changes)
 }
 
-// handleSessionInteract sends a prompt to a session's Claude instance using
-// `claude -p --resume <uuid>` and returns the structured response.
-// This bypasses the PTY entirely — no bracketed paste, no quiet timers, no ANSI.
+// handleSessionInteract sends text to a session and waits for the response.
+// Writes the prompt to the PTY with a delay before Enter (so Claude Code's
+// Ink TUI finishes processing the text before the submit keystroke), then
+// collects output until quiet.
 func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Request, sessionID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -334,6 +335,8 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	var req struct {
 		Text      string `json:"text"`
 		TimeoutMs int    `json:"timeout_ms"` // max wait time (default 120000)
+		QuietMs   int    `json:"quiet_ms"`   // output settle time (default 8000)
+		StartMs   int    `json:"start_ms"`   // max time to wait for first output (default 30000)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -342,92 +345,141 @@ func (api *APIServer) handleSessionInteract(w http.ResponseWriter, r *http.Reque
 	if req.TimeoutMs == 0 {
 		req.TimeoutMs = 120000
 	}
-
-	// Must be idle — don't spawn a second claude process during approval or active work
-	state := api.tm.GetSessionState(sessionID)
-	if state == "approval" {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "session is waiting for approval",
-			"state": "approval",
-		})
-		return
+	if req.QuietMs == 0 {
+		req.QuietMs = 8000
+	}
+	if req.StartMs == 0 {
+		req.StartMs = 30000
 	}
 
-	// Need the Claude session UUID to resume
-	claudeID, err := api.tm.GetClaudeSessionID(sessionID)
-	if err != nil {
+	// Subscribe to output before sending input
+	ch := api.tm.Subscribe(sessionID)
+	if ch == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
 		return
 	}
-	if claudeID == "" {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "session not ready — Claude session ID not yet captured",
-		})
+	defer api.tm.Unsubscribe(sessionID, ch)
+
+	// Reject if session is waiting for tool approval — sending a new prompt
+	// would conflict with the pending approval flow.
+	if state := api.tm.GetSessionState(sessionID); state == "approval" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "session is waiting for approval"})
 		return
 	}
 
-	// Get session directory
-	sessions := api.tm.GetSessions()
-	var dir string
-	for _, s := range sessions {
-		if s.ID == sessionID {
-			dir = s.Dir
-			break
-		}
-	}
+	promptText := strings.TrimRight(req.Text, "\r\n")
+	log.Printf("[interact] session=%s timeout=%dms quiet=%dms start=%dms prompt=%q", sessionID, req.TimeoutMs, req.QuietMs, req.StartMs, truncateLog(promptText, 80))
 
-	log.Printf("[interact] session=%s claude=%s timeout=%dms prompt=%q", sessionID, claudeID, req.TimeoutMs, truncateLog(req.Text, 80))
-
-	// Spawn claude -p --resume with timeout
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(req.TimeoutMs)*time.Millisecond)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, resolveClaudePath(),
-		"-p", req.Text,
-		"--resume", claudeID,
-		"--output-format", "json",
-		"--bare",
-	)
-	cmd.Dir = dir
-	cmd.Env = api.tm.buildEnv()
-
-	output, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("[interact] session=%s timeout after %dms", sessionID, req.TimeoutMs)
-			writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "timeout waiting for Claude response"})
-			return
-		}
-		log.Printf("[interact] session=%s error: %v", sessionID, err)
-		// Try to extract stderr for context
-		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": string(exitErr.Stderr)})
-			return
-		}
+	// Write each character individually to the PTY, simulating real keyboard
+	// input. Claude Code's Ink TUI uses Node's readline.emitKeypressEvents()
+	// which processes bulk writes as a single data event — the trailing \r
+	// doesn't generate a separate "return" keypress event. Writing char-by-char
+	// matches what xterm.js does and ensures \r triggers submission.
+	if err := api.tm.WriteKeystrokes(sessionID, promptText+"\r"); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Parse the JSON response from claude -p
-	var result struct {
-		Result    string `json:"result"`
-		SessionID string `json:"session_id"`
-		IsError   bool   `json:"is_error"`
-	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		log.Printf("[interact] session=%s failed to parse claude output: %v", sessionID, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to parse Claude response"})
-		return
+	// Phase 1: wait for Claude to start responding (first output chunk).
+	timeout := time.After(time.Duration(req.TimeoutMs) * time.Millisecond)
+	startDeadline := time.After(time.Duration(req.StartMs) * time.Millisecond)
+	quiet := time.Duration(req.QuietMs) * time.Millisecond
+
+	var collected []byte
+
+waitForStart:
+	for {
+		select {
+		case data, ok := <-ch:
+			if !ok {
+				log.Printf("[interact] session=%s channel closed waiting for first output", sessionID)
+				goto done
+			}
+			collected = append(collected, data...)
+			log.Printf("[interact] session=%s first output chunk (%d bytes), starting quiet timer", sessionID, len(data))
+			break waitForStart
+		case <-startDeadline:
+			log.Printf("[interact] session=%s start timeout — no output within start_ms", sessionID)
+			goto done
+		case <-timeout:
+			log.Printf("[interact] session=%s overall timeout hit waiting for first output", sessionID)
+			goto done
+		}
 	}
 
-	log.Printf("[interact] session=%s done result_len=%d is_error=%v", sessionID, len(result.Result), result.IsError)
+	// Phase 2: collect output, resetting quiet timer on each chunk.
+	{
+		quietTimer := time.NewTimer(quiet)
+		defer quietTimer.Stop()
 
-	// Check session state after the call (approval may have been triggered during execution)
-	postState := api.tm.GetSessionState(sessionID)
+		for {
+			select {
+			case data, ok := <-ch:
+				if !ok {
+					goto done
+				}
+				collected = append(collected, data...)
+				if !quietTimer.Stop() {
+					select {
+					case <-quietTimer.C:
+					default:
+					}
+				}
+				quietTimer.Reset(quiet)
+			case <-quietTimer.C:
+				// Drain any buffered data
+				for len(ch) > 0 {
+					data := <-ch
+					collected = append(collected, data...)
+				}
+				if len(ch) > 0 {
+					quietTimer.Reset(quiet)
+					continue
+				}
+				log.Printf("[interact] session=%s quiet settle after %d bytes", sessionID, len(collected))
+				goto done
+			case <-timeout:
+				log.Printf("[interact] session=%s overall timeout hit collecting output (%d bytes so far)", sessionID, len(collected))
+				goto done
+			}
+		}
+	}
+
+done:
+	// Render raw PTY output through a virtual terminal emulator so that cursor
+	// positioning codes produce correct whitespace. Plain regex stripping loses
+	// spaces that are implied by cursor movement (e.g. \x1b[10C → 10 spaces).
+	rendered := renderVT(collected, 120, 500)
+	state := api.tm.GetSessionState(sessionID)
+	log.Printf("[interact] session=%s state=%s raw=%d rendered=%d", sessionID, state, len(collected), len(rendered))
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"output": result.Result,
-		"state":  postState,
+		"output": rendered,
+		"state":  state,
 	})
+}
+
+// renderVT feeds raw PTY bytes through a virtual terminal emulator and returns
+// the rendered screen text. This correctly handles cursor positioning, erasure,
+// and other ANSI sequences that a simple regex strip would mangle.
+func renderVT(raw []byte, cols, rows int) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	term := vt.NewEmulator(cols, rows)
+	_, _ = term.Write(raw)
+	// String() returns the screen buffer as plain text with lines separated by \n.
+	// Trim trailing blank lines.
+	text := term.String()
+	lines := strings.Split(text, "\n")
+	// Remove trailing empty lines (the screen buffer is usually larger than content)
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	// Also trim trailing spaces from each line
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // truncateLog trims a string to max chars for log lines.

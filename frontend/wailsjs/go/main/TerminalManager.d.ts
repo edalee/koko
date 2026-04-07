@@ -26,8 +26,14 @@ export function ReplayBuffer(arg1:string):Promise<string>;
 
 export function Resize(arg1:string,arg2:number,arg3:number):Promise<void>;
 
+export function ResolveSession(arg1:string):Promise<string>;
+
+export function SetApprovalState(arg1:string,arg2:string):Promise<void>;
+
 export function Subscribe(arg1:string):Promise<any>;
 
 export function Unsubscribe(arg1:string,arg2:any):Promise<void>;
 
 export function Write(arg1:string,arg2:string):Promise<void>;
+
+export function WriteKeystrokes(arg1:string,arg2:string):Promise<void>;

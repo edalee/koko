@@ -441,6 +441,33 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 	return err
 }
 
+// WriteKeystrokes writes text to the PTY one character at a time, simulating
+// real keyboard input. This is necessary for Claude Code's Ink TUI: when text
+// arrives as a bulk write, Node's readline.emitKeypressEvents processes it as
+// a single data event rather than individual keypress events, so \r at the end
+// doesn't trigger the submit action. Writing char-by-char matches what xterm.js
+// does when the user types.
+func (tm *TerminalManager) WriteKeystrokes(sessionID string, text string) error {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waitingApproval = false
+	s.approvalTool = ""
+
+	buf := []byte{0}
+	for _, b := range []byte(text) {
+		buf[0] = b
+		if _, err := s.ptmx.Write(buf); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (tm *TerminalManager) Resize(sessionID string, cols, rows int) error {
 	s, err := tm.getSession(sessionID)
 	if err != nil {

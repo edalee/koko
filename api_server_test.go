@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newTestAPIServer creates an APIServer backed by a TerminalManager with no real PTY sessions.
@@ -376,29 +377,67 @@ func TestSessionInteract_ApprovalState(t *testing.T) {
 	}
 }
 
-func TestSessionInteract_NoClaudeUUID(t *testing.T) {
+func TestSessionInteract_WritesToPTY(t *testing.T) {
 	api, tm := newTestAPIServer(t)
 
-	s := &session{
-		id:          "interact-no-uuid",
-		name:        "Test",
-		dir:         "/tmp",
-		done:        make(chan struct{}),
-		tailText:    newRingBuffer(2048),
-		subscribers: make(map[chan []byte]struct{}),
-		// claudeSessionID deliberately empty
-	}
+	s, r, pw := newPipeSession(t, "interact-write")
+	defer func() { _ = r.Close() }()
+	defer func() { _ = pw.Close() }()
 	tm.mu.Lock()
 	tm.sessions[s.id] = s
 	tm.mu.Unlock()
 
-	body := strings.NewReader(`{"text":"hello"}`)
-	req := httptest.NewRequest("POST", "/api/sessions/interact-no-uuid/interact", body)
+	// Use short timeouts so the test completes quickly
+	body := strings.NewReader(`{"text":"hello world","timeout_ms":500,"quiet_ms":200,"start_ms":300}`)
+	req := httptest.NewRequest("POST", "/api/sessions/"+s.id+"/interact", body)
 	w := httptest.NewRecorder()
 	api.handleSessionInteract(w, req, s.id)
 
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Read all bytes written to the pipe (the PTY master side).
+	// WriteKeystrokes writes char-by-char, so we may need multiple reads.
+	var all []byte
+	buf := make([]byte, 4096)
+	for {
+		_ = r.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		n, err := r.Read(buf)
+		if n > 0 {
+			all = append(all, buf[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	got := string(all)
+	if !strings.Contains(got, "hello world") {
+		t.Errorf("expected pipe to contain 'hello world', got %q", got)
+	}
+	if !strings.HasSuffix(got, "\r") {
+		t.Errorf("expected pipe data to end with \\r (Enter), got %q", got)
+	}
+}
+
+func TestRenderVT_PreservesSpacing(t *testing.T) {
+	// Simulate Claude Code output with cursor positioning escape codes.
+	// \x1b[10C = cursor forward 10 (should produce 10 spaces).
+	// \x1b[2;1H = move cursor to row 2, col 1.
+	raw := []byte("hello\x1b[5Cworld\x1b[2;1H1 file changed")
+	got := renderVT(raw, 80, 24)
+	if !strings.Contains(got, "hello     world") {
+		t.Errorf("expected 'hello     world', got first line %q", strings.SplitN(got, "\n", 2)[0])
+	}
+	if !strings.Contains(got, "1 file changed") {
+		t.Errorf("expected '1 file changed' on second line, got %q", got)
+	}
+}
+
+func TestRenderVT_EmptyInput(t *testing.T) {
+	got := renderVT(nil, 80, 24)
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
 	}
 }
 

@@ -50,6 +50,14 @@ export function Resize(arg1, arg2, arg3) {
   return window['go']['main']['TerminalManager']['Resize'](arg1, arg2, arg3);
 }
 
+export function ResolveSession(arg1) {
+  return window['go']['main']['TerminalManager']['ResolveSession'](arg1);
+}
+
+export function SetApprovalState(arg1, arg2) {
+  return window['go']['main']['TerminalManager']['SetApprovalState'](arg1, arg2);
+}
+
 export function Subscribe(arg1) {
   return window['go']['main']['TerminalManager']['Subscribe'](arg1);
 }
@@ -60,4 +68,8 @@ export function Unsubscribe(arg1, arg2) {
 
 export function Write(arg1, arg2) {
   return window['go']['main']['TerminalManager']['Write'](arg1, arg2);
+}
+
+export function WriteKeystrokes(arg1, arg2) {
+  return window['go']['main']['TerminalManager']['WriteKeystrokes'](arg1, arg2);
 }
