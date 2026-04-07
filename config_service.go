@@ -152,6 +152,16 @@ func (cs *ConfigService) UnhidePR(repo string, number int) error {
 	return cs.SaveConfig(cfg)
 }
 
+// ClearHiddenPRs removes all hidden PR entries.
+func (cs *ConfigService) ClearHiddenPRs() (int, error) {
+	cs.mu.Lock()
+	count := len(cs.config.HiddenPRs)
+	cs.config.HiddenPRs = nil
+	cfg := cs.config
+	cs.mu.Unlock()
+	return count, cs.SaveConfig(cfg)
+}
+
 // GetHiddenPRs returns the set of hidden PR keys.
 func (cs *ConfigService) GetHiddenPRs() map[string]bool {
 	cs.mu.Lock()

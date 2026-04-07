@@ -420,22 +420,35 @@ func TestSessionInteract_WritesToPTY(t *testing.T) {
 	}
 }
 
-func TestRenderVT_PreservesSpacing(t *testing.T) {
-	// Simulate Claude Code output with cursor positioning escape codes.
-	// \x1b[10C = cursor forward 10 (should produce 10 spaces).
-	// \x1b[2;1H = move cursor to row 2, col 1.
-	raw := []byte("hello\x1b[5Cworld\x1b[2;1H1 file changed")
-	got := renderVT(raw, 80, 24)
-	if !strings.Contains(got, "hello     world") {
-		t.Errorf("expected 'hello     world', got first line %q", strings.SplitN(got, "\n", 2)[0])
-	}
-	if !strings.Contains(got, "1 file changed") {
-		t.Errorf("expected '1 file changed' on second line, got %q", got)
+func TestStripANSI_CursorForwardToSpaces(t *testing.T) {
+	// \x1b[5C = cursor forward 5 → 5 spaces
+	raw := []byte("hello\x1b[5Cworld")
+	got := stripANSI(raw)
+	if got != "hello     world" {
+		t.Errorf("expected 'hello     world', got %q", got)
 	}
 }
 
-func TestRenderVT_EmptyInput(t *testing.T) {
-	got := renderVT(nil, 80, 24)
+func TestStripANSI_DefaultCursorForward(t *testing.T) {
+	// \x1b[C with no number = cursor forward 1 → 1 space
+	raw := []byte("a\x1b[Cb")
+	got := stripANSI(raw)
+	if got != "a b" {
+		t.Errorf("expected 'a b', got %q", got)
+	}
+}
+
+func TestStripANSI_StripsOtherCodes(t *testing.T) {
+	// Color codes + cursor position should be stripped, not converted to spaces
+	raw := []byte("\x1b[32mgreen\x1b[0m \x1b[2;1Htext")
+	got := stripANSI(raw)
+	if got != "green text" {
+		t.Errorf("expected 'green text', got %q", got)
+	}
+}
+
+func TestStripANSI_EmptyInput(t *testing.T) {
+	got := stripANSI(nil)
 	if got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}

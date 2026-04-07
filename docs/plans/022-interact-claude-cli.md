@@ -1,104 +1,71 @@
-# Plan 022: Replace PTY-based /interact with `claude -p --resume`
+# Plan 022: Fix /interact PTY input and output
 
 ## Problem
 
-The `/interact` endpoint writes text to the PTY and waits for output to settle.
-This approach has multiple issues:
+The `/interact` endpoint had two issues:
 
-1. **Bracketed paste mode** — Claude Code's TUI enables bracketed paste. Raw PTY
-   writes appear in the input buffer but don't execute. Wrapping in paste sequences
-   and splitting writes doesn't reliably submit.
-2. **Quiet timer races** — The phase-1/phase-2 quiet timer fires during gaps between
-   Claude's tool calls, returning partial responses.
-3. **ANSI stripping** — PTY output is full of escape codes that must be stripped,
-   losing formatting context.
+1. **Input: Bulk PTY writes don't submit** — Claude Code's Ink TUI uses
+   `readline.emitKeypressEvents()` in raw mode. A bulk `ptmx.Write("hello\r")`
+   arrives as a single `data` event — the `\r` isn't recognized as a separate
+   Return keypress, so the prompt never submits. Bracketed paste also failed.
+   `claude -p --resume` was attempted but only works with `-p` mode sessions,
+   not interactive PTY sessions.
+
+2. **Output: ANSI stripping loses spaces** — Claude Code's TUI uses cursor-forward
+   sequences (`\x1b[nC`) for column alignment (e.g. `git diff --stat`). The old
+   regex stripped these, turning "1 file changed" into "1filechanged".
 
 ## Solution
 
-Replace PTY write + subscriber + quiet timer with `claude -p --resume <uuid>`:
+### Input: Character-by-character PTY writes
 
-```
-POST /api/sessions/:id/interact {"text": "check the tests"}
+New `WriteKeystrokes()` method writes one byte at a time to ptmx, matching
+exactly what xterm.js does when the user types. Each character arrives as its
+own stdin read event, so `\r` correctly fires as a Return keypress.
 
-→ exec: claude -p "check the tests" --resume <uuid> --output-format json
-→ parse JSON result
-→ return {"output": "...", "state": "idle"}
+```go
+func (tm *TerminalManager) WriteKeystrokes(sessionID string, text string) error {
+    // ... lock, clear approval ...
+    for _, b := range []byte(text) {
+        buf[0] = b
+        ptmx.Write(buf)
+    }
+}
 ```
+
+### Output: Smart ANSI stripping with cursor-forward → spaces
+
+Two-pass regex approach:
+1. Replace `\x1b[nC` (cursor forward) with n spaces
+2. Strip all remaining ANSI escape sequences
+
+This preserves column-aligned content spacing without rendering Claude Code's
+full TUI chrome (bird logo, spinners, status bar, tips).
+
+A VT terminal emulator (charmbracelet/x/vt) was tried but rendered the entire
+screen including all TUI decorations — too much noise.
 
 ## What stays unchanged
 
 - PTY sessions (creation, xterm.js display, scrollback, resize, tab switching)
-- Session recovery (`--resume` / `--continue` on reconnect)
 - `/write` endpoint (raw PTY input — keystrokes, y/n, Ctrl+C)
-- Approval indicator (PermissionRequest hook still fires for PTY session)
+- Subscriber + quiet timer approach for collecting output
+- Approval state guard (409 if waiting for tool approval)
 - MCP tools (call `/interact` — transparently upgraded)
 - Slack `prompt` command (calls `/interact` — transparently upgraded)
 
-## Implementation
+## Approaches tried and rejected
 
-### `api_server.go` — `handleSessionInteract`
-
-Replace the entire subscriber/quiet-timer machinery with:
-
-1. Check `state == "idle"` (reject if approval or not ready)
-2. Get `claudeSessionID` from TerminalManager
-3. `exec.CommandContext` with timeout:
-   ```
-   claude -p "<text>" --resume <uuid> --output-format json --bare
-   ```
-4. Parse JSON response → extract `result` field
-5. Return to caller
-
-Environment: `resolveClaudePath()` for binary, `tm.buildEnv()` for PATH.
-
-### Request/response contract (unchanged for callers)
-
-```json
-// Request
-{"text": "what is the status?", "timeout_ms": 120000}
-
-// Response — 200
-{"output": "Here's the status...", "state": "idle"}
-
-// Response — 409
-{"error": "session is waiting for approval"}
-{"error": "session not ready — Claude session ID not yet captured"}
-```
-
-### Deleted code
-
-- Phase-1/phase-2 quiet timer (~80 lines)
-- Subscriber channel setup/teardown
-- ANSI strip regex usage in interact
-- Bracketed paste logic
-
-## Risks and mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Concurrent JSONL writes (PTY Claude idle but holding file) | Gate on `state == "idle"`, return 409 if not |
-| PTY display divergence (Slack exchange not visible in terminal) | By design. Claude has full context from JSONL |
-| No UUID yet (fresh session) | Return 409. Caller retries |
-| Tool approvals block `-p` process | `exec.CommandContext` timeout kills it. Consider `--permission-mode acceptEdits` |
-| Binary/env resolution | Reuse `resolveClaudePath()` + `tm.buildEnv()` |
-
-## Verification
-
-```bash
-# Direct test
-curl -X POST http://127.0.0.1:19876/api/sessions/koko-1/interact \
-  -H "Authorization: Bearer <key>" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"what files have changed?"}'
-
-# Slack
-prompt koko-1 what files have changed?
-
-# Check logs
-tail -f ~/Library/Application\ Support/koko/koko.log | grep interact
-```
+| Approach | Why it failed |
+|----------|---------------|
+| Bulk PTY write with `\r\n` | Text appeared in input but didn't submit |
+| Bracketed paste (`\x1b[200~...\x1b[201~`) | Same — text appeared, `\r` didn't submit |
+| `claude -p --resume <uuid>` | `--resume` only works with `-p` mode sessions, not PTY |
+| 100ms delay between text and `\r` | Untested — replaced by char-by-char approach |
+| VT terminal emulator for output | Rendered full TUI including bird/spinner/tips noise |
 
 ## Files changed
 
-- `api_server.go` — rewrite `handleSessionInteract`
-- `api_server_test.go` — update interact tests
+- `terminal_manager.go` — added `WriteKeystrokes()` method
+- `api_server.go` — `/interact` uses `WriteKeystrokes`, smart `stripANSI()` with cursor-forward handling
+- `api_server_test.go` — tests for `WriteKeystrokes`, `stripANSI`, approval state guard

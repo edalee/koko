@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/x/vt"
 	"github.com/gorilla/websocket"
 )
 
@@ -446,41 +447,48 @@ waitForStart:
 	}
 
 done:
-	// Render raw PTY output through a virtual terminal emulator so that cursor
-	// positioning codes produce correct whitespace. Plain regex stripping loses
-	// spaces that are implied by cursor movement (e.g. \x1b[10C → 10 spaces).
-	rendered := renderVT(collected, 120, 500)
+	stripped := stripANSI(collected)
 	state := api.tm.GetSessionState(sessionID)
-	log.Printf("[interact] session=%s state=%s raw=%d rendered=%d", sessionID, state, len(collected), len(rendered))
+	log.Printf("[interact] session=%s state=%s raw=%d stripped=%d", sessionID, state, len(collected), len(stripped))
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"output": rendered,
+		"output": stripped,
 		"state":  state,
 	})
 }
 
-// renderVT feeds raw PTY bytes through a virtual terminal emulator and returns
-// the rendered screen text. This correctly handles cursor positioning, erasure,
-// and other ANSI sequences that a simple regex strip would mangle.
-func renderVT(raw []byte, cols, rows int) string {
+// stripANSI removes ANSI escape codes from raw PTY output, converting
+// cursor-forward sequences (\x1b[nC) to spaces so column-aligned text
+// (like git diff --stat) retains its spacing. Other positioning codes
+// (cursor-up/down/absolute) are stripped — they're used by Claude Code's
+// Ink TUI to draw decorative elements and would add noise.
+func stripANSI(raw []byte) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	term := vt.NewEmulator(cols, rows)
-	_, _ = term.Write(raw)
-	// String() returns the screen buffer as plain text with lines separated by \n.
-	// Trim trailing blank lines.
-	text := term.String()
-	lines := strings.Split(text, "\n")
-	// Remove trailing empty lines (the screen buffer is usually larger than content)
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	// Also trim trailing spaces from each line
-	for i, line := range lines {
-		lines[i] = strings.TrimRight(line, " ")
-	}
-	return strings.Join(lines, "\n")
+	// First pass: replace cursor-forward \x1b[nC with n spaces.
+	result := cursorForwardRegex.ReplaceAllFunc(raw, func(match []byte) []byte {
+		// Parse the count from \x1b[nC — default to 1 if no number.
+		s := string(match)
+		numStr := s[2 : len(s)-1] // between \x1b[ and C
+		n := 1
+		if numStr != "" {
+			if parsed, err := strconv.Atoi(numStr); err == nil && parsed > 0 {
+				n = parsed
+			}
+		}
+		return []byte(strings.Repeat(" ", n))
+	})
+	// Second pass: strip all remaining escape sequences.
+	result = ansiStripRegex.ReplaceAll(result, nil)
+	return string(result)
 }
+
+var (
+	// Matches cursor-forward: \x1b[C or \x1b[nC (CUF).
+	cursorForwardRegex = regexp.MustCompile(`\x1b\[\d*C`)
+	// Matches all other ANSI escape sequences.
+	ansiStripRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[()][0-9A-B]|\x1b\[[\?]?[0-9;]*[hlmsu]`)
+)
 
 // truncateLog trims a string to max chars for log lines.
 func truncateLog(s string, max int) string {

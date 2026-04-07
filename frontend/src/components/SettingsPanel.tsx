@@ -1,6 +1,11 @@
-import { Check, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, Loader2, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { GetConfig, SaveConfig } from "../../wailsjs/go/main/ConfigService";
+import {
+  ClearHiddenPRs,
+  GetConfig,
+  GetHiddenPRs,
+  SaveConfig,
+} from "../../wailsjs/go/main/ConfigService";
 import type { SafeWorkingConfig } from "../hooks/useSafeWorking";
 import { cn } from "../lib/utils";
 
@@ -28,8 +33,13 @@ export default function SettingsPanel({
   const [apiPort, setApiPort] = useState(19876);
   const [apiKey, setApiKey] = useState("");
   const [keyCopied, setKeyCopied] = useState(false);
+  const [hiddenPRCount, setHiddenPRCount] = useState(0);
+  const [prCleared, setPrCleared] = useState(false);
 
   useEffect(() => {
+    GetHiddenPRs()
+      .then((prs) => setHiddenPRCount(Object.keys(prs).length))
+      .catch(() => {});
     GetConfig()
       .then((config) => {
         if (config.slackToken) {
@@ -388,6 +398,41 @@ export default function SettingsPanel({
             </div>
           </>
         )}
+      </div>
+
+      {/* GitHub */}
+      <div className="space-y-3 pt-3 border-t border-white/[0.06]">
+        <div>
+          <h4 className="text-sm text-white font-medium">GitHub</h4>
+          <p className="text-xs text-muted-foreground mt-1">Manage hidden pull requests.</p>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-white/80">Hidden PRs</p>
+            <p className="text-[10px] text-tertiary">
+              {hiddenPRCount} {hiddenPRCount === 1 ? "PR" : "PRs"} hidden from sidebar
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={hiddenPRCount === 0 || prCleared}
+            onClick={async () => {
+              await ClearHiddenPRs();
+              setHiddenPRCount(0);
+              setPrCleared(true);
+              setTimeout(() => setPrCleared(false), 2000);
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40"
+          >
+            {prCleared ? (
+              <Check className="size-3 text-accent" />
+            ) : (
+              <Trash2 className="size-3 text-muted-foreground" />
+            )}
+            <span className="text-white">{prCleared ? "Cleared" : "Clear All"}</span>
+          </button>
+        </div>
       </div>
 
       {/* Config file location */}

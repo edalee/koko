@@ -2,6 +2,7 @@ import { Settings } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { GetHiddenPRs } from "../wailsjs/go/main/ConfigService";
 import { Write } from "../wailsjs/go/main/TerminalManager";
+import kokoBird from "./assets/koko_bird.svg";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
 import NewSessionDialog from "./components/NewSessionDialog";
@@ -200,6 +201,11 @@ export default function App() {
                           className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-base/60 backdrop-blur-sm cursor-pointer"
                           onClick={() => switchTab(tab.id)}
                         >
+                          <img
+                            src={kokoBird}
+                            alt=""
+                            className="absolute bottom-0 right-0 w-full max-h-full object-contain opacity-[0.04] pointer-events-none select-none"
+                          />
                           <div className="max-w-sm w-full mx-auto glass-card rounded-xl p-5 border border-white/[0.08] space-y-3">
                             <div className="flex items-center gap-2">
                               <span className="size-2 rounded-full bg-white/20" />
@@ -224,7 +230,12 @@ export default function App() {
                   </div>
                 ))}
                 {tabs.length === 0 && (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <div className="relative flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                    <img
+                      src={kokoBird}
+                      alt=""
+                      className="absolute bottom-0 right-0 w-full max-h-full object-contain opacity-[0.04] pointer-events-none select-none"
+                    />
                     <p className="text-sm">No active sessions</p>
                     <p className="text-xs text-tertiary">
                       Press{" "}
