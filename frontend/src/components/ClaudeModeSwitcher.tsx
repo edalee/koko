@@ -12,7 +12,7 @@ const MODES: { key: ClaudeMode; label: string; icon: typeof MessageSquare }[] = 
   { key: "plan", label: "Plan", icon: Sparkles },
 ];
 
-const MODE_ORDER: ClaudeMode[] = ["ask", "auto", "plan"];
+const MODE_ORDER: ClaudeMode[] = ["auto", "plan", "ask"];
 
 interface ClaudeModeSwitcherProps {
   sessionId: string;
@@ -23,18 +23,17 @@ export default function ClaudeModeSwitcher({ sessionId }: ClaudeModeSwitcherProp
   const [contextPct, setContextPct] = useState<number | null>(null);
   const [model, setModel] = useState<string | null>(null);
 
-  const sendShiftTab = useCallback(() => {
-    Write(sessionId, btoa("\x1b[Z"));
-  }, [sessionId]);
+  const sendShiftTab = useCallback(() => Write(sessionId, btoa("\x1b[Z")), [sessionId]);
 
   const switchTo = useCallback(
-    (target: ClaudeMode) => {
+    async (target: ClaudeMode) => {
       if (target === mode) return;
       const currentIdx = MODE_ORDER.indexOf(mode);
       const targetIdx = MODE_ORDER.indexOf(target);
       const steps = (targetIdx - currentIdx + MODE_ORDER.length) % MODE_ORDER.length;
       for (let i = 0; i < steps; i++) {
-        sendShiftTab();
+        if (i > 0) await new Promise((r) => setTimeout(r, 80));
+        await sendShiftTab();
       }
       setMode(target);
     },
