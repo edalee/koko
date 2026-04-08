@@ -1,8 +1,10 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ReplayBuffer, Resize, Write } from "../../wailsjs/go/main/TerminalManager";
 import { BrowserOpenURL, EventsOn } from "../../wailsjs/runtime/runtime";
@@ -19,6 +21,8 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const serializeRef = useRef<SerializeAddon | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
@@ -31,6 +35,37 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // Search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResult, setSearchResult] = useState<string | null>(null);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setTimeout(() => searchInputRef.current?.focus(), 0);
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResult(null);
+    searchRef.current?.clearDecorations();
+    termRef.current?.focus();
+  }, []);
+
+  const doSearch = useCallback((query: string, direction: "next" | "prev" = "next") => {
+    const addon = searchRef.current;
+    if (!addon || !query) {
+      setSearchResult(null);
+      addon?.clearDecorations();
+      return;
+    }
+    const opts = { regex: false, caseSensitive: false, incremental: direction === "next" };
+    const found =
+      direction === "next" ? addon.findNext(query, opts) : addon.findPrevious(query, opts);
+    setSearchResult(found ? null : "No results");
+  }, []);
 
   const copyPlainText = useCallback(() => {
     const term = termRef.current;
@@ -93,8 +128,10 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
 
     const fit = new FitAddon();
     const serialize = new SerializeAddon();
+    const search = new SearchAddon();
     term.loadAddon(fit);
     term.loadAddon(serialize);
+    term.loadAddon(search);
     term.loadAddon(
       new WebLinksAddon((_event, uri) => {
         BrowserOpenURL(uri);
@@ -115,6 +152,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     termRef.current = term;
     fitRef.current = fit;
     serializeRef.current = serialize;
+    searchRef.current = search;
 
     // --- Copy handlers ---
     // Cmd+C: copy selection as trimmed plain text + HTML for rich paste
@@ -122,6 +160,10 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type === "keydown" && e.metaKey && e.shiftKey && e.code === "KeyC") {
         copyAsMarkdown();
+        return false;
+      }
+      if (e.type === "keydown" && e.metaKey && !e.shiftKey && e.code === "KeyF") {
+        openSearch();
         return false;
       }
       return true;
@@ -251,19 +293,67 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const hasSelection = termRef.current?.hasSelection() ?? false;
 
   return (
-    <>
-      <div
-        ref={containerRef}
-        className="h-full w-full p-1"
-        style={{
-          visibility: active ? "visible" : "hidden",
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-        }}
-      />
+    <div
+      className="h-full w-full"
+      style={{
+        visibility: active ? "visible" : "hidden",
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+      }}
+    >
+      <div ref={containerRef} className="h-full w-full p-1" />
+      {searchOpen && active && (
+        <div className="absolute top-2 right-4 z-40 flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[rgba(15,17,23,0.95)] px-2 py-1.5 shadow-lg">
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              doSearch(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                closeSearch();
+              } else if (e.key === "Enter" && e.shiftKey) {
+                doSearch(searchQuery, "prev");
+              } else if (e.key === "Enter") {
+                doSearch(searchQuery, "next");
+              }
+            }}
+            placeholder="Search..."
+            className="w-48 bg-transparent text-xs text-white outline-none placeholder:text-white/30"
+          />
+          {searchResult && <span className="text-[10px] text-red-400">{searchResult}</span>}
+          <button
+            type="button"
+            onClick={() => doSearch(searchQuery, "prev")}
+            className="rounded p-0.5 text-white/50 hover:bg-white/[0.06] hover:text-white"
+            title="Previous (Shift+Enter)"
+          >
+            <ChevronUp className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => doSearch(searchQuery, "next")}
+            className="rounded p-0.5 text-white/50 hover:bg-white/[0.06] hover:text-white"
+            title="Next (Enter)"
+          >
+            <ChevronDown className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={closeSearch}
+            className="rounded p-0.5 text-white/50 hover:bg-white/[0.06] hover:text-white"
+            title="Close (Esc)"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
       {ctxMenu && active && (
         <ContextMenu
           x={ctxMenu.x}
@@ -292,7 +382,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
           }}
         />
       )}
-    </>
+    </div>
   );
 }
 

@@ -14,6 +14,10 @@ export function FetchPRCommits(arg1, arg2) {
   return window['go']['main']['GitHubService']['FetchPRCommits'](arg1, arg2);
 }
 
+export function FetchPRFileDiff(arg1, arg2, arg3) {
+  return window['go']['main']['GitHubService']['FetchPRFileDiff'](arg1, arg2, arg3);
+}
+
 export function FetchPRFiles(arg1, arg2) {
   return window['go']['main']['GitHubService']['FetchPRFiles'](arg1, arg2);
 }

@@ -17,9 +17,8 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Blame view** — git blame overlay for file viewer
 
 ### Slack
-- [ ] **Quick reply** — reply to messages without leaving Koko
 - [ ] **Channel mentions** — monitor specific channels for keywords/mentions (needs `channels:history` scope)
-- [ ] **Reaction support** — quick-react to messages from the panel
+- [ ] **Reaction support** — quick-react to messages from the bot DM
 - [ ] **Real unread tracking** — if Slack API ever exposes unread state for user tokens
 
 ### Sessions
@@ -46,4 +45,4 @@ Features planned for future implementation, roughly prioritized.
 
 ## Completed
 
-See `docs/plans/` for detailed implementation plans of completed features (001-017).
+See `docs/plans/` for detailed implementation plans of completed features (001-022).

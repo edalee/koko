@@ -3,7 +3,7 @@ import "@git-diff-view/react/styles/diff-view-pure.css";
 import { ArrowLeft, Columns2, FileMinus, FilePlus, FileText, Loader2, Rows2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { main } from "../../wailsjs/go/models";
-import type { ViewMode } from "../hooks/useCodeViewer";
+import type { PRFileItem, ViewMode } from "../hooks/useCodeViewer";
 import type { FileChange } from "../hooks/useFileChanges";
 
 type AnimState = "closed" | "open" | "closing";
@@ -19,6 +19,8 @@ interface CodeViewerProps {
   onClose: () => void;
   onSetViewMode: (mode: ViewMode) => void;
   onFileSelect: (path: string, staged: boolean) => void;
+  prFiles?: PRFileItem[];
+  onPRFileSelect?: (path: string) => void;
 }
 
 function fileNameFromPath(path: string) {
@@ -68,6 +70,8 @@ export default function CodeViewer({
   onClose,
   onSetViewMode,
   onFileSelect,
+  prFiles,
+  onPRFileSelect,
 }: CodeViewerProps) {
   const [state, setState] = useState<AnimState>("closed");
 
@@ -216,7 +220,34 @@ export default function CodeViewer({
         </div>
 
         {/* File list sidebar */}
-        {fileChanges.length > 0 && (
+        {prFiles && prFiles.length > 0 ? (
+          <div className="w-56 shrink-0 border-l border-white/[0.08] bg-white/[0.02] overflow-y-auto">
+            <div className="px-3 py-2 text-[10px] text-tertiary uppercase tracking-wider">
+              PR Files ({prFiles.length})
+            </div>
+            {prFiles.map((pf) => {
+              const isActive = pf.path === filePath;
+              return (
+                <button
+                  key={pf.path}
+                  type="button"
+                  onClick={() => onPRFileSelect?.(pf.path)}
+                  className={`flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors ${
+                    isActive
+                      ? "bg-white/[0.08] text-white"
+                      : "text-muted-foreground hover:text-white hover:bg-white/[0.04]"
+                  }`}
+                  title={pf.path}
+                >
+                  <FileText className="size-3.5 shrink-0" />
+                  <span className="text-[11px] truncate flex-1">{fileNameFromPath(pf.path)}</span>
+                  <span className="text-[9px] text-green-400 shrink-0">+{pf.additions}</span>
+                  <span className="text-[9px] text-red-400 shrink-0">-{pf.deletions}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : fileChanges.length > 0 ? (
           <div className="w-56 shrink-0 border-l border-white/[0.08] bg-white/[0.02] overflow-y-auto">
             <div className="px-3 py-2 text-[10px] text-tertiary uppercase tracking-wider">
               Changed Files ({fileChanges.length})
@@ -246,7 +277,7 @@ export default function CodeViewer({
               );
             })}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

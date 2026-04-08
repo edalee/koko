@@ -8,6 +8,8 @@ export function FetchNotifications(arg1:string):Promise<Array<main.GitHubNotific
 
 export function FetchPRCommits(arg1:string,arg2:number):Promise<Array<main.PRCommit>>;
 
+export function FetchPRFileDiff(arg1:string,arg2:number,arg3:string):Promise<main.FileDiffData>;
+
 export function FetchPRFiles(arg1:string,arg2:number):Promise<Array<main.PRFile>>;
 
 export function FetchPRReviews(arg1:string,arg2:number):Promise<Array<main.PRReview>>;

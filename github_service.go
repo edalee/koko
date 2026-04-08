@@ -201,6 +201,92 @@ func (g *GitHubService) FetchPRFiles(repo string, number int) ([]PRFile, error) 
 	return files, nil
 }
 
+// FetchPRFileDiff returns diff data for a single file in a PR, suitable for the code viewer.
+func (g *GitHubService) FetchPRFileDiff(repo string, number int, filePath string) (FileDiffData, error) {
+	fullRepo := "epidemicsound/" + repo
+	prNum := fmt.Sprintf("%d", number)
+	lang := inferLanguage(filePath)
+
+	result := FileDiffData{
+		OldFileName: filePath,
+		NewFileName: filePath,
+		Language:    lang,
+	}
+
+	// Get unified diff for the entire PR, then extract hunks for this file
+	diffOut, err := exec.Command("gh", "pr", "diff", "--repo", fullRepo, prNum).Output()
+	if err != nil {
+		return result, fmt.Errorf("gh pr diff failed: %w", err)
+	}
+
+	result.Hunks = extractFileHunks(string(diffOut), filePath)
+
+	// Count additions/deletions from hunks
+	for _, line := range strings.Split(result.Hunks, "\n") {
+		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
+			result.Additions++
+		} else if len(line) > 0 && line[0] == '-' && !strings.HasPrefix(line, "---") {
+			result.Deletions++
+		}
+	}
+
+	// Get base branch for old content
+	prInfo, err := exec.Command("gh", "pr", "view", "--repo", fullRepo, "--json", "baseRefName,headRefName", prNum).Output()
+	if err == nil {
+		var info struct {
+			BaseRefName string `json:"baseRefName"`
+			HeadRefName string `json:"headRefName"`
+		}
+		if json.Unmarshal(prInfo, &info) == nil {
+			// Old content from base branch
+			if old, err := exec.Command("gh", "api",
+				fmt.Sprintf("repos/%s/contents/%s", fullRepo, filePath),
+				"-H", "Accept: application/vnd.github.raw",
+				"--jq", ".",
+				"-X", "GET",
+				"-f", "ref="+info.BaseRefName,
+			).Output(); err == nil {
+				result.OldContent = string(old)
+			}
+
+			// New content from head branch
+			if newC, err := exec.Command("gh", "api",
+				fmt.Sprintf("repos/%s/contents/%s", fullRepo, filePath),
+				"-H", "Accept: application/vnd.github.raw",
+				"--jq", ".",
+				"-X", "GET",
+				"-f", "ref="+info.HeadRefName,
+			).Output(); err == nil {
+				result.NewContent = string(newC)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// extractFileHunks extracts the unified diff hunks for a specific file from a full PR diff.
+func extractFileHunks(fullDiff, filePath string) string {
+	lines := strings.Split(fullDiff, "\n")
+	var hunks []string
+	inFile := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			if inFile {
+				break // reached next file
+			}
+			inFile = strings.HasSuffix(line, " b/"+filePath)
+			continue
+		}
+		if inFile {
+			hunks = append(hunks, line)
+		}
+	}
+
+	return strings.Join(hunks, "\n")
+}
+
 // FetchPRReviews returns reviews and requested reviewers for a specific PR.
 func (g *GitHubService) FetchPRReviews(repo string, number int) ([]PRReview, error) {
 	out, err := exec.Command("gh", "pr", "view",

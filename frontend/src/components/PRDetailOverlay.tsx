@@ -45,6 +45,7 @@ interface PRDetailOverlayProps {
   onRefresh: () => void;
   hiddenPRs: Set<string>;
   onHiddenChange: () => void;
+  onOpenDiff?: (repo: string, number: number, path: string, files: PRFile[]) => void;
 }
 
 function timeAgo(iso: string): string {
@@ -249,6 +250,7 @@ export default function PRDetailOverlay({
   onRefresh,
   hiddenPRs,
   onHiddenChange,
+  onOpenDiff,
 }: PRDetailOverlayProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [files, setFiles] = useState<PRFile[]>([]);
@@ -554,17 +556,19 @@ export default function PRDetailOverlay({
               ) : files.length > 0 ? (
                 <div className="grid gap-0.5 max-h-[300px] overflow-auto">
                   {files.map((file) => (
-                    <div
+                    <button
                       key={file.path}
-                      className="flex items-center gap-2 px-3 py-1 rounded-md bg-white/[0.03] group"
+                      type="button"
+                      onClick={() => onOpenDiff?.(pr.repo, pr.number, file.path, files)}
+                      className="flex items-center gap-2 px-3 py-1 rounded-md bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-left w-full group"
                     >
                       <FileText className="size-3.5 text-muted-foreground shrink-0" />
-                      <span className="text-xs text-white/70 truncate flex-1 font-mono">
+                      <span className="text-xs text-white/70 truncate flex-1 font-mono group-hover:text-white transition-colors">
                         {file.path}
                       </span>
                       <span className="text-[10px] text-green-400 shrink-0">+{file.additions}</span>
                       <span className="text-[10px] text-red-400 shrink-0">-{file.deletions}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (

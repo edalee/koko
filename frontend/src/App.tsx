@@ -337,6 +337,12 @@ export default function App() {
               codeViewer.openDiff(activeTab.directory, path, isStaged);
             }
           }}
+          prFiles={codeViewer.prFiles}
+          onPRFileSelect={(path) => {
+            if (codeViewer.prContext) {
+              codeViewer.openPRDiff(codeViewer.prContext.repo, codeViewer.prContext.number, path);
+            }
+          }}
         />
 
         <NewSessionDialog
@@ -359,6 +365,9 @@ export default function App() {
           onRefresh={refresh}
           hiddenPRs={hiddenPRs}
           onHiddenChange={loadHiddenPRs}
+          onOpenDiff={(repo, number, path, files) =>
+            codeViewer.openPRDiff(repo, number, path, files)
+          }
         />
       </div>
 
