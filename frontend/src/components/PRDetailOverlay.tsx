@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import Markdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
 import { HidePR, UnhidePR } from "../../wailsjs/go/main/ConfigService";
 import {
   ApprovePR,
@@ -226,6 +227,16 @@ const mdComponents = {
     <blockquote className="border-l-2 border-white/[0.1] pl-3 my-2 text-white/50 italic">
       {children}
     </blockquote>
+  ),
+  details: ({ children }: { children?: React.ReactNode }) => (
+    <details className="my-2 text-sm text-white/60 border border-white/[0.06] rounded-md overflow-hidden">
+      {children}
+    </details>
+  ),
+  summary: ({ children }: { children?: React.ReactNode }) => (
+    <summary className="cursor-pointer px-3 py-1.5 text-white/70 font-medium hover:bg-white/[0.04] select-none">
+      {children}
+    </summary>
   ),
   hr: () => <hr className="border-white/[0.06] my-3" />,
   table: ({ children }: { children?: React.ReactNode }) => (
@@ -507,7 +518,7 @@ export default function PRDetailOverlay({
                 </h3>
                 <div className="prose-sm bg-white/[0.03] rounded-lg p-4 border border-white/[0.06] max-h-[400px] overflow-auto">
                   {/* biome-ignore lint/suspicious/noExplicitAny: react-markdown component types */}
-                  <Markdown components={mdComponents as any}>
+                  <Markdown rehypePlugins={[rehypeRaw]} components={mdComponents as any}>
                     {pr.body.replace(/<!--[\s\S]*?-->/g, "").trim()}
                   </Markdown>
                 </div>
