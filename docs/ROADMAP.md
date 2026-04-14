@@ -12,7 +12,7 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Inline comments** — annotate diff lines (future: code review workflow)
 
 ### Terminal
-- [ ] **Search scrollback** — `Cmd+F` to search terminal output (xterm.js SearchAddon)
+- [x] **Search scrollback** — `Cmd+F` to search terminal output (xterm.js SearchAddon)
 - [ ] **Multi-file diff navigation** — PR-style "Files changed" view across commits
 - [ ] **Blame view** — git blame overlay for file viewer
 
@@ -27,7 +27,7 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Session export** — export terminal scrollback as text/markdown/HTML
 
 ### GitHub
-- [ ] **PR diff viewer** — view PR diffs directly in Koko (reuse code viewer)
+- [x] **PR diff viewer** — view PR diffs directly in Koko (reuse code viewer)
 - [ ] **PR comments** — read and reply to PR review comments
 - [ ] **CI status** — show GitHub Actions status for active branches
 
