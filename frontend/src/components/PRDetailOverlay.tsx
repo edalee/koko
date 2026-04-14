@@ -238,6 +238,15 @@ const mdComponents = {
       {children}
     </summary>
   ),
+  img: ({ src, alt }: { src?: string; alt?: string }) =>
+    src ? (
+      <img
+        src={src}
+        alt={alt ?? ""}
+        className="max-w-full rounded-md my-2 border border-white/[0.06]"
+        loading="lazy"
+      />
+    ) : null,
   hr: () => <hr className="border-white/[0.06] my-3" />,
   table: ({ children }: { children?: React.ReactNode }) => (
     <table className="text-xs text-white/60 border-collapse my-2 w-full">{children}</table>
