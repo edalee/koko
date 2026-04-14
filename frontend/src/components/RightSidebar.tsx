@@ -47,6 +47,7 @@ interface RightSidebarProps {
   prs: GitHubPR[];
   prsLoading: boolean;
   visiblePRCount: number;
+  hiddenPRs: Set<string>;
   onRefreshPRs: () => void;
   notifications: GitHubNotification[];
   notifCount: number;
@@ -56,7 +57,7 @@ interface RightSidebarProps {
   onRefreshNotifications: () => void;
   onMarkNotifRead: (id: string) => void;
   onMarkAllNotifRead: () => void;
-  onPRClick?: (pr: GitHubPR) => void;
+  onPRClick?: (pr: GitHubPR | null) => void;
 }
 
 function changeColor(change: FileChange): string {
@@ -180,6 +181,7 @@ export default function RightSidebar({
   onFileClick,
   prs,
   visiblePRCount,
+  hiddenPRs,
   notifications,
   notifCount,
   notifLoading,
@@ -243,7 +245,8 @@ export default function RightSidebar({
         <button
           type="button"
           onClick={() => {
-            if (prs.length > 0) onPRClick?.(prs[0]);
+            const firstVisible = prs.find((p) => !hiddenPRs.has(`${p.repo}#${p.number}`));
+            onPRClick?.(firstVisible ?? null);
           }}
           className="relative p-1.5 rounded-md transition-colors text-muted-foreground hover:text-white hover:bg-white/5"
           title="Pull Requests"

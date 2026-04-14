@@ -17,7 +17,6 @@ import {
   Loader2,
   MessageSquare,
   ShieldAlert,
-  Tag,
   Users,
   X,
   XCircle,
@@ -348,11 +347,11 @@ export default function PRDetailOverlay({
     [onHiddenChange],
   );
 
-  if (!open || !selectedPR) return null;
+  if (!open) return null;
 
   const pr = selectedPR;
-  const isApproved = pr.reviewDecision === "APPROVED";
-  const checks = pr.checks || [];
+  const isApproved = pr?.reviewDecision === "APPROVED";
+  const checks = pr?.checks || [];
   const passedChecks = checks.filter((c) => c.conclusion === "SUCCESS").length;
   const failedChecks = checks.filter((c) => c.conclusion === "FAILURE").length;
 
@@ -360,6 +359,7 @@ export default function PRDetailOverlay({
   const hiddenPRList = prs.filter((p) => hiddenPRs.has(`${p.repo}#${p.number}`));
 
   async function handleApprove() {
+    if (!pr) return;
     setBusyAction("approve");
     try {
       await ApprovePR(pr.repo, pr.number);
@@ -372,6 +372,7 @@ export default function PRDetailOverlay({
   }
 
   async function handleMerge() {
+    if (!pr) return;
     setBusyAction("merge");
     try {
       await MergePR(pr.repo, pr.number);
@@ -387,308 +388,328 @@ export default function PRDetailOverlay({
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-backdrop-in"
+        onClick={onClose}
+      />
 
       {/* Content */}
-      <div className="relative flex w-full h-full">
+      <div className="relative flex w-full h-full animate-overlay-in">
         {/* Detail panel */}
-        <div className="flex-1 flex flex-col overflow-hidden glass-overlay bg-[rgba(15,17,23,0.92)] m-4 mr-0 rounded-xl border border-white/[0.08]">
-          {/* Header — title + author prominent */}
-          <div className="flex items-start gap-3 px-6 py-4 border-b border-white/[0.08]">
-            <GitPullRequest className="size-5 text-accent mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <h2 className="text-lg text-white font-medium leading-tight">{pr.title}</h2>
-              <div className="flex items-center gap-3 mt-2">
-                {/* Author prominent */}
-                <div className="flex items-center gap-1.5">
-                  <span className="size-5 rounded-full bg-accent/20 text-accent text-[10px] font-medium flex items-center justify-center shrink-0">
-                    {authorInitial(pr.author)}
-                  </span>
-                  <span className="text-sm text-white/80 font-medium">{pr.author}</span>
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  {pr.repo}#{pr.number}
-                </span>
-                {reviewBadge(pr.reviewDecision)}
-                {pr.isDraft && (
-                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/10 text-white/50">
-                    Draft
-                  </span>
-                )}
-                {pr.assignees?.length > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Users className="size-3" />
-                    {pr.assignees.join(", ")}
-                  </span>
-                )}
-              </div>
-              {/* Branch + stats row */}
-              <div className="flex items-center gap-4 mt-2 flex-wrap">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <GitBranch className="size-3.5" />
-                  <span className="font-mono">{pr.headRef}</span>
-                  <span className="text-tertiary">→</span>
-                  <span className="font-mono">{pr.baseRef}</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="text-green-400">+{pr.additions}</span>
-                  <span className="text-red-400">-{pr.deletions}</span>
-                  <span className="text-muted-foreground">
-                    <FileText className="size-3 inline mr-1" />
-                    {pr.changedFiles} files
-                  </span>
-                </div>
-                {pr.createdAt && (
-                  <span className="text-[10px] text-tertiary">{timeAgo(pr.createdAt)}</span>
-                )}
-              </div>
+        <div className="flex-1 flex flex-col overflow-hidden glass-overlay bg-[rgba(15,17,23,0.92)] m-4 mr-0 rounded-xl border border-white/[0.08] inset-highlight">
+          {!pr ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+              <GitPullRequest className="size-8 text-tertiary" />
+              <p className="text-sm">No PR selected</p>
+              <p className="text-xs text-tertiary">Select a PR from the sidebar</p>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-md text-muted-foreground hover:text-white hover:bg-white/10 transition-colors shrink-0"
-            >
-              <X className="size-5" />
-            </button>
-          </div>
-
-          {/* Scrollable body */}
-          <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
-            {/* Merge state */}
-            {pr.mergeStateStatus && mergeStateLabel(pr.mergeStateStatus)}
-
-            {/* Mergeable status */}
-            {pr.mergeable && pr.mergeable !== "UNKNOWN" && !pr.mergeStateStatus && (
-              <div className="flex items-center gap-2 text-xs">
-                {pr.mergeable === "MERGEABLE" ? (
-                  <>
-                    <CheckCircle2 className="size-3.5 text-success" />
-                    <span className="text-success">No conflicts</span>
-                  </>
-                ) : (
-                  <>
-                    <XCircle className="size-3.5 text-error" />
-                    <span className="text-error">Has conflicts</span>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={busyAction === "approve" || isApproved}
-                onClick={handleApprove}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors border",
-                  isApproved
-                    ? "text-success/50 border-success/20 cursor-default"
-                    : "text-success border-success/30 hover:bg-success/10",
-                )}
-              >
-                {busyAction === "approve" ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Check className="size-3.5" />
-                )}
-                {isApproved ? "Approved" : "Approve"}
-              </button>
-
-              <button
-                type="button"
-                disabled={busyAction === "merge"}
-                onClick={handleMerge}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors border text-purple-400 border-purple-400/30 hover:bg-purple-400/10"
-              >
-                {busyAction === "merge" ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <GitMerge className="size-3.5" />
-                )}
-                Squash & Merge
-              </button>
-
-              <button
-                type="button"
-                onClick={() => BrowserOpenURL(pr.url)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors border border-white/[0.08] text-muted-foreground hover:text-white hover:bg-white/[0.06] ml-auto"
-              >
-                <ExternalLink className="size-3.5" />
-                View on GitHub
-              </button>
-            </div>
-
-            {/* Description — right after actions */}
-            {pr.body && (
-              <div className="space-y-2">
-                <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                  Description
-                </h3>
-                <div className="prose-sm bg-white/[0.03] rounded-lg p-4 border border-white/[0.06] max-h-[400px] overflow-auto">
-                  {/* biome-ignore lint/suspicious/noExplicitAny: react-markdown component types */}
-                  <Markdown rehypePlugins={[rehypeRaw]} components={mdComponents as any}>
-                    {pr.body.replace(/<!--[\s\S]*?-->/g, "").trim()}
-                  </Markdown>
-                </div>
-              </div>
-            )}
-
-            {/* Reviews */}
-            {reviews.length > 0 && (
-              <div className="space-y-2">
-                <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                  <MessageSquare className="size-3 inline mr-1.5" />
-                  Reviews
-                  <span className="ml-2 text-tertiary normal-case">{reviews.length}</span>
-                </h3>
-                <div className="grid gap-1">
-                  {reviews.map((review) => (
-                    <div
-                      key={`${review.author}-${review.state}`}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03]"
-                    >
-                      <span className="size-5 rounded-full bg-white/10 text-white/60 text-[10px] font-medium flex items-center justify-center shrink-0">
-                        {authorInitial(review.author)}
+          ) : (
+            <>
+              {/* Header — title + author prominent */}
+              <div className="flex items-start gap-3 px-6 py-4 border-b border-white/[0.08]">
+                <GitPullRequest className="size-5 text-accent mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg text-white font-medium leading-tight">{pr.title}</h2>
+                  <div className="flex items-center gap-3 mt-2">
+                    {/* Author prominent */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-5 rounded-full bg-accent/20 text-accent text-[10px] font-medium flex items-center justify-center shrink-0">
+                        {authorInitial(pr.author)}
                       </span>
-                      <span className="text-xs text-white/70">{review.author}</span>
-                      <span className="ml-auto">{reviewStateBadge(review.state)}</span>
+                      <span className="text-sm text-white/80 font-medium">{pr.author}</span>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* File Changes */}
-            <div className="space-y-2">
-              <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                <FileCode className="size-3 inline mr-1.5" />
-                Files changed
-                <span className="ml-2 text-tertiary normal-case">
-                  {filesLoading ? "..." : files.length}
-                </span>
-              </h3>
-              {filesLoading ? (
-                <div className="flex items-center gap-2 px-3 py-2">
-                  <Loader2 className="size-3.5 text-accent animate-spin" />
-                  <span className="text-xs text-muted-foreground">Loading files...</span>
-                </div>
-              ) : files.length > 0 ? (
-                <div className="grid gap-0.5 max-h-[300px] overflow-auto">
-                  {files.map((file) => (
-                    <button
-                      key={file.path}
-                      type="button"
-                      onClick={() => onOpenDiff?.(pr.repo, pr.number, file.path, files)}
-                      className="flex items-center gap-2 px-3 py-1 rounded-md bg-white/[0.03] hover:bg-white/[0.06] transition-colors text-left w-full group"
-                    >
-                      <FileText className="size-3.5 text-muted-foreground shrink-0" />
-                      <span className="text-xs text-white/70 truncate flex-1 font-mono group-hover:text-white transition-colors">
-                        {file.path}
+                    <span className="text-xs text-muted-foreground">
+                      {pr.repo}#{pr.number}
+                    </span>
+                    {reviewBadge(pr.reviewDecision)}
+                    {pr.isDraft && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/10 text-white/50">
+                        Draft
                       </span>
-                      <span className="text-[10px] text-green-400 shrink-0">+{file.additions}</span>
-                      <span className="text-[10px] text-red-400 shrink-0">-{file.deletions}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-tertiary px-3">No file data available</p>
-              )}
-            </div>
-
-            {/* Commits — collapsible */}
-            {commits.length > 0 && (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => setCommitsOpen(!commitsOpen)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium uppercase tracking-wider hover:text-white/70 transition-colors"
-                >
-                  <ChevronDown
-                    className={cn("size-3 transition-transform", commitsOpen ? "" : "-rotate-90")}
-                  />
-                  <GitCommit className="size-3" />
-                  Commits
-                  <span className="text-tertiary normal-case ml-1">{commits.length}</span>
-                </button>
-                {commitsOpen && (
-                  <div className="grid gap-0.5 max-h-[200px] overflow-auto">
-                    {commits.map((commit) => (
-                      <div
-                        key={commit.sha}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03]"
-                      >
-                        <span className="text-[10px] text-accent/60 font-mono shrink-0">
-                          {commit.sha.slice(0, 7)}
-                        </span>
-                        <span className="text-xs text-white/70 truncate flex-1">
-                          {commit.message}
-                        </span>
-                        <span className="text-[10px] text-tertiary shrink-0">{commit.author}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* CI Checks — collapsible */}
-            {checks.length > 0 && (
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => setChecksOpen(!checksOpen)}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium uppercase tracking-wider hover:text-white/70 transition-colors"
-                >
-                  <ChevronDown
-                    className={cn("size-3 transition-transform", checksOpen ? "" : "-rotate-90")}
-                  />
-                  Checks
-                  <span className="text-tertiary normal-case ml-1">
-                    {passedChecks}/{checks.length} passed
-                    {failedChecks > 0 && (
-                      <span className="text-error ml-1">({failedChecks} failed)</span>
                     )}
-                  </span>
+                    {pr.assignees?.length > 0 && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Users className="size-3" />
+                        {pr.assignees.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                  {/* Branch + stats row */}
+                  <div className="flex items-center gap-4 mt-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <GitBranch className="size-3.5" />
+                      <span className="font-mono">{pr.headRef}</span>
+                      <span className="text-tertiary">→</span>
+                      <span className="font-mono">{pr.baseRef}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-success">+{pr.additions}</span>
+                      <span className="text-error">-{pr.deletions}</span>
+                      <span className="text-muted-foreground">
+                        <FileText className="size-3 inline mr-1" />
+                        {pr.changedFiles} files
+                      </span>
+                    </div>
+                    {pr.createdAt && (
+                      <span className="text-[10px] text-tertiary">{timeAgo(pr.createdAt)}</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-white hover:bg-white/10 transition-colors shrink-0"
+                >
+                  <X className="size-5" />
                 </button>
-                {checksOpen && (
-                  <div className="grid gap-1">
-                    {checks.map((check) => (
-                      <div
-                        key={check.name}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03]"
-                      >
-                        {checkIcon(check.conclusion)}
-                        <span className="text-xs text-white/70 truncate">{check.name}</span>
-                        <span className="text-[10px] text-tertiary ml-auto">
-                          {check.conclusion?.toLowerCase() || check.status?.toLowerCase()}
-                        </span>
+              </div>
+
+              {/* Scrollable body */}
+              <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
+                {/* Merge state */}
+                {pr.mergeStateStatus && mergeStateLabel(pr.mergeStateStatus)}
+
+                {/* Mergeable status */}
+                {pr.mergeable && pr.mergeable !== "UNKNOWN" && !pr.mergeStateStatus && (
+                  <div className="flex items-center gap-2 text-xs">
+                    {pr.mergeable === "MERGEABLE" ? (
+                      <>
+                        <CheckCircle2 className="size-3.5 text-success" />
+                        <span className="text-success">No conflicts</span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="size-3.5 text-error" />
+                        <span className="text-error">Has conflicts</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={busyAction === "approve" || isApproved}
+                    onClick={handleApprove}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all border",
+                      isApproved
+                        ? "text-success/50 border-success/20 cursor-default bg-success/[0.04]"
+                        : "text-success border-success/30 hover:bg-success/10 hover:shadow-[0_0_12px_rgba(31,242,171,0.08)]",
+                    )}
+                  >
+                    {busyAction === "approve" ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Check className="size-3.5" />
+                    )}
+                    {isApproved ? "Approved" : "Approve"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busyAction === "merge"}
+                    onClick={handleMerge}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all border text-purple-400 border-purple-400/30 hover:bg-purple-400/10 hover:shadow-[0_0_12px_rgba(168,85,247,0.08)]"
+                  >
+                    {busyAction === "merge" ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <GitMerge className="size-3.5" />
+                    )}
+                    Squash & Merge
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => BrowserOpenURL(pr.url)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all border border-white/[0.08] text-muted-foreground hover:text-white hover:bg-white/[0.06] ml-auto"
+                  >
+                    <ExternalLink className="size-3.5" />
+                    View on GitHub
+                  </button>
+                </div>
+
+                {/* Description — right after actions */}
+                {pr.body && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                        Description
+                      </h3>
+                      {pr.labels &&
+                        pr.labels.length > 0 &&
+                        pr.labels.map((label) => (
+                          <span
+                            key={label}
+                            className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.08] text-white/70 border border-white/[0.06]"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                    </div>
+                    <div className="prose-sm bg-white/[0.03] rounded-xl p-4 border border-white/[0.06] inset-highlight max-h-[400px] overflow-auto">
+                      {/* biome-ignore lint/suspicious/noExplicitAny: react-markdown component types */}
+                      <Markdown rehypePlugins={[rehypeRaw]} components={mdComponents as any}>
+                        {pr.body.replace(/<!--[\s\S]*?-->/g, "").trim()}
+                      </Markdown>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reviews */}
+                {reviews.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                      <MessageSquare className="size-3 inline mr-1.5" />
+                      Reviews
+                      <span className="ml-2 text-tertiary normal-case">{reviews.length}</span>
+                    </h3>
+                    <div className="grid gap-1">
+                      {reviews.map((review) => (
+                        <div
+                          key={`${review.author}-${review.state}`}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03]"
+                        >
+                          <span className="size-5 rounded-full bg-white/10 text-white/60 text-[10px] font-medium flex items-center justify-center shrink-0">
+                            {authorInitial(review.author)}
+                          </span>
+                          <span className="text-xs text-white/70">{review.author}</span>
+                          <span className="ml-auto">{reviewStateBadge(review.state)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* File Changes */}
+                <div className="space-y-2">
+                  <h3 className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                    <FileCode className="size-3 inline mr-1.5" />
+                    Files changed
+                    <span className="ml-2 text-tertiary normal-case">
+                      {filesLoading ? "..." : files.length}
+                    </span>
+                  </h3>
+                  {filesLoading ? (
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <Loader2 className="size-3.5 text-accent animate-spin" />
+                      <span className="text-xs text-muted-foreground">Loading files...</span>
+                    </div>
+                  ) : files.length > 0 ? (
+                    <div className="grid gap-0.5 max-h-[300px] overflow-auto">
+                      {files.map((file) => (
+                        <button
+                          key={file.path}
+                          type="button"
+                          onClick={() => onOpenDiff?.(pr.repo, pr.number, file.path, files)}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-transparent hover:border-white/[0.06] transition-all text-left w-full group"
+                        >
+                          <FileText className="size-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-xs text-white/70 truncate flex-1 font-mono group-hover:text-white transition-colors">
+                            {file.path}
+                          </span>
+                          <span className="text-[10px] text-success shrink-0">
+                            +{file.additions}
+                          </span>
+                          <span className="text-[10px] text-error shrink-0">-{file.deletions}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-tertiary px-3">No file data available</p>
+                  )}
+                </div>
+
+                {/* Commits — collapsible */}
+                {commits.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setCommitsOpen(!commitsOpen)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium uppercase tracking-wider hover:text-white/70 transition-colors"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-3 transition-transform",
+                          commitsOpen ? "" : "-rotate-90",
+                        )}
+                      />
+                      <GitCommit className="size-3" />
+                      Commits
+                      <span className="text-tertiary normal-case ml-1">{commits.length}</span>
+                    </button>
+                    {commitsOpen && (
+                      <div className="grid gap-0.5 max-h-[200px] overflow-auto">
+                        {commits.map((commit) => (
+                          <div
+                            key={commit.sha}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03]"
+                          >
+                            <span className="text-[10px] text-accent/60 font-mono shrink-0">
+                              {commit.sha.slice(0, 7)}
+                            </span>
+                            <span className="text-xs text-white/70 truncate flex-1">
+                              {commit.message}
+                            </span>
+                            <span className="text-[10px] text-tertiary shrink-0">
+                              {commit.author}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+                  </div>
+                )}
+
+                {/* CI Checks — collapsible */}
+                {checks.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setChecksOpen(!checksOpen)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium uppercase tracking-wider hover:text-white/70 transition-colors"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-3 transition-transform",
+                          checksOpen ? "" : "-rotate-90",
+                        )}
+                      />
+                      Checks
+                      <span className="text-tertiary normal-case ml-1">
+                        {passedChecks}/{checks.length} passed
+                        {failedChecks > 0 && (
+                          <span className="text-error ml-1">({failedChecks} failed)</span>
+                        )}
+                      </span>
+                    </button>
+                    {checksOpen && (
+                      <div className="grid gap-1">
+                        {checks.map((check) => (
+                          <div
+                            key={check.name}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.03]"
+                          >
+                            {checkIcon(check.conclusion)}
+                            <span className="text-xs text-white/70 truncate">{check.name}</span>
+                            <span className="text-[10px] text-tertiary ml-auto">
+                              {check.conclusion?.toLowerCase() || check.status?.toLowerCase()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-
-            {/* Labels */}
-            {pr.labels && pr.labels.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <Tag className="size-3 text-tertiary" />
-                {pr.labels.map((label) => (
-                  <span
-                    key={label}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.08] text-white/70 border border-white/[0.06]"
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {/* PR list sidebar */}
-        <div className="w-72 shrink-0 flex flex-col overflow-hidden glass-overlay bg-[rgba(15,17,23,0.92)] m-4 ml-2 rounded-xl border border-white/[0.08]">
+        <div className="w-72 shrink-0 flex flex-col overflow-hidden glass-overlay bg-[rgba(15,17,23,0.92)] m-4 ml-2 rounded-xl border border-white/[0.08] inset-highlight">
           <div className="px-4 py-3 border-b border-white/[0.08]">
             <h3 className="text-sm text-white font-medium">
               Open PRs
@@ -697,15 +718,15 @@ export default function PRDetailOverlay({
           </div>
           <div className="flex-1 overflow-auto">
             {visiblePRs.map((p) => {
-              const isSelected = p.repo === pr.repo && p.number === pr.number;
+              const isSelected = pr != null && p.repo === pr.repo && p.number === pr.number;
               return (
                 // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR list item
                 <div
                   key={`${p.repo}-${p.number}`}
                   className={cn(
-                    "px-4 py-3 cursor-pointer transition-colors border-l-2 group",
+                    "px-4 py-3 cursor-pointer transition-all border-l-2 group",
                     isSelected
-                      ? "bg-white/[0.06] border-accent"
+                      ? "bg-white/[0.06] border-accent glow-accent"
                       : "border-transparent hover:bg-white/[0.04]",
                   )}
                   onClick={() => onSelectPR(p)}

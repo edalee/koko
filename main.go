@@ -64,9 +64,8 @@ func main() {
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Menu:             appMenu,
-		Frameless:        false,
+		Frameless:        true,
 		Mac: &mac.Options{
-			TitleBar: mac.TitleBarHiddenInset(),
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  false,
 		},

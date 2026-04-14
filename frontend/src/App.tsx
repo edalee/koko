@@ -45,6 +45,7 @@ export default function App() {
   const [showNewSession, setShowNewSession] = useState(false);
   const [quickTerminalTabs, setQuickTerminalTabs] = useState<Set<string>>(new Set());
   const [selectedPR, setSelectedPR] = useState<import("./types").GitHubPR | null>(null);
+  const [prOverlayOpen, setPrOverlayOpen] = useState(false);
   const [hiddenPRs, setHiddenPRs] = useState<Set<string>>(new Set());
 
   const loadHiddenPRs = useCallback(() => {
@@ -295,6 +296,7 @@ export default function App() {
               prs={prs}
               prsLoading={loading}
               visiblePRCount={visiblePRCount}
+              hiddenPRs={hiddenPRs}
               onRefreshPRs={refresh}
               notifications={notifications}
               notifCount={notifCount}
@@ -304,7 +306,10 @@ export default function App() {
               onRefreshNotifications={refreshNotifications}
               onMarkNotifRead={markNotifRead}
               onMarkAllNotifRead={markAllNotifRead}
-              onPRClick={setSelectedPR}
+              onPRClick={(pr) => {
+                setSelectedPR(pr);
+                setPrOverlayOpen(true);
+              }}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -357,11 +362,14 @@ export default function App() {
         />
 
         <PRDetailOverlay
-          open={!!selectedPR}
+          open={prOverlayOpen}
           prs={prs}
           selectedPR={selectedPR}
           onSelectPR={setSelectedPR}
-          onClose={() => setSelectedPR(null)}
+          onClose={() => {
+            setPrOverlayOpen(false);
+            setSelectedPR(null);
+          }}
           onRefresh={refresh}
           hiddenPRs={hiddenPRs}
           onHiddenChange={loadHiddenPRs}
