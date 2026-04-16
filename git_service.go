@@ -63,6 +63,25 @@ func (gs *GitService) GetBranchName(dir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// GetRepoSlug returns the owner/repo slug from the git remote origin URL.
+// e.g. "epidemicsound/drumstick2" from "git@github.com:epidemicsound/drumstick2.git"
+func (gs *GitService) GetRepoSlug(dir string) (string, error) {
+	out, err := gs.runGit(dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	url := strings.TrimSpace(out)
+	// SSH: git@github.com:owner/repo.git
+	if idx := strings.Index(url, ":"); idx != -1 && !strings.Contains(url[:idx], "/") {
+		url = url[idx+1:]
+	}
+	// HTTPS: https://github.com/owner/repo.git
+	url = strings.TrimPrefix(url, "https://github.com/")
+	url = strings.TrimPrefix(url, "http://github.com/")
+	url = strings.TrimSuffix(url, ".git")
+	return url, nil
+}
+
 func (gs *GitService) findBaseBranch(dir string) (string, error) {
 	// Try common default branch names
 	for _, branch := range []string{"main", "master"} {

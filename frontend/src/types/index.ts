@@ -47,6 +47,49 @@ export interface PRCommit {
   date: string;
 }
 
+export interface WorkflowRun {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string;
+  event: string;
+  createdAt: string;
+  updatedAt: string;
+  htmlUrl: string;
+}
+
+export interface BranchCI {
+  branch: string;
+  repo: string;
+  runs: WorkflowRun[];
+}
+
+export interface PRComment {
+  id: number;
+  inReplyToId: number;
+  author: string;
+  authorType: string;
+  body: string;
+  createdAt: string;
+  htmlUrl: string;
+  path: string;
+  line: number;
+  originalLine: number;
+  side: string;
+  diffHunk: string;
+  subjectType: string;
+}
+
+export interface PRCommentThread {
+  root: PRComment;
+  replies: PRComment[];
+}
+
+export interface PRCommentsData {
+  reviewThreads: PRCommentThread[];
+  issueComments: PRComment[];
+}
+
 export interface SessionTab {
   id: string;
   slug: string;

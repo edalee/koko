@@ -80,6 +80,66 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class WorkflowRun {
+	    id: number;
+	    name: string;
+	    status: string;
+	    conclusion: string;
+	    event: string;
+	    createdAt: string;
+	    updatedAt: string;
+	    htmlUrl: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WorkflowRun(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.status = source["status"];
+	        this.conclusion = source["conclusion"];
+	        this.event = source["event"];
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.htmlUrl = source["htmlUrl"];
+	    }
+	}
+	export class BranchCI {
+	    branch: string;
+	    repo: string;
+	    runs: WorkflowRun[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BranchCI(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.branch = source["branch"];
+	        this.repo = source["repo"];
+	        this.runs = this.convertValues(source["runs"], WorkflowRun);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class CommandInfo {
 	    name: string;
 	    source: string;
@@ -321,6 +381,106 @@ export namespace main {
 	    }
 	}
 	
+	export class PRComment {
+	    id: number;
+	    inReplyToId: number;
+	    author: string;
+	    authorType: string;
+	    body: string;
+	    createdAt: string;
+	    htmlUrl: string;
+	    path: string;
+	    line: number;
+	    originalLine: number;
+	    side: string;
+	    diffHunk: string;
+	    subjectType: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PRComment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.inReplyToId = source["inReplyToId"];
+	        this.author = source["author"];
+	        this.authorType = source["authorType"];
+	        this.body = source["body"];
+	        this.createdAt = source["createdAt"];
+	        this.htmlUrl = source["htmlUrl"];
+	        this.path = source["path"];
+	        this.line = source["line"];
+	        this.originalLine = source["originalLine"];
+	        this.side = source["side"];
+	        this.diffHunk = source["diffHunk"];
+	        this.subjectType = source["subjectType"];
+	    }
+	}
+	export class PRCommentThread {
+	    root: PRComment;
+	    replies: PRComment[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PRCommentThread(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.root = this.convertValues(source["root"], PRComment);
+	        this.replies = this.convertValues(source["replies"], PRComment);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PRCommentsData {
+	    reviewThreads: PRCommentThread[];
+	    issueComments: PRComment[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PRCommentsData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.reviewThreads = this.convertValues(source["reviewThreads"], PRCommentThread);
+	        this.issueComments = this.convertValues(source["issueComments"], PRComment);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PRCommit {
 	    sha: string;
 	    message: string;

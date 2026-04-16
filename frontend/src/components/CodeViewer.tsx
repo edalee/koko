@@ -1,7 +1,7 @@
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view-pure.css";
 import { ArrowLeft, Columns2, FileMinus, FilePlus, FileText, Loader2, Rows2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { main } from "../../wailsjs/go/models";
 import type { PRFileItem, ViewMode } from "../hooks/useCodeViewer";
 import type { FileChange } from "../hooks/useFileChanges";
@@ -34,16 +34,16 @@ function fileDir(path: string) {
 }
 
 function statusColor(change: FileChange): string {
-  if (change.staged) return "text-green-400";
+  if (change.staged) return "text-success";
   switch (change.status) {
     case "added":
-      return "text-green-400";
+      return "text-success";
     case "modified":
-      return "text-yellow-400";
+      return "text-warning";
     case "deleted":
-      return "text-red-400";
+      return "text-error";
     default:
-      return "text-blue-400";
+      return "text-accent";
   }
 }
 
@@ -83,14 +83,41 @@ export default function CodeViewer({
     }
   }, [open, state]);
 
+  const navigateFile = useCallback(
+    (direction: -1 | 1) => {
+      if (prFiles && prFiles.length > 0) {
+        const idx = prFiles.findIndex((f) => f.path === filePath);
+        const next = idx + direction;
+        if (next >= 0 && next < prFiles.length) {
+          onPRFileSelect?.(prFiles[next].path);
+        }
+      } else if (fileChanges.length > 0) {
+        const idx = fileChanges.findIndex((f) => f.path === filePath && f.staged === staged);
+        const next = idx + direction;
+        if (next >= 0 && next < fileChanges.length) {
+          onFileSelect(fileChanges[next].path, fileChanges[next].staged);
+        }
+      }
+    },
+    [prFiles, fileChanges, filePath, staged, onPRFileSelect, onFileSelect],
+  );
+
   useEffect(() => {
     if (state !== "open") return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
+      if (e.key === "[" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigateFile(-1);
+      }
+      if (e.key === "]" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigateFile(1);
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state, onClose]);
+  }, [state, onClose, navigateFile]);
 
   function handleAnimationEnd() {
     if (state === "closing") setState("closed");
@@ -116,7 +143,7 @@ export default function CodeViewer({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex flex-col bg-base ${
+      className={`fixed inset-0 z-[60] flex flex-col bg-base ${
         state === "closing" ? "animate-overlay-out" : "animate-overlay-in"
       }`}
       onAnimationEnd={handleAnimationEnd}
@@ -124,7 +151,7 @@ export default function CodeViewer({
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.08] shrink-0 bg-white/[0.02]"
-        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        style={{ "--wails-draggable": "drag" } as React.CSSProperties}
       >
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-14 shrink-0" />
@@ -132,7 +159,7 @@ export default function CodeViewer({
             type="button"
             onClick={onClose}
             className="p-1.5 rounded-md text-muted-foreground hover:text-white hover:bg-white/10 transition-colors shrink-0"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+            style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
             title="Back (Escape)"
           >
             <ArrowLeft className="size-4" />
@@ -140,11 +167,11 @@ export default function CodeViewer({
 
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-white text-sm font-medium truncate">
+              <span className="text-foreground text-sm font-medium truncate">
                 {fileNameFromPath(filePath)}
               </span>
               {staged && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-400/10 text-green-400 font-medium shrink-0">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success font-medium shrink-0">
                   Staged
                 </span>
               )}
@@ -157,12 +184,23 @@ export default function CodeViewer({
 
         <div
           className="flex items-center gap-2 shrink-0"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          style={{ "--wails-draggable": "no-drag" } as React.CSSProperties}
         >
+          {((prFiles && prFiles.length > 1) || fileChanges.length > 1) && (
+            <span className="text-[10px] text-tertiary mr-2">
+              <kbd className="px-1 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] font-mono">
+                [
+              </kbd>{" "}
+              <kbd className="px-1 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] font-mono">
+                ]
+              </kbd>{" "}
+              navigate
+            </span>
+          )}
           {file && (file.additions > 0 || file.deletions > 0) && (
             <div className="flex items-center gap-1.5 text-xs font-mono mr-2">
-              {file.additions > 0 && <span className="text-green-400">+{file.additions}</span>}
-              {file.deletions > 0 && <span className="text-red-400">-{file.deletions}</span>}
+              {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
+              {file.deletions > 0 && <span className="text-error">-{file.deletions}</span>}
             </div>
           )}
 
@@ -241,8 +279,8 @@ export default function CodeViewer({
                 >
                   <FileText className="size-3.5 shrink-0" />
                   <span className="text-[11px] truncate flex-1">{fileNameFromPath(pf.path)}</span>
-                  <span className="text-[9px] text-green-400 shrink-0">+{pf.additions}</span>
-                  <span className="text-[9px] text-red-400 shrink-0">-{pf.deletions}</span>
+                  <span className="text-[9px] text-success shrink-0">+{pf.additions}</span>
+                  <span className="text-[9px] text-error shrink-0">-{pf.deletions}</span>
                 </button>
               );
             })}
@@ -269,7 +307,7 @@ export default function CodeViewer({
                   <StatusIcon change={change} />
                   <span className="text-[11px] truncate">{fileNameFromPath(change.path)}</span>
                   {change.staged && (
-                    <span className="text-[9px] px-1 rounded bg-green-400/10 text-green-400 ml-auto shrink-0">
+                    <span className="text-[9px] px-1 rounded bg-success/10 text-success ml-auto shrink-0">
                       S
                     </span>
                   )}

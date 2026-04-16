@@ -152,6 +152,54 @@ type PRCommit struct {
 	Date    string `json:"date"`
 }
 
+// WorkflowRun represents a GitHub Actions workflow run.
+type WorkflowRun struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`     // completed, in_progress, queued, requested, waiting
+	Conclusion string `json:"conclusion"` // success, failure, cancelled, skipped, timed_out
+	Event      string `json:"event"`      // push, pull_request, schedule
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
+	HTMLURL    string `json:"htmlUrl"`
+}
+
+// BranchCI represents CI status for a git branch.
+type BranchCI struct {
+	Branch string        `json:"branch"`
+	Repo   string        `json:"repo"`
+	Runs   []WorkflowRun `json:"runs"`
+}
+
+// PRComment represents a comment on a PR (review comment or issue comment).
+type PRComment struct {
+	ID           int64  `json:"id"`
+	InReplyToID  int64  `json:"inReplyToId"`
+	Author       string `json:"author"`
+	AuthorType   string `json:"authorType"`
+	Body         string `json:"body"`
+	CreatedAt    string `json:"createdAt"`
+	HTMLURL      string `json:"htmlUrl"`
+	Path         string `json:"path"`
+	Line         int    `json:"line"`
+	OriginalLine int    `json:"originalLine"`
+	Side         string `json:"side"`
+	DiffHunk     string `json:"diffHunk"`
+	SubjectType  string `json:"subjectType"`
+}
+
+// PRCommentThread represents a threaded review comment and its replies.
+type PRCommentThread struct {
+	Root    PRComment   `json:"root"`
+	Replies []PRComment `json:"replies"`
+}
+
+// PRCommentsData holds all comments for a PR.
+type PRCommentsData struct {
+	ReviewThreads []PRCommentThread `json:"reviewThreads"`
+	IssueComments []PRComment       `json:"issueComments"`
+}
+
 // GitHubNotification represents a GitHub notification.
 type GitHubNotification struct {
 	ID        string `json:"id"`

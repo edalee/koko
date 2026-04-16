@@ -9,3 +9,5 @@ export function GetFileChanges(arg1:string):Promise<Array<main.FileChange>>;
 export function GetFileContent(arg1:string,arg2:string):Promise<main.FileContentData>;
 
 export function GetFileDiff(arg1:string,arg2:string,arg3:boolean):Promise<main.FileDiffData>;
+
+export function GetRepoSlug(arg1:string):Promise<string>;

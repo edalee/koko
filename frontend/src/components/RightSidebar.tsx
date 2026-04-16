@@ -2,26 +2,32 @@ import {
   Bell,
   Bot,
   CheckCheck,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Circle,
+  Clock,
+  ExternalLink,
   FileCode2,
   FileMinus,
   FilePlus,
   FileText,
   GitPullRequest,
+  Loader2,
   Plug,
   RefreshCw,
   Sparkles,
   Terminal,
+  XCircle,
 } from "lucide-react";
 import { useState } from "react";
 import type { main } from "../../wailsjs/go/models";
+import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import type { FileChange } from "../hooks/useFileChanges";
 import type { GitHubNotification, NotifFilter } from "../hooks/useNotifications";
 import type { SubagentProcess } from "../hooks/useSubagents";
-import type { GitHubPR } from "../types";
+import type { BranchCI, GitHubPR, WorkflowRun } from "../types";
 import NotificationBadge from "./NotificationBadge";
 import NotificationsPanel from "./NotificationsPanel";
 
@@ -34,6 +40,8 @@ interface RightSidebarProps {
   branch: string;
   fileChangesLoading: boolean;
   onRefreshFileChanges: () => void;
+  ci: BranchCI | null;
+  ciLoading: boolean;
   processes: SubagentProcess[];
   agentCount: number;
   mcpServers: main.MCPServer[];
@@ -61,16 +69,16 @@ interface RightSidebarProps {
 }
 
 function changeColor(change: FileChange): string {
-  if (change.staged) return "text-green-400";
+  if (change.staged) return "text-success";
   switch (change.status) {
     case "added":
-      return "text-green-400";
+      return "text-success";
     case "deleted":
-      return "text-red-400";
+      return "text-error";
     case "renamed":
-      return "text-blue-400";
+      return "text-accent";
     default:
-      return "text-yellow-400";
+      return "text-warning";
   }
 }
 
@@ -117,12 +125,103 @@ function fileDir(path: string) {
 function statusDot(status: string) {
   switch (status) {
     case "connected":
-      return "bg-green-400";
+      return "bg-success";
     case "auth_needed":
-      return "bg-yellow-400";
+      return "bg-warning";
     default:
-      return "bg-red-400";
+      return "bg-error";
   }
+}
+
+function ciStatusIcon(run: WorkflowRun) {
+  if (run.status !== "completed") {
+    return <Clock className="size-3 text-warning animate-pulse" />;
+  }
+  switch (run.conclusion) {
+    case "success":
+      return <CheckCircle2 className="size-3 text-success" />;
+    case "failure":
+      return <XCircle className="size-3 text-error" />;
+    default:
+      return <Circle className="size-3 text-tertiary" />;
+  }
+}
+
+function ciStatusDot(ci: BranchCI | null) {
+  if (!ci || ci.runs.length === 0) return null;
+  const latest = ci.runs[0];
+  if (latest.status !== "completed") {
+    return <span className="size-1.5 rounded-full bg-warning animate-pulse shrink-0" />;
+  }
+  switch (latest.conclusion) {
+    case "success":
+      return <span className="size-1.5 rounded-full bg-success shrink-0" />;
+    case "failure":
+      return <span className="size-1.5 rounded-full bg-error shrink-0" />;
+    default:
+      return <span className="size-1.5 rounded-full bg-tertiary shrink-0" />;
+  }
+}
+
+function timeAgo(iso: string): string {
+  if (!iso) return "";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function CIRunsSection({ ci, loading }: { ci: BranchCI; loading: boolean }) {
+  const [open, setOpen] = useState(() =>
+    ci.runs.some((r) => r.status !== "completed" || r.conclusion === "failure"),
+  );
+  const hasFailing = ci.runs.some((r) => r.conclusion === "failure");
+
+  return (
+    <div className="border-t border-white/[0.06] mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 px-3 py-2 w-full text-left hover:bg-white/[0.04] transition-colors"
+      >
+        <ChevronDown
+          className={`size-3 text-tertiary transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+        {hasFailing ? (
+          <XCircle className="size-3 text-error" />
+        ) : (
+          <CheckCircle2 className="size-3 text-success" />
+        )}
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+          CI
+        </span>
+        <span className="text-[10px] text-tertiary ml-auto flex items-center gap-1.5">
+          {loading && <Loader2 className="size-2.5 animate-spin" />}
+          {ci.runs.length} run{ci.runs.length !== 1 ? "s" : ""}
+        </span>
+      </button>
+      {open && (
+        <div>
+          {ci.runs.map((run) => (
+            // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: CI run click
+            <div
+              key={run.id}
+              className="flex items-center gap-2 px-3 py-1.5 pl-7 hover:bg-white/[0.04] transition-colors cursor-pointer group"
+              onClick={() => run.htmlUrl && BrowserOpenURL(run.htmlUrl)}
+            >
+              {ciStatusIcon(run)}
+              <span className="text-xs text-white/70 truncate flex-1">{run.name}</span>
+              <ExternalLink className="size-2.5 text-tertiary opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              <span className="text-[10px] text-tertiary shrink-0">
+                {timeAgo(run.updatedAt || run.createdAt)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function CollapsibleSection({
@@ -169,6 +268,8 @@ export default function RightSidebar({
   branch,
   fileChangesLoading,
   onRefreshFileChanges,
+  ci,
+  ciLoading,
   processes,
   agentCount,
   mcpServers,
@@ -280,9 +381,10 @@ export default function RightSidebar({
                 <div className="min-w-0">
                   <h3 className="text-white text-sm">File Changes</h3>
                   {branch && (
-                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                    <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground truncate mt-0.5">
+                      {ciStatusDot(ci)}
                       {branch}
-                      <span className="text-tertiary ml-1.5">
+                      <span className="text-tertiary ml-0.5">
                         {fileChanges.length} file{fileChanges.length !== 1 ? "s" : ""}
                       </span>
                     </p>
@@ -300,7 +402,7 @@ export default function RightSidebar({
                 </button>
               </div>
               <div className="flex-1 overflow-auto">
-                {fileChanges.length === 0 ? (
+                {fileChanges.length === 0 && !ci?.runs?.length ? (
                   <p className="text-xs text-muted-foreground text-center py-8">
                     {branch ? "No changes on this branch" : "No active session"}
                   </p>
@@ -332,6 +434,11 @@ export default function RightSidebar({
                         </span>
                       </div>
                     ))}
+
+                    {/* CI Runs */}
+                    {ci?.runs && ci.runs.length > 0 && (
+                      <CIRunsSection ci={ci} loading={ciLoading} />
+                    )}
                   </div>
                 )}
               </div>
@@ -434,7 +541,7 @@ export default function RightSidebar({
                     {mcpServers.length > 0 && (
                       <CollapsibleSection
                         title="MCP Servers"
-                        icon={<Plug className="size-3 text-blue-400" />}
+                        icon={<Plug className="size-3 text-accent" />}
                         count={mcpServers.length}
                       >
                         {mcpServers.map((server) => (

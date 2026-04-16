@@ -16,6 +16,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
+import { useCI } from "./hooks/useCI";
 import { useCodeViewer } from "./hooks/useCodeViewer";
 import { useFileChanges } from "./hooks/useFileChanges";
 import { useGitHub } from "./hooks/useGitHub";
@@ -67,6 +68,7 @@ export default function App() {
     loading: fileChangesLoading,
     refresh: refreshFileChanges,
   } = useFileChanges(activeTab?.directory ?? null);
+  const { ci, loading: ciLoading } = useCI(activeTab?.directory ?? null, branch);
   const codeViewer = useCodeViewer();
   const { activeOverlay, toggleOverlay, closeOverlay } = useOverlay();
   const {
@@ -279,6 +281,8 @@ export default function App() {
               branch={branch}
               fileChangesLoading={fileChangesLoading}
               onRefreshFileChanges={refreshFileChanges}
+              ci={ci}
+              ciLoading={ciLoading}
               processes={processes}
               agentCount={agentCount}
               mcpServers={mcpServers}

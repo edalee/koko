@@ -385,6 +385,223 @@ func (g *GitHubService) FetchPRCommits(repo string, number int) ([]PRCommit, err
 	return commits, nil
 }
 
+// FetchPRComments fetches both review comments and issue comments for a PR.
+func (g *GitHubService) FetchPRComments(repo string, number int) (PRCommentsData, error) {
+	fullRepo := "epidemicsound/" + repo
+	result := PRCommentsData{}
+
+	// Fetch review comments (inline on diffs)
+	reviewOut, err := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/pulls/%d/comments?per_page=100", fullRepo, number),
+	).Output()
+	if err == nil {
+		var rawReview []struct {
+			ID           int64  `json:"id"`
+			InReplyToID  int64  `json:"in_reply_to_id"`
+			User         struct {
+				Login string `json:"login"`
+				Type  string `json:"type"`
+			} `json:"user"`
+			Body         string `json:"body"`
+			CreatedAt    string `json:"created_at"`
+			HTMLURL      string `json:"html_url"`
+			Path         string `json:"path"`
+			Line         *int   `json:"line"`
+			OriginalLine *int   `json:"original_line"`
+			Side         string `json:"side"`
+			DiffHunk     string `json:"diff_hunk"`
+			SubjectType  string `json:"subject_type"`
+		}
+		if json.Unmarshal(reviewOut, &rawReview) == nil {
+			roots := map[int64]*PRCommentThread{}
+			var rootOrder []int64
+
+			for _, r := range rawReview {
+				c := PRComment{
+					ID:          r.ID,
+					InReplyToID: r.InReplyToID,
+					Author:      r.User.Login,
+					AuthorType:  r.User.Type,
+					Body:        r.Body,
+					CreatedAt:   r.CreatedAt,
+					HTMLURL:     r.HTMLURL,
+					Path:        r.Path,
+					Side:        r.Side,
+					DiffHunk:    r.DiffHunk,
+					SubjectType: r.SubjectType,
+				}
+				if r.Line != nil {
+					c.Line = *r.Line
+				}
+				if r.OriginalLine != nil {
+					c.OriginalLine = *r.OriginalLine
+				}
+
+				if r.InReplyToID == 0 {
+					thread := &PRCommentThread{Root: c}
+					roots[r.ID] = thread
+					rootOrder = append(rootOrder, r.ID)
+				} else {
+					if t, ok := roots[r.InReplyToID]; ok {
+						t.Replies = append(t.Replies, c)
+					}
+				}
+			}
+
+			for _, id := range rootOrder {
+				result.ReviewThreads = append(result.ReviewThreads, *roots[id])
+			}
+		}
+	}
+
+	// Fetch issue comments (general discussion)
+	issueOut, err := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/issues/%d/comments?per_page=100", fullRepo, number),
+	).Output()
+	if err == nil {
+		var rawIssue []struct {
+			ID   int64 `json:"id"`
+			User struct {
+				Login string `json:"login"`
+				Type  string `json:"type"`
+			} `json:"user"`
+			Body      string `json:"body"`
+			CreatedAt string `json:"created_at"`
+			HTMLURL   string `json:"html_url"`
+		}
+		if json.Unmarshal(issueOut, &rawIssue) == nil {
+			for _, r := range rawIssue {
+				result.IssueComments = append(result.IssueComments, PRComment{
+					ID:         r.ID,
+					Author:     r.User.Login,
+					AuthorType: r.User.Type,
+					Body:       r.Body,
+					CreatedAt:  r.CreatedAt,
+					HTMLURL:    r.HTMLURL,
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// ReplyToReviewComment replies to a review comment thread.
+func (g *GitHubService) ReplyToReviewComment(repo string, number int, commentID int64, body string) (PRComment, error) {
+	fullRepo := "epidemicsound/" + repo
+	out, err := exec.Command("gh", "api",
+		"--method", "POST",
+		fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", fullRepo, number, commentID),
+		"-f", "body="+body,
+	).Output()
+	if err != nil {
+		return PRComment{}, fmt.Errorf("failed to reply to review comment: %w", err)
+	}
+
+	var raw struct {
+		ID        int64  `json:"id"`
+		User      struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"user"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+		HTMLURL   string `json:"html_url"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return PRComment{}, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	return PRComment{
+		ID:         raw.ID,
+		Author:     raw.User.Login,
+		AuthorType: raw.User.Type,
+		Body:       raw.Body,
+		CreatedAt:  raw.CreatedAt,
+		HTMLURL:    raw.HTMLURL,
+	}, nil
+}
+
+// AddIssueComment adds a general discussion comment to a PR.
+func (g *GitHubService) AddIssueComment(repo string, number int, body string) (PRComment, error) {
+	fullRepo := "epidemicsound/" + repo
+	out, err := exec.Command("gh", "api",
+		"--method", "POST",
+		fmt.Sprintf("repos/%s/issues/%d/comments", fullRepo, number),
+		"-f", "body="+body,
+	).Output()
+	if err != nil {
+		return PRComment{}, fmt.Errorf("failed to add issue comment: %w", err)
+	}
+
+	var raw struct {
+		ID        int64  `json:"id"`
+		User      struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"user"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+		HTMLURL   string `json:"html_url"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return PRComment{}, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	return PRComment{
+		ID:         raw.ID,
+		Author:     raw.User.Login,
+		AuthorType: raw.User.Type,
+		Body:       raw.Body,
+		CreatedAt:  raw.CreatedAt,
+		HTMLURL:    raw.HTMLURL,
+	}, nil
+}
+
+// FetchBranchCI returns recent workflow runs for a branch.
+func (g *GitHubService) FetchBranchCI(repoSlug string, branch string) (BranchCI, error) {
+	result := BranchCI{Branch: branch, Repo: repoSlug}
+
+	out, err := exec.Command("gh", "run", "list",
+		"--repo", repoSlug,
+		"--branch", branch,
+		"--limit", "5",
+		"--json", "databaseId,displayTitle,status,conclusion,event,createdAt,updatedAt,url",
+	).Output()
+	if err != nil {
+		return result, fmt.Errorf("gh run list failed: %w", err)
+	}
+
+	var raw []struct {
+		DatabaseID   int64  `json:"databaseId"`
+		DisplayTitle string `json:"displayTitle"`
+		Status       string `json:"status"`
+		Conclusion   string `json:"conclusion"`
+		Event        string `json:"event"`
+		CreatedAt    string `json:"createdAt"`
+		UpdatedAt    string `json:"updatedAt"`
+		URL          string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return result, fmt.Errorf("json parse failed: %w", err)
+	}
+
+	for _, r := range raw {
+		result.Runs = append(result.Runs, WorkflowRun{
+			ID:         r.DatabaseID,
+			Name:       r.DisplayTitle,
+			Status:     r.Status,
+			Conclusion: r.Conclusion,
+			Event:      r.Event,
+			CreatedAt:  r.CreatedAt,
+			UpdatedAt:  r.UpdatedAt,
+			HTMLURL:    r.URL,
+		})
+	}
+
+	return result, nil
+}
+
 func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 	var allPRs []GitHubPR
 	for _, repo := range trackedRepos {

@@ -5,7 +5,7 @@
 Features planned for future implementation, roughly prioritized.
 
 ### Code Viewer Enhancements
-- [ ] **Keyboard navigation** — `↑`/`↓` or `[`/`]` to switch between files in the diff viewer
+- [x] **Keyboard navigation** — `↑`/`↓` or `[`/`]` to switch between files in the diff viewer
 - [ ] **Raw file viewer** — view unmodified files with syntax highlighting (not just diffs)
 - [ ] **Large file handling** — Web Worker via DiffFile bundle API for 10k+ line diffs
 - [ ] **Binary file detection** — show "Binary file" message instead of attempting diff
@@ -28,8 +28,8 @@ Features planned for future implementation, roughly prioritized.
 
 ### GitHub
 - [x] **PR diff viewer** — view PR diffs directly in Koko (reuse code viewer)
-- [ ] **PR comments** — read and reply to PR review comments
-- [ ] **CI status** — show GitHub Actions status for active branches
+- [x] **PR comments** — read and reply to PR review comments
+- [x] **CI status** — show GitHub Actions status for active branches
 
 ### Design & UX
 - [ ] **Themes** — light theme, custom accent colors

@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Circle,
   Clock,
+  Code2,
   ExternalLink,
   Eye,
   EyeOff,
@@ -15,7 +16,9 @@ import {
   GitMerge,
   GitPullRequest,
   Loader2,
+  MessageCircle,
   MessageSquare,
+  Send,
   ShieldAlert,
   Users,
   X,
@@ -26,15 +29,25 @@ import Markdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import { HidePR, UnhidePR } from "../../wailsjs/go/main/ConfigService";
 import {
+  AddIssueComment,
   ApprovePR,
+  FetchPRComments,
   FetchPRCommits,
   FetchPRFiles,
   FetchPRReviews,
   MergePR,
+  ReplyToReviewComment,
 } from "../../wailsjs/go/main/GitHubService";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import { cn } from "../lib/utils";
-import type { GitHubPR, PRCommit, PRFile, PRReview } from "../types";
+import type {
+  GitHubPR,
+  PRCommentsData,
+  PRCommentThread,
+  PRCommit,
+  PRFile,
+  PRReview,
+} from "../types";
 
 interface PRDetailOverlayProps {
   open: boolean;
@@ -276,8 +289,14 @@ export default function PRDetailOverlay({
   const [filesLoading, setFilesLoading] = useState(false);
   const [reviews, setReviews] = useState<PRReview[]>([]);
   const [commits, setCommits] = useState<PRCommit[]>([]);
+  const [commentsData, setCommentsData] = useState<PRCommentsData | null>(null);
   const [checksOpen, setChecksOpen] = useState(false);
   const [commitsOpen, setCommitsOpen] = useState(false);
+  const [discussionOpen, setDiscussionOpen] = useState(true);
+  const [codeCommentsOpen, setCodeCommentsOpen] = useState(true);
+  const [replyingTo, setReplyingTo] = useState<number | null>(null);
+  const [replyBody, setReplyBody] = useState("");
+  const [replying, setReplying] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   // Track which PR's detail data is loaded to avoid redundant fetches
   const [loadedPRKey, setLoadedPRKey] = useState<string>("");
@@ -294,6 +313,9 @@ export default function PRDetailOverlay({
     setFiles([]);
     setReviews([]);
     setCommits([]);
+    setCommentsData(null);
+    setReplyingTo(null);
+    setReplyBody("");
 
     FetchPRFiles(repo, number)
       .then((f) => setFiles(f || []))
@@ -304,6 +326,9 @@ export default function PRDetailOverlay({
       .catch(() => {});
     FetchPRCommits(repo, number)
       .then((c) => setCommits(c || []))
+      .catch(() => {});
+    FetchPRComments(repo, number)
+      .then((data) => setCommentsData(data))
       .catch(() => {});
   }, [open, selectedPR, prKey, loadedPRKey]);
 
@@ -383,6 +408,68 @@ export default function PRDetailOverlay({
       setBusyAction(null);
     }
   }
+
+  async function handleReplyToThread(threadRootID: number) {
+    if (!pr || !replyBody.trim()) return;
+    setReplying(true);
+    try {
+      const newComment = await ReplyToReviewComment(
+        pr.repo,
+        pr.number,
+        threadRootID,
+        replyBody.trim(),
+      );
+      setCommentsData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          reviewThreads: prev.reviewThreads.map((t) =>
+            t.root.id === threadRootID ? { ...t, replies: [...t.replies, newComment] } : t,
+          ),
+        };
+      });
+      setReplyBody("");
+      setReplyingTo(null);
+    } catch {
+      // ignore
+    } finally {
+      setReplying(false);
+    }
+  }
+
+  async function handleAddIssueComment() {
+    if (!pr || !replyBody.trim()) return;
+    setReplying(true);
+    try {
+      const newComment = await AddIssueComment(pr.repo, pr.number, replyBody.trim());
+      setCommentsData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          issueComments: [...prev.issueComments, newComment],
+        };
+      });
+      setReplyBody("");
+      setReplyingTo(null);
+    } catch {
+      // ignore
+    } finally {
+      setReplying(false);
+    }
+  }
+
+  // Group review threads by file path
+  const threadsByFile: Record<string, PRCommentThread[]> = {};
+  if (commentsData?.reviewThreads) {
+    for (const thread of commentsData.reviewThreads) {
+      const path = thread.root.path || "(file-level)";
+      if (!threadsByFile[path]) threadsByFile[path] = [];
+      threadsByFile[path].push(thread);
+    }
+  }
+
+  const issueComments = commentsData?.issueComments || [];
+  const reviewThreadCount = commentsData?.reviewThreads?.length || 0;
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -511,7 +598,7 @@ export default function PRDetailOverlay({
                     type="button"
                     disabled={busyAction === "merge"}
                     onClick={handleMerge}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all border text-purple-400 border-purple-400/30 hover:bg-purple-400/10 hover:shadow-[0_0_12px_rgba(168,85,247,0.08)]"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all border text-merge border-merge/30 hover:bg-merge/10 hover:shadow-[0_0_12px_color-mix(in_srgb,var(--color-merge)_15%,transparent)]"
                   >
                     {busyAction === "merge" ? (
                       <Loader2 className="size-3.5 animate-spin" />
@@ -580,6 +667,306 @@ export default function PRDetailOverlay({
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* Discussion (issue comments) */}
+                {commentsData && (issueComments.length > 0 || replyingTo === -1) && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setDiscussionOpen(!discussionOpen)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium uppercase tracking-wider hover:text-white/70 transition-colors"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-3 transition-transform",
+                          discussionOpen ? "" : "-rotate-90",
+                        )}
+                      />
+                      <MessageCircle className="size-3" />
+                      Discussion
+                      <span className="text-tertiary normal-case ml-1">{issueComments.length}</span>
+                    </button>
+                    {discussionOpen && (
+                      <div className="space-y-2">
+                        {issueComments.map((comment) => (
+                          <div
+                            key={comment.id}
+                            className="px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/[0.06] space-y-1.5"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="size-5 rounded-full bg-white/10 text-white/60 text-[10px] font-medium flex items-center justify-center shrink-0">
+                                {authorInitial(comment.author)}
+                              </span>
+                              <span className="text-xs text-white/70 font-medium">
+                                {comment.author}
+                              </span>
+                              {comment.authorType === "Bot" && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/40">
+                                  Bot
+                                </span>
+                              )}
+                              <span className="text-[10px] text-tertiary ml-auto">
+                                {timeAgo(comment.createdAt)}
+                              </span>
+                            </div>
+                            <div className="text-sm">
+                              <Markdown
+                                rehypePlugins={[rehypeRaw]}
+                                // biome-ignore lint/suspicious/noExplicitAny: react-markdown component types
+                                components={mdComponents as any}
+                              >
+                                {comment.body}
+                              </Markdown>
+                            </div>
+                          </div>
+                        ))}
+                        {/* Add comment */}
+                        {replyingTo === -1 ? (
+                          <div className="space-y-2">
+                            <textarea
+                              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white/80 placeholder-white/30 resize-none focus:outline-none focus:border-accent/40"
+                              rows={3}
+                              placeholder="Add a comment..."
+                              value={replyBody}
+                              onChange={(e) => setReplyBody(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && e.metaKey) handleAddIssueComment();
+                              }}
+                            />
+                            <div className="flex items-center gap-2 justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingTo(null);
+                                  setReplyBody("");
+                                }}
+                                className="px-2.5 py-1 text-xs text-muted-foreground hover:text-white rounded-md transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={replying || !replyBody.trim()}
+                                onClick={handleAddIssueComment}
+                                className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-accent bg-accent/10 hover:bg-accent/20 rounded-md transition-colors disabled:opacity-40"
+                              >
+                                {replying ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                  <Send className="size-3" />
+                                )}
+                                Comment
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingTo(-1);
+                              setReplyBody("");
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-white rounded-lg border border-dashed border-white/[0.08] hover:border-white/[0.15] transition-all w-full"
+                          >
+                            <MessageCircle className="size-3" />
+                            Add a comment
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Code Comments (review threads) */}
+                {reviewThreadCount > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setCodeCommentsOpen(!codeCommentsOpen)}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium uppercase tracking-wider hover:text-white/70 transition-colors"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "size-3 transition-transform",
+                          codeCommentsOpen ? "" : "-rotate-90",
+                        )}
+                      />
+                      <Code2 className="size-3" />
+                      Code Comments
+                      <span className="text-tertiary normal-case ml-1">{reviewThreadCount}</span>
+                    </button>
+                    {codeCommentsOpen && (
+                      <div className="space-y-4">
+                        {Object.entries(threadsByFile).map(([filePath, threads]) => (
+                          <div key={filePath} className="space-y-2">
+                            <div className="flex items-center gap-1.5 text-xs text-white/50">
+                              <FileText className="size-3" />
+                              <span className="font-mono truncate">{filePath}</span>
+                            </div>
+                            {threads.map((thread) => {
+                              const line = thread.root.line || thread.root.originalLine;
+                              return (
+                                <div
+                                  key={thread.root.id}
+                                  className="rounded-lg border border-white/[0.06] overflow-hidden"
+                                >
+                                  {/* Diff hunk context */}
+                                  {thread.root.diffHunk && (
+                                    <div className="bg-white/[0.02] px-3 py-1.5 border-b border-white/[0.06] overflow-auto max-h-[120px]">
+                                      <pre className="text-[11px] font-mono leading-relaxed">
+                                        {thread.root.diffHunk
+                                          .split("\n")
+                                          .slice(-5)
+                                          .map((hunkLine, i) => (
+                                            <div
+                                              key={`${i}-${hunkLine}`}
+                                              className={cn(
+                                                hunkLine.startsWith("+")
+                                                  ? "text-success/70"
+                                                  : hunkLine.startsWith("-")
+                                                    ? "text-error/70"
+                                                    : hunkLine.startsWith("@@")
+                                                      ? "text-accent/50"
+                                                      : "text-white/30",
+                                              )}
+                                            >
+                                              {hunkLine}
+                                            </div>
+                                          ))}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {/* Root comment */}
+                                  <div className="px-3 py-2.5 bg-white/[0.03] space-y-1.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="size-5 rounded-full bg-white/10 text-white/60 text-[10px] font-medium flex items-center justify-center shrink-0">
+                                        {authorInitial(thread.root.author)}
+                                      </span>
+                                      <span className="text-xs text-white/70 font-medium">
+                                        {thread.root.author}
+                                      </span>
+                                      {thread.root.authorType === "Bot" && (
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/40">
+                                          Bot
+                                        </span>
+                                      )}
+                                      {line > 0 && (
+                                        <span className="text-[10px] text-accent/50 font-mono">
+                                          L{line}
+                                        </span>
+                                      )}
+                                      <span className="text-[10px] text-tertiary ml-auto">
+                                        {timeAgo(thread.root.createdAt)}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm">
+                                      <Markdown
+                                        rehypePlugins={[rehypeRaw]}
+                                        // biome-ignore lint/suspicious/noExplicitAny: react-markdown component types
+                                        components={mdComponents as any}
+                                      >
+                                        {thread.root.body}
+                                      </Markdown>
+                                    </div>
+                                  </div>
+                                  {/* Replies */}
+                                  {thread.replies.map((reply) => (
+                                    <div
+                                      key={reply.id}
+                                      className="px-3 py-2.5 pl-7 bg-white/[0.02] border-t border-white/[0.04] space-y-1.5"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="size-4 rounded-full bg-white/10 text-white/60 text-[9px] font-medium flex items-center justify-center shrink-0">
+                                          {authorInitial(reply.author)}
+                                        </span>
+                                        <span className="text-xs text-white/70">
+                                          {reply.author}
+                                        </span>
+                                        {reply.authorType === "Bot" && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/40">
+                                            Bot
+                                          </span>
+                                        )}
+                                        <span className="text-[10px] text-tertiary ml-auto">
+                                          {timeAgo(reply.createdAt)}
+                                        </span>
+                                      </div>
+                                      <div className="text-sm">
+                                        <Markdown
+                                          rehypePlugins={[rehypeRaw]}
+                                          // biome-ignore lint/suspicious/noExplicitAny: react-markdown component types
+                                          components={mdComponents as any}
+                                        >
+                                          {reply.body}
+                                        </Markdown>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {/* Reply action */}
+                                  <div className="px-3 py-2 border-t border-white/[0.04]">
+                                    {replyingTo === thread.root.id ? (
+                                      <div className="space-y-2">
+                                        <textarea
+                                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-white/80 placeholder-white/30 resize-none focus:outline-none focus:border-accent/40"
+                                          rows={2}
+                                          placeholder="Write a reply..."
+                                          value={replyBody}
+                                          onChange={(e) => setReplyBody(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter" && e.metaKey)
+                                              handleReplyToThread(thread.root.id);
+                                          }}
+                                          // biome-ignore lint/a11y/noAutofocus: reply textarea should focus on open
+                                          autoFocus
+                                        />
+                                        <div className="flex items-center gap-2 justify-end">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setReplyingTo(null);
+                                              setReplyBody("");
+                                            }}
+                                            className="px-2.5 py-1 text-xs text-muted-foreground hover:text-white rounded-md transition-colors"
+                                          >
+                                            Cancel
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={replying || !replyBody.trim()}
+                                            onClick={() => handleReplyToThread(thread.root.id)}
+                                            className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-accent bg-accent/10 hover:bg-accent/20 rounded-md transition-colors disabled:opacity-40"
+                                          >
+                                            {replying ? (
+                                              <Loader2 className="size-3 animate-spin" />
+                                            ) : (
+                                              <Send className="size-3" />
+                                            )}
+                                            Reply
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setReplyingTo(thread.root.id);
+                                          setReplyBody("");
+                                        }}
+                                        className="text-xs text-muted-foreground hover:text-white transition-colors"
+                                      >
+                                        Reply
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
