@@ -2,6 +2,7 @@ import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view-pure.css";
 import { ArrowLeft, Columns2, FileMinus, FilePlus, FileText, Loader2, Rows2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { type BundledLanguage, type BundledTheme, codeToHtml } from "shiki";
 import type { main } from "../../wailsjs/go/models";
 import type { PRFileItem, ViewMode } from "../hooks/useCodeViewer";
 import type { FileChange } from "../hooks/useFileChanges";
@@ -11,6 +12,7 @@ type AnimState = "closed" | "open" | "closing";
 interface CodeViewerProps {
   open: boolean;
   file: main.FileDiffData | null;
+  rawFile: main.FileContentData | null;
   loading: boolean;
   viewMode: ViewMode;
   filePath: string;
@@ -59,9 +61,30 @@ function StatusIcon({ change }: { change: FileChange }) {
   }
 }
 
+// Map common language identifiers to shiki-compatible language names
+const LANG_MAP: Record<string, string> = {
+  golang: "go",
+  js: "javascript",
+  ts: "typescript",
+  jsx: "jsx",
+  tsx: "tsx",
+  yml: "yaml",
+  sh: "bash",
+  zsh: "bash",
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+  proto: "proto",
+};
+
+function toShikiLang(lang: string): BundledLanguage {
+  const l = lang.toLowerCase();
+  return (LANG_MAP[l] ?? l) as BundledLanguage;
+}
+
 export default function CodeViewer({
   open,
   file,
+  rawFile,
   loading,
   viewMode,
   filePath,
@@ -74,6 +97,31 @@ export default function CodeViewer({
   onPRFileSelect,
 }: CodeViewerProps) {
   const [state, setState] = useState<AnimState>("closed");
+  const [highlightedHtml, setHighlightedHtml] = useState<string>("");
+
+  const isRawMode = rawFile != null && file == null;
+
+  // Highlight raw file content with shiki
+  useEffect(() => {
+    if (!rawFile?.content) {
+      setHighlightedHtml("");
+      return;
+    }
+    let cancelled = false;
+    codeToHtml(rawFile.content, {
+      lang: toShikiLang(rawFile.language || "text"),
+      theme: "github-dark" as BundledTheme,
+    })
+      .then((html) => {
+        if (!cancelled) setHighlightedHtml(html);
+      })
+      .catch(() => {
+        if (!cancelled) setHighlightedHtml("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawFile]);
 
   useEffect(() => {
     if (open && state === "closed") {
@@ -197,50 +245,68 @@ export default function CodeViewer({
               navigate
             </span>
           )}
-          {file && (file.additions > 0 || file.deletions > 0) && (
+          {isRawMode && rawFile && (
+            <span className="text-[10px] text-tertiary mr-2">
+              {rawFile.language || "text"}
+              <span className="ml-1.5">{rawFile.content.split("\n").length} lines</span>
+            </span>
+          )}
+          {!isRawMode && file && (file.additions > 0 || file.deletions > 0) && (
             <div className="flex items-center gap-1.5 text-xs font-mono mr-2">
               {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
               {file.deletions > 0 && <span className="text-error">-{file.deletions}</span>}
             </div>
           )}
 
-          <div className="flex items-center rounded-md border border-white/[0.08] overflow-hidden">
-            <button
-              type="button"
-              onClick={() => onSetViewMode("split")}
-              className={`p-1.5 transition-colors ${
-                viewMode === "split"
-                  ? "bg-white/[0.1] text-white"
-                  : "text-muted-foreground hover:text-white hover:bg-white/[0.04]"
-              }`}
-              title="Split view"
-            >
-              <Columns2 className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onSetViewMode("unified")}
-              className={`p-1.5 transition-colors ${
-                viewMode === "unified"
-                  ? "bg-white/[0.1] text-white"
-                  : "text-muted-foreground hover:text-white hover:bg-white/[0.04]"
-              }`}
-              title="Unified view"
-            >
-              <Rows2 className="size-3.5" />
-            </button>
-          </div>
+          {!isRawMode && (
+            <div className="flex items-center rounded-md border border-white/[0.08] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => onSetViewMode("split")}
+                className={`p-1.5 transition-colors ${
+                  viewMode === "split"
+                    ? "bg-white/[0.1] text-white"
+                    : "text-muted-foreground hover:text-white hover:bg-white/[0.04]"
+                }`}
+                title="Split view"
+              >
+                <Columns2 className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onSetViewMode("unified")}
+                className={`p-1.5 transition-colors ${
+                  viewMode === "unified"
+                    ? "bg-white/[0.1] text-white"
+                    : "text-muted-foreground hover:text-white hover:bg-white/[0.04]"
+                }`}
+                title="Unified view"
+              >
+                <Rows2 className="size-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Main content: diff + file list sidebar */}
       <div className="flex-1 flex min-h-0">
-        {/* Diff content */}
+        {/* Content */}
         <div className="flex-1 overflow-auto code-viewer-wrapper">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="size-5 text-muted-foreground animate-spin" />
             </div>
+          ) : isRawMode && highlightedHtml ? (
+            <div
+              className="raw-file-viewer text-[13px] leading-relaxed p-4"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki output is safe
+              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+            />
+          ) : isRawMode && rawFile ? (
+            <pre className="text-[13px] leading-relaxed p-4 text-white/70 font-mono whitespace-pre-wrap">
+              {rawFile.content}
+            </pre>
           ) : file && diffData ? (
             <DiffView
               data={diffData}
@@ -252,7 +318,7 @@ export default function CodeViewer({
             />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              No diff data available
+              No data available
             </div>
           )}
         </div>

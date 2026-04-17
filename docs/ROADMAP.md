@@ -6,7 +6,7 @@ Features planned for future implementation, roughly prioritized.
 
 ### Code Viewer Enhancements
 - [x] **Keyboard navigation** — `↑`/`↓` or `[`/`]` to switch between files in the diff viewer
-- [ ] **Raw file viewer** — view unmodified files with syntax highlighting (not just diffs)
+- [x] **Raw file viewer** — view unmodified files with syntax highlighting (not just diffs)
 - [ ] **Large file handling** — Web Worker via DiffFile bundle API for 10k+ line diffs
 - [ ] **Binary file detection** — show "Binary file" message instead of attempting diff
 - [ ] **Inline comments** — annotate diff lines (future: code review workflow)
@@ -45,4 +45,4 @@ Features planned for future implementation, roughly prioritized.
 
 ## Completed
 
-See `docs/plans/` for detailed implementation plans of completed features (001-022).
+See `docs/plans/` for detailed implementation plans of completed features (001-025).

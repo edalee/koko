@@ -297,6 +297,11 @@ export default function App() {
                   codeViewer.openDiff(activeTab.directory, path, staged);
                 }
               }}
+              onFileView={(path) => {
+                if (activeTab?.directory) {
+                  codeViewer.openFile(activeTab.directory, path);
+                }
+              }}
               prs={prs}
               prsLoading={loading}
               visiblePRCount={visiblePRCount}
@@ -334,6 +339,7 @@ export default function App() {
         <CodeViewer
           open={codeViewer.isOpen}
           file={codeViewer.file}
+          rawFile={codeViewer.rawFile}
           loading={codeViewer.loading}
           viewMode={codeViewer.viewMode}
           filePath={codeViewer.filePath}

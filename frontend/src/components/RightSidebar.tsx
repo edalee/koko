@@ -52,6 +52,7 @@ interface RightSidebarProps {
   onInjectCommand: (command: string) => void;
   hasActiveSession: boolean;
   onFileClick?: (path: string, staged: boolean) => void;
+  onFileView?: (path: string) => void;
   prs: GitHubPR[];
   prsLoading: boolean;
   visiblePRCount: number;
@@ -280,6 +281,7 @@ export default function RightSidebar({
   onInjectCommand,
   hasActiveSession,
   onFileClick,
+  onFileView,
   prs,
   visiblePRCount,
   hiddenPRs,
@@ -414,7 +416,11 @@ export default function RightSidebar({
                         key={`${change.path}-${change.staged}`}
                         className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.04] transition-colors group cursor-pointer"
                         title={`${change.path}${change.staged ? " (staged)" : ""}`}
-                        onClick={() => onFileClick?.(change.path, change.staged)}
+                        onClick={(e) =>
+                          e.metaKey
+                            ? onFileView?.(change.path)
+                            : onFileClick?.(change.path, change.staged)
+                        }
                       >
                         {statusIcon(change)}
                         <div className="flex-1 min-w-0">

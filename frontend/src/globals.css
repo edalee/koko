@@ -28,6 +28,7 @@
   --color-success: oklch(0.65 0.15 155);
   --color-warning: oklch(0.75 0.15 80);
   --color-error: oklch(0.65 0.2 25);
+  --color-merge: #a78bfa; /* purple — distinct from approve (mint) */
 
   /* Badges */
   --color-badge-mail: #569cd6;
@@ -218,6 +219,33 @@
 
 .code-viewer-wrapper [data-component="git-diff-view"] {
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", "Menlo", monospace;
+}
+
+/* Raw file viewer — shiki-generated HTML */
+.raw-file-viewer pre {
+  background: transparent !important;
+  margin: 0;
+  font-family: "SF Mono", "Fira Code", "JetBrains Mono", "Menlo", monospace;
+}
+
+.raw-file-viewer code {
+  counter-reset: line;
+}
+
+.raw-file-viewer code .line {
+  display: inline-block;
+  width: 100%;
+}
+
+.raw-file-viewer code .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 3.5em;
+  margin-right: 1.5em;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.2);
+  user-select: none;
 }
 
 /* Glass utility classes */
