@@ -89,6 +89,8 @@ type FileDiffData struct {
 	Language    string `json:"language"`
 	Additions   int    `json:"additions"`
 	Deletions   int    `json:"deletions"`
+	IsBinary    bool   `json:"isBinary"`
+	LineCount   int    `json:"lineCount"`
 }
 
 // FileContentData represents raw file content.
@@ -96,6 +98,7 @@ type FileContentData struct {
 	Content  string `json:"content"`
 	Language string `json:"language"`
 	Path     string `json:"path"`
+	IsBinary bool   `json:"isBinary"`
 }
 
 // GitHubPR represents a pull request from a tracked repository.

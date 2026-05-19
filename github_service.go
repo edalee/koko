@@ -221,6 +221,13 @@ func (g *GitHubService) FetchPRFileDiff(repo string, number int, filePath string
 
 	result.Hunks = extractFileHunks(string(diffOut), filePath)
 
+	// Check for binary file marker in diff output
+	if strings.Contains(result.Hunks, "Binary files") || strings.Contains(result.Hunks, "GIT binary patch") {
+		result.IsBinary = true
+		result.Hunks = ""
+		return result, nil
+	}
+
 	// Count additions/deletions from hunks
 	for _, line := range strings.Split(result.Hunks, "\n") {
 		if len(line) > 0 && line[0] == '+' && !strings.HasPrefix(line, "+++") {
@@ -246,6 +253,11 @@ func (g *GitHubService) FetchPRFileDiff(repo string, number int, filePath string
 				"-X", "GET",
 				"-f", "ref="+info.BaseRefName,
 			).Output(); err == nil {
+				if isBinaryData(old) {
+					result.IsBinary = true
+					result.Hunks = ""
+					return result, nil
+				}
 				result.OldContent = string(old)
 			}
 
@@ -257,9 +269,24 @@ func (g *GitHubService) FetchPRFileDiff(repo string, number int, filePath string
 				"-X", "GET",
 				"-f", "ref="+info.HeadRefName,
 			).Output(); err == nil {
+				if isBinaryData(newC) {
+					result.IsBinary = true
+					result.OldContent = ""
+					result.Hunks = ""
+					return result, nil
+				}
 				result.NewContent = string(newC)
 			}
 		}
+	}
+
+	// Count lines in the larger of old/new content
+	oldLines := strings.Count(result.OldContent, "\n")
+	newLines := strings.Count(result.NewContent, "\n")
+	if oldLines > newLines {
+		result.LineCount = oldLines
+	} else {
+		result.LineCount = newLines
 	}
 
 	return result, nil

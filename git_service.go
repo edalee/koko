@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -226,6 +227,15 @@ func inferLanguage(path string) string {
 	return ""
 }
 
+// isBinaryData checks if data contains null bytes in the first 8KB (same heuristic as git).
+func isBinaryData(data []byte) bool {
+	n := len(data)
+	if n > 8192 {
+		n = 8192
+	}
+	return bytes.ContainsRune(data[:n], 0)
+}
+
 // GetFileDiff returns the diff data for a file including old/new content and unified diff hunks.
 func (gs *GitService) GetFileDiff(dir, path string, staged bool) (FileDiffData, error) {
 	if dir == "" || path == "" {
@@ -295,7 +305,23 @@ func (gs *GitService) GetFileDiff(dir, path string, staged bool) (FileDiffData, 
 		// Deleted file
 		result.NewContent = ""
 	} else {
+		if isBinaryData(data) {
+			result.IsBinary = true
+			result.OldContent = ""
+			result.NewContent = ""
+			result.Hunks = ""
+			return result, nil
+		}
 		result.NewContent = string(data)
+	}
+
+	// Count lines in the larger of old/new content
+	oldLines := strings.Count(result.OldContent, "\n")
+	newLines := strings.Count(result.NewContent, "\n")
+	if oldLines > newLines {
+		result.LineCount = oldLines
+	} else {
+		result.LineCount = newLines
 	}
 
 	return result, nil
@@ -311,6 +337,14 @@ func (gs *GitService) GetFileContent(dir, path string) (FileContentData, error) 
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		return FileContentData{}, err
+	}
+
+	if isBinaryData(data) {
+		return FileContentData{
+			Language: inferLanguage(path),
+			Path:     path,
+			IsBinary: true,
+		}, nil
 	}
 
 	return FileContentData{

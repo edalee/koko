@@ -1,6 +1,15 @@
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import "@git-diff-view/react/styles/diff-view-pure.css";
-import { ArrowLeft, Columns2, FileMinus, FilePlus, FileText, Loader2, Rows2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Columns2,
+  FileMinus,
+  FilePlus,
+  FileText,
+  Loader2,
+  Rows2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { type BundledLanguage, type BundledTheme, codeToHtml } from "shiki";
 import type { main } from "../../wailsjs/go/models";
@@ -98,8 +107,12 @@ export default function CodeViewer({
 }: CodeViewerProps) {
   const [state, setState] = useState<AnimState>("closed");
   const [highlightedHtml, setHighlightedHtml] = useState<string>("");
+  const [forceLoad, setForceLoad] = useState(false);
 
   const isRawMode = rawFile != null && file == null;
+  const isBinary = file?.isBinary || rawFile?.isBinary;
+  const isLargeFile =
+    !isBinary && !isRawMode && file != null && file.lineCount > 10000 && !forceLoad;
 
   // Highlight raw file content with shiki
   useEffect(() => {
@@ -122,6 +135,11 @@ export default function CodeViewer({
       cancelled = true;
     };
   }, [rawFile]);
+
+  // Reset forceLoad when switching files
+  useEffect(() => {
+    setForceLoad(false);
+  }, [filePath]);
 
   useEffect(() => {
     if (open && state === "closed") {
@@ -245,20 +263,25 @@ export default function CodeViewer({
               navigate
             </span>
           )}
-          {isRawMode && rawFile && (
+          {isBinary && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning/10 text-warning font-medium mr-2">
+              Binary
+            </span>
+          )}
+          {isRawMode && rawFile && !isBinary && (
             <span className="text-[10px] text-tertiary mr-2">
               {rawFile.language || "text"}
               <span className="ml-1.5">{rawFile.content.split("\n").length} lines</span>
             </span>
           )}
-          {!isRawMode && file && (file.additions > 0 || file.deletions > 0) && (
+          {!isRawMode && file && !isBinary && (file.additions > 0 || file.deletions > 0) && (
             <div className="flex items-center gap-1.5 text-xs font-mono mr-2">
               {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
               {file.deletions > 0 && <span className="text-error">-{file.deletions}</span>}
             </div>
           )}
 
-          {!isRawMode && (
+          {!isRawMode && !isBinary && (
             <div className="flex items-center rounded-md border border-white/[0.08] overflow-hidden">
               <button
                 type="button"
@@ -296,6 +319,25 @@ export default function CodeViewer({
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="size-5 text-muted-foreground animate-spin" />
+            </div>
+          ) : isBinary ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+              <FileText className="size-10 text-tertiary" />
+              <p className="text-sm">Binary file — cannot display contents</p>
+              <p className="text-xs text-tertiary">{filePath}</p>
+            </div>
+          ) : isLargeFile ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+              <AlertTriangle className="size-10 text-warning" />
+              <p className="text-sm">Large file — {file.lineCount.toLocaleString()} lines</p>
+              <p className="text-xs text-tertiary">Rendering may be slow</p>
+              <button
+                type="button"
+                onClick={() => setForceLoad(true)}
+                className="mt-2 px-4 py-1.5 text-xs rounded-md bg-white/[0.08] border border-white/[0.08] text-white hover:bg-white/[0.12] transition-colors"
+              >
+                Load anyway
+              </button>
             </div>
           ) : isRawMode && highlightedHtml ? (
             <div

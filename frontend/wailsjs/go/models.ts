@@ -216,6 +216,7 @@ export namespace main {
 	    content: string;
 	    language: string;
 	    path: string;
+	    isBinary: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new FileContentData(source);
@@ -226,6 +227,7 @@ export namespace main {
 	        this.content = source["content"];
 	        this.language = source["language"];
 	        this.path = source["path"];
+	        this.isBinary = source["isBinary"];
 	    }
 	}
 	export class FileDiffData {
@@ -237,6 +239,8 @@ export namespace main {
 	    language: string;
 	    additions: number;
 	    deletions: number;
+	    isBinary: boolean;
+	    lineCount: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new FileDiffData(source);
@@ -252,6 +256,8 @@ export namespace main {
 	        this.language = source["language"];
 	        this.additions = source["additions"];
 	        this.deletions = source["deletions"];
+	        this.isBinary = source["isBinary"];
+	        this.lineCount = source["lineCount"];
 	    }
 	}
 	export class GitHubNotification {
