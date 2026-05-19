@@ -23,6 +23,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const serializeRef = useRef<SerializeAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const webglRef = useRef<WebglAddon | null>(null);
+  const hadOutputSinceFlushRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
@@ -217,11 +218,50 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
           if (dims && (dims.cols !== termRef.current.cols || dims.rows !== termRef.current.rows)) {
             fitRef.current.fit();
             Resize(sessionIdRef.current, dims.cols, dims.rows);
+            // WORKAROUND[xtermjs/xterm.js#5847]: see comment block below.
+            webglRef.current?.clearTextureAtlas?.();
           }
         }
       }, 50);
     });
     observer.observe(container);
+
+    // -------------------------------------------------------------------
+    // WORKAROUND: WebGL texture atlas page-merge corruption
+    //
+    // Upstream bug:  https://github.com/xtermjs/xterm.js/issues/5847
+    // Upstream fix:  https://github.com/xtermjs/xterm.js/pull/5883
+    //
+    // Symptom: lines with ANSI background colors progressively develop
+    // partial ghosting / glyph overlap during streaming output (e.g.
+    // Claude TUI, `git diff`, `tree`). Most visible in WKWebView
+    // (Wails on macOS).
+    //
+    // Mitigation: call Terminal.clearTextureAtlas() periodically while
+    // the terminal is actively producing output, and on every resize.
+    // The clear is cheap; glyphs re-rasterize on the next render.
+    //
+    // TO REMOVE once the upstream fix is released:
+    //   1. Bump @xterm/xterm and @xterm/addon-webgl past the version
+    //      that includes PR #5883 (currently unreleased; check both
+    //      the 6.x stable line and the @xterm/addon-webgl 0.19.x line).
+    //   2. Delete this `atlasInterval` block (including the
+    //      `hadOutputSinceFlushRef` ref and the assignment in the
+    //      pty:data handler).
+    //   3. Delete the `webglRef.current?.clearTextureAtlas?.()` call
+    //      inside the ResizeObserver above.
+    //   4. (Optional) Keep the "Redraw Terminal" context-menu action
+    //      as a user-facing escape hatch; it's harmless even after
+    //      the fix lands.
+    // -------------------------------------------------------------------
+    const atlasInterval = setInterval(() => {
+      if (!activeRef.current) return;
+      if (!hadOutputSinceFlushRef.current) return;
+      webglRef.current?.clearTextureAtlas?.();
+      const t = termRef.current;
+      if (t) t.refresh(0, t.rows - 1);
+      hadOutputSinceFlushRef.current = false;
+    }, 60000);
 
     return () => {
       container.removeEventListener("copy", onCopy);
@@ -229,6 +269,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       onDataDisposable.dispose();
       onBinaryDisposable.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
+      clearInterval(atlasInterval);
       observer.disconnect();
       term.dispose();
       termRef.current = null;
@@ -244,6 +285,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     const cleanupData = EventsOn(`pty:data:${sessionId}`, (encoded: string) => {
       const bytes = Uint8Array.from(atob(encoded), (c: string) => c.charCodeAt(0));
       term.write(bytes);
+      hadOutputSinceFlushRef.current = true;
     });
 
     const cleanupExit = EventsOn(`pty:exit:${sessionId}`, () => {
