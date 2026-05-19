@@ -11,7 +11,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **Wails v2 desktop shell** — Go backend + embedded webview
 - **Frameless window** — `Frameless: true`, custom traffic lights via `--wails-draggable`, 8px bevel
 - **Terminal sessions** — xterm.js v6 + WebGL + SearchAddon, one per tab, connected to PTY via Wails events
-- **Right sidebar** — 4 modules: file changes, session context, PRs, notifications
+- **Right sidebar** — 3 modules: file changes (+ CI runs), session context, notifications; PRs open via overlay
 - **Left sidebar** — session list grouped by directory, collapsible
 - **Remote API** — HTTP/WebSocket on localhost:19876 with Bearer auth
 - **MCP server** — JSON-RPC 2.0 over stdio, 8 tools (launched via `koko mcp`)
@@ -29,7 +29,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `@git-diff-view/react` + `@git-diff-view/shiki` — Code diff viewer
 - `tailwindcss@4` — Styling with glassmorphism dark theme
 - `lucide-react` — Icons
-- `react-markdown` + `rehype-raw` — PR description rendering
+- `react-markdown` + `rehype-raw` — PR description + comment rendering
 
 ## Conventions
 - Follow Go standard project layout
@@ -43,7 +43,8 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `terminal_manager.go` — PTY sessions, slugs, UUID capture, subscriber fan-out, --resume
 - `api_server.go` — HTTP/WS API, /interact, PermissionRequest hook
 - `mcp_server.go` + `mcp_tools.go` — MCP server, 8 tools
-- `github_service.go` — PR fetching, file diffs, reviews, commits (Wails-bound)
+- `github_service.go` — PR fetching, file diffs, reviews, commits, comments, CI status (Wails-bound)
+- `git_service.go` — Branch name, file changes, file diffs, repo slug detection
 - `config_service.go` — Atomic writes, API key, hidden PRs
 - `claude_service.go` — Last message extraction
 - `slack_commands.go` — Slack bot DM command handler
@@ -51,10 +52,10 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `cmd/koko-cli/` — CLI companion
 - `frontend/src/` — React app
   - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, etc.
-  - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, etc.
+  - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
-- `docs/plans/` — Implementation plans (001-022)
+- `docs/plans/` — Implementation plans (001-024)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
@@ -75,10 +76,11 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **Accent**: `#1FF2AB` (mint green) — single accent color
 - **Text hierarchy**: opacity-based (92% → 55% → 35%)
 - **Borders**: `rgba(255,255,255,0.08)` — ultra-thin
+- **Semantic tokens**: `success` (green), `warning` (amber), `error` (red), `merge` (#a78bfa purple) — use these instead of hardcoded Tailwind colors
 - **Design memory**: `.claude/agent-memory/design-reviewer/MEMORY.md`
 - **`/design` command**: screenshots running app + analyzes against design system
 
 ## Design Docs
-- Implementation plans in `docs/plans/` (001-022)
+- Implementation plans in `docs/plans/` (001-024)
 - Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation

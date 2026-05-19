@@ -18,7 +18,7 @@ Rebuild `/design` as a proper Claude Code agent with Playwright interaction, per
 
 Full agent definition with:
 - **Hybrid capture:** native `screencapture` (shows macOS chrome, traffic lights, real PTY data) + Playwright MCP (interactive review, accessibility snapshots, console/network checks)
-- **Playwright Docker fallback:** tries `host.docker.internal:5173` then `localhost:5173`, graceful screencapture-only mode if both fail
+- **Playwright:** navigates to `localhost:5173`, graceful screencapture-only mode if it fails
 - **Reference design comparison:** reads `docs/references/Screenshot 2026-03-01 at 14.44.34.png` and key reference source files, visually diffs against running app
 - **Multi-state review:** detect app, read reference, native screenshot, Playwright navigate + snapshot + screenshot, interactive states (sidebar toggle, tab switch, resize 1200/900), console/network checks, dynamic component discovery, source code reading
 - **13 review criteria:** reference fidelity, elevation/layering, color token compliance, terminal rendering, resizable panels, session tab states, toolbar, right sidebar, session sidebar, macOS integration, dark theme consistency, accessibility, spacing/typography
