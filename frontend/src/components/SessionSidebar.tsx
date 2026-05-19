@@ -181,7 +181,7 @@ export default function SessionSidebar({
                           </span>
                         )}
                         {hasApproval && (
-                          <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+                          <span className="size-2 rounded-full bg-warning animate-pulse" />
                         )}
                         {!hasApproval && activeCount > 0 && (
                           <span className="size-2 rounded-full bg-accent/60" />
@@ -209,7 +209,7 @@ export default function SessionSidebar({
                               isActive
                                 ? "bg-white/[0.08] border border-accent/20 glow-accent"
                                 : state === "approval"
-                                  ? "hover:bg-white/[0.05] border border-amber-400/30"
+                                  ? "hover:bg-white/[0.05] border border-warning/30"
                                   : "hover:bg-white/[0.05] border border-transparent"
                             }`}
                             onClick={() => onSessionSelect(session.id)}
@@ -218,7 +218,7 @@ export default function SessionSidebar({
                             <span
                               className={`size-2 rounded-full shrink-0 ${
                                 state === "approval"
-                                  ? "bg-amber-400 animate-pulse"
+                                  ? "bg-warning animate-pulse"
                                   : state === "disconnected"
                                     ? "bg-white/20"
                                     : "bg-accent/70"
@@ -276,7 +276,7 @@ export default function SessionSidebar({
                                 className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                                 title="Close session"
                               >
-                                <X className="size-3.5 text-muted-foreground hover:text-[#F14D4C]" />
+                                <X className="size-3.5 text-muted-foreground hover:text-error" />
                               </button>
                             </div>
                           </div>
@@ -332,14 +332,14 @@ export default function SessionSidebar({
                 <SquareTerminal
                   className={`size-5 transition-colors ${
                     state === "approval"
-                      ? "text-amber-400 animate-pulse"
+                      ? "text-warning animate-pulse"
                       : activeSessionId === session.id
                         ? "text-accent"
                         : "text-muted-foreground hover:text-accent"
                   }`}
                 />
                 {state === "approval" && (
-                  <span className="absolute top-1 right-1 size-2 rounded-full bg-amber-400 animate-ping" />
+                  <span className="absolute top-1 right-1 size-2 rounded-full bg-warning animate-ping" />
                 )}
               </button>
             );

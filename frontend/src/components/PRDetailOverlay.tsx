@@ -423,8 +423,8 @@ export default function PRDetailOverlay({
         if (!prev) return prev;
         return {
           ...prev,
-          reviewThreads: prev.reviewThreads.map((t) =>
-            t.root.id === threadRootID ? { ...t, replies: [...t.replies, newComment] } : t,
+          reviewThreads: (prev.reviewThreads || []).map((t) =>
+            t.root.id === threadRootID ? { ...t, replies: [...(t.replies || []), newComment] } : t,
           ),
         };
       });
@@ -446,7 +446,7 @@ export default function PRDetailOverlay({
         if (!prev) return prev;
         return {
           ...prev,
-          issueComments: [...prev.issueComments, newComment],
+          issueComments: [...(prev.issueComments || []), newComment],
         };
       });
       setReplyBody("");
@@ -872,7 +872,7 @@ export default function PRDetailOverlay({
                                     </div>
                                   </div>
                                   {/* Replies */}
-                                  {thread.replies.map((reply) => (
+                                  {thread.replies?.map((reply) => (
                                     <div
                                       key={reply.id}
                                       className="px-3 py-2.5 pl-7 bg-white/[0.02] border-t border-white/[0.04] space-y-1.5"

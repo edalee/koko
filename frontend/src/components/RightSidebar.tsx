@@ -149,7 +149,7 @@ function ciStatusIcon(run: WorkflowRun) {
 }
 
 function ciStatusDot(ci: BranchCI | null) {
-  if (!ci || ci.runs.length === 0) return null;
+  if (!ci?.runs?.length) return null;
   const latest = ci.runs[0];
   if (latest.status !== "completed") {
     return <span className="size-1.5 rounded-full bg-warning animate-pulse shrink-0" />;

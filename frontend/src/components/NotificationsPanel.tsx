@@ -37,11 +37,11 @@ function typeIcon(type: string) {
     case "PullRequest":
       return <GitPullRequest className="size-3.5 text-accent" />;
     case "Release":
-      return <Tag className="size-3.5 text-purple-400" />;
+      return <Tag className="size-3.5 text-merge" />;
     case "CheckSuite":
-      return <GitMerge className="size-3.5 text-yellow-400" />;
+      return <GitMerge className="size-3.5 text-warning" />;
     default:
-      return <Bell className="size-3.5 text-blue-400" />;
+      return <Bell className="size-3.5 text-accent" />;
   }
 }
 
@@ -72,13 +72,13 @@ function reasonColor(reason: string): string {
       return "bg-accent/15 text-accent";
     case "mention":
     case "team_mention":
-      return "bg-blue-400/15 text-blue-400";
+      return "bg-accent/15 text-accent";
     case "assign":
-      return "bg-purple-400/15 text-purple-400";
+      return "bg-merge/15 text-merge";
     case "author":
-      return "bg-white/10 text-white/70";
+      return "bg-white/10 text-muted-foreground";
     case "ci_activity":
-      return "bg-yellow-400/15 text-yellow-400";
+      return "bg-warning/15 text-warning";
     default:
       return "";
   }

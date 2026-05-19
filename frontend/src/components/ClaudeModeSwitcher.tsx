@@ -66,9 +66,9 @@ export default function ClaudeModeSwitcher({ sessionId }: ClaudeModeSwitcherProp
     contextPct === null
       ? "text-tertiary"
       : contextPct >= 80
-        ? "text-red-400"
+        ? "text-error"
         : contextPct >= 60
-          ? "text-yellow-400"
+          ? "text-warning"
           : "text-muted-foreground";
 
   return (
@@ -99,9 +99,9 @@ export default function ClaudeModeSwitcher({ sessionId }: ClaudeModeSwitcherProp
               className={cn(
                 "h-full rounded-full transition-all",
                 contextPct !== null && contextPct >= 80
-                  ? "bg-red-400"
+                  ? "bg-error"
                   : contextPct !== null && contextPct >= 60
-                    ? "bg-yellow-400"
+                    ? "bg-warning"
                     : "bg-accent",
               )}
               style={{ width: `${contextPct ?? 0}%` }}
