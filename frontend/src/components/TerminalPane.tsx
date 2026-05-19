@@ -22,6 +22,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
   const fitRef = useRef<FitAddon | null>(null);
   const serializeRef = useRef<SerializeAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
+  const webglRef = useRef<WebglAddon | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
@@ -144,6 +145,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => webgl.dispose());
       term.loadAddon(webgl);
+      webglRef.current = webgl;
     } catch {
       // WebGL not available, DOM renderer is fine
     }
@@ -327,7 +329,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
             placeholder="Search..."
             className="w-48 bg-transparent text-xs text-white outline-none placeholder:text-white/30"
           />
-          {searchResult && <span className="text-[10px] text-red-400">{searchResult}</span>}
+          {searchResult && <span className="text-[10px] text-error">{searchResult}</span>}
           <button
             type="button"
             onClick={() => doSearch(searchQuery, "prev")}
@@ -380,6 +382,14 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
             termRef.current?.clear();
             setCtxMenu(null);
           }}
+          onRedraw={() => {
+            // Fixes WebGL texture atlas corruption (overlapping/melted glyphs)
+            // without clearing scrollback.
+            webglRef.current?.clearTextureAtlas?.();
+            const t = termRef.current;
+            if (t) t.refresh(0, t.rows - 1);
+            setCtxMenu(null);
+          }}
         />
       )}
     </div>
@@ -397,6 +407,7 @@ interface CtxMenuProps {
   onPaste: () => void;
   onSelectAll: () => void;
   onClear: () => void;
+  onRedraw: () => void;
 }
 
 function ContextMenu({
@@ -408,6 +419,7 @@ function ContextMenu({
   onPaste,
   onSelectAll,
   onClear,
+  onRedraw,
 }: CtxMenuProps) {
   const items: {
     label: string;
@@ -421,6 +433,7 @@ function ContextMenu({
     { label: "Paste", shortcut: "⌘V", action: onPaste },
     { label: "---", action: () => {}, separator: true },
     { label: "Select All", shortcut: "⌘A", action: onSelectAll },
+    { label: "Redraw Terminal", action: onRedraw },
     { label: "Clear Terminal", action: onClear },
   ];
 
