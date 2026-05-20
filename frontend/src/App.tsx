@@ -25,6 +25,7 @@ import { useNotifications } from "./hooks/useNotifications";
 import { useOverlay } from "./hooks/useOverlay";
 import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionActivity } from "./hooks/useSessionActivity";
+import { useSessionBranches } from "./hooks/useSessionBranches";
 import { useSessionContext } from "./hooks/useSessionContext";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useSubagents } from "./hooks/useSubagents";
@@ -59,6 +60,7 @@ export default function App() {
 
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
   const sessionStates = useSessionActivity(connectedIds);
+  const sessionBranches = useSessionBranches(tabs.map((t) => t.directory));
   const { prs, loading, refresh } = useGitHub();
   const visiblePRCount = prs.filter((p) => !hiddenPRs.has(`${p.repo}#${p.number}`)).length;
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -170,6 +172,7 @@ export default function App() {
               sessions={tabs}
               activeSessionId={activeTabId}
               sessionStates={sessionStates}
+              sessionBranches={sessionBranches}
               onSessionSelect={switchTab}
               onNewSession={() => setShowNewSession(true)}
               onDeleteSession={closeTab}
@@ -292,6 +295,10 @@ export default function App() {
               onRefreshContext={refreshContext}
               onInjectCommand={handleInjectCommand}
               hasActiveSession={!!activeTabId}
+              activeDirectory={activeTab?.directory ?? null}
+              onOpenWorktreeSession={(name, directory) => {
+                createTab(name, directory);
+              }}
               onFileClick={(path, staged) => {
                 if (activeTab?.directory) {
                   codeViewer.openDiff(activeTab.directory, path, staged);

@@ -700,6 +700,31 @@ export namespace main {
 	        this.url = source["url"];
 	    }
 	}
+	
+	export class Worktree {
+	    path: string;
+	    branch: string;
+	    headSha: string;
+	    isMain: boolean;
+	    isDetached: boolean;
+	    hasUncommittedChanges: boolean;
+	    prunable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Worktree(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.branch = source["branch"];
+	        this.headSha = source["headSha"];
+	        this.isMain = source["isMain"];
+	        this.isDetached = source["isDetached"];
+	        this.hasUncommittedChanges = source["hasUncommittedChanges"];
+	        this.prunable = source["prunable"];
+	    }
+	}
 
 }
 

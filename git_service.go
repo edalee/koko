@@ -369,3 +369,161 @@ func (gs *GitService) mergeChanges(committed, uncommitted []FileChange) []FileCh
 	}
 	return result
 }
+
+// ListWorktrees returns all worktrees for the repository containing dir.
+// dir may be any path inside the repo (main worktree or any worktree).
+func (gs *GitService) ListWorktrees(dir string) ([]Worktree, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	out, err := gs.runGit(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	worktrees := parseWorktreePorcelain(out)
+	// Annotate each worktree with HasUncommittedChanges
+	for i := range worktrees {
+		if worktrees[i].Prunable {
+			continue
+		}
+		status, err := gs.runGit(worktrees[i].Path, "status", "--porcelain")
+		if err == nil && strings.TrimSpace(status) != "" {
+			worktrees[i].HasUncommittedChanges = true
+		}
+	}
+	return worktrees, nil
+}
+
+// CreateWorktree creates a new worktree at path checked out to branch.
+// If createBranch is true, branch is created as a new branch from HEAD.
+// repoDir must be any path inside the repository.
+func (gs *GitService) CreateWorktree(repoDir, path, branch string, createBranch bool) (Worktree, error) {
+	if repoDir == "" || path == "" {
+		return Worktree{}, exec.ErrNotFound
+	}
+	args := []string{"worktree", "add"}
+	if createBranch {
+		args = append(args, "-b", branch, path)
+	} else {
+		args = append(args, path, branch)
+	}
+	if _, err := gs.runGit(repoDir, args...); err != nil {
+		return Worktree{}, err
+	}
+	// Look up the new worktree to return its full state
+	worktrees, err := gs.ListWorktrees(repoDir)
+	if err != nil {
+		return Worktree{}, err
+	}
+	absPath, _ := filepath.Abs(path)
+	for _, wt := range worktrees {
+		if wt.Path == absPath || wt.Path == path {
+			return wt, nil
+		}
+	}
+	// Fallback: synthesise from inputs
+	return Worktree{Path: path, Branch: branch}, nil
+}
+
+// RemoveWorktree removes a worktree at path. force=true passes --force,
+// which is needed when the worktree has uncommitted changes or is locked.
+// The main worktree cannot be removed.
+func (gs *GitService) RemoveWorktree(path string, force bool) error {
+	if path == "" {
+		return exec.ErrNotFound
+	}
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, path)
+	// Run from inside the worktree itself (or its parent if dir is gone)
+	runDir := path
+	if _, err := os.Stat(path); err != nil {
+		runDir = filepath.Dir(path)
+	}
+	_, err := gs.runGit(runDir, args...)
+	return err
+}
+
+// PruneWorktrees runs `git worktree prune` to remove administrative
+// records for worktrees whose directories no longer exist.
+func (gs *GitService) PruneWorktrees(dir string) error {
+	if dir == "" {
+		return exec.ErrNotFound
+	}
+	_, err := gs.runGit(dir, "worktree", "prune")
+	return err
+}
+
+// GetWorktreeForDir resolves any directory inside a repo to its worktree info.
+func (gs *GitService) GetWorktreeForDir(dir string) (Worktree, error) {
+	if dir == "" {
+		return Worktree{}, exec.ErrNotFound
+	}
+	// `git rev-parse --show-toplevel` gives the worktree root
+	out, err := gs.runGit(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return Worktree{}, err
+	}
+	root := strings.TrimSpace(out)
+	worktrees, err := gs.ListWorktrees(root)
+	if err != nil {
+		return Worktree{}, err
+	}
+	for _, wt := range worktrees {
+		if wt.Path == root {
+			return wt, nil
+		}
+	}
+	return Worktree{Path: root}, nil
+}
+
+// parseWorktreePorcelain parses the output of `git worktree list --porcelain`.
+// Records are separated by blank lines. Each record has lines like:
+//
+//	worktree /path/to/main
+//	HEAD 1234abcd...
+//	branch refs/heads/main
+//
+// detached worktrees have `detached` instead of `branch`. Missing dirs
+// have `prunable <reason>`.
+func parseWorktreePorcelain(output string) []Worktree {
+	var worktrees []Worktree
+	var cur Worktree
+	hasAny := false
+	flush := func() {
+		if !hasAny {
+			return
+		}
+		worktrees = append(worktrees, cur)
+		cur = Worktree{}
+		hasAny = false
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" {
+			flush()
+			continue
+		}
+		hasAny = true
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			cur.Path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "HEAD "):
+			cur.HeadSHA = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch "):
+			ref := strings.TrimPrefix(line, "branch ")
+			cur.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		case line == "detached":
+			cur.IsDetached = true
+		case strings.HasPrefix(line, "prunable"):
+			cur.Prunable = true
+		}
+	}
+	flush()
+	// The first entry from `git worktree list` is always the main worktree
+	if len(worktrees) > 0 {
+		worktrees[0].IsMain = true
+	}
+	return worktrees
+}

@@ -1,7 +1,17 @@
-import { Clock, Folder, FolderOpen, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Clock,
+  Folder,
+  FolderOpen,
+  GitBranch,
+  Loader2,
+  Plus,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PickDirectory } from "../../wailsjs/go/main/App";
 import { GetSessions } from "../../wailsjs/go/main/ConfigService";
+import { CreateWorktree, GetBranchName } from "../../wailsjs/go/main/GitService";
 import type { SessionHistoryEntry } from "../types";
 
 function timeAgo(ts: number): string {
@@ -36,6 +46,20 @@ function dirBasename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function dirParent(path: string): string {
+  const stripped = path.replace(/\/+$/, "");
+  const idx = stripped.lastIndexOf("/");
+  return idx === -1 ? stripped : stripped.slice(0, idx);
+}
+
+function branchSlug(branch: string): string {
+  return branch.replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase();
+}
+
+function randomSlug(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
 export default function NewSessionDialog({
   open,
   onClose,
@@ -48,6 +72,20 @@ export default function NewSessionDialog({
   const [directory, setDirectory] = useState("");
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
 
+  // Worktree state
+  const [useWorktree, setUseWorktree] = useState(false);
+  const [worktreeBranch, setWorktreeBranch] = useState("");
+  const [worktreePath, setWorktreePath] = useState("");
+  const [createNewBranch, setCreateNewBranch] = useState(true);
+  const [currentBranch, setCurrentBranch] = useState<string | null>(null);
+  const [creatingWorktree, setCreatingWorktree] = useState(false);
+  const [worktreeError, setWorktreeError] = useState<string | null>(null);
+
+  const dirCollides = useMemo(
+    () => directory !== "" && activeDirs.includes(directory),
+    [directory, activeDirs],
+  );
+
   // Load recent dirs from Go backend
   useEffect(() => {
     if (open) {
@@ -56,6 +94,37 @@ export default function NewSessionDialog({
         .catch(() => {});
     }
   }, [open]);
+
+  // When a directory is picked, look up its current branch and seed worktree
+  // defaults. If the dir collides with another active session, auto-enable
+  // the worktree toggle.
+  useEffect(() => {
+    if (!directory) {
+      setCurrentBranch(null);
+      setWorktreeBranch("");
+      setWorktreePath("");
+      setUseWorktree(false);
+      setWorktreeError(null);
+      return;
+    }
+    setUseWorktree(activeDirs.includes(directory));
+    GetBranchName(directory)
+      .then((branch) => {
+        setCurrentBranch(branch);
+        const base = branchSlug(branch || "wt");
+        const suffix = randomSlug();
+        const newBranch = `${base}-${suffix}`;
+        setWorktreeBranch(newBranch);
+        setWorktreePath(`${dirParent(directory)}/${dirBasename(directory)}-${suffix}`);
+      })
+      .catch(() => {
+        setCurrentBranch(null);
+        const suffix = randomSlug();
+        setWorktreeBranch(`wt-${suffix}`);
+        setWorktreePath(`${dirParent(directory)}/${dirBasename(directory)}-${suffix}`);
+      });
+  }, [directory, activeDirs]);
+
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -80,24 +149,52 @@ export default function NewSessionDialog({
     if (dir) setDirectory(dir);
   }, []);
 
-  const handleCreate = useCallback(() => {
+  const handleCreate = useCallback(async () => {
     if (!directory) return;
-    const sessionName = name.trim() || dirBasename(directory);
-    onCreate(sessionName, directory);
-  }, [name, directory, onCreate]);
+    setWorktreeError(null);
+
+    let finalDir = directory;
+    if (useWorktree) {
+      if (!worktreeBranch.trim() || !worktreePath.trim()) {
+        setWorktreeError("Branch and worktree path are required");
+        return;
+      }
+      setCreatingWorktree(true);
+      try {
+        const wt = await CreateWorktree(
+          directory,
+          worktreePath.trim(),
+          worktreeBranch.trim(),
+          createNewBranch,
+        );
+        finalDir = wt.path || worktreePath.trim();
+      } catch (err) {
+        setCreatingWorktree(false);
+        setWorktreeError(
+          err instanceof Error ? err.message : String(err ?? "Failed to create worktree"),
+        );
+        return;
+      }
+      setCreatingWorktree(false);
+    }
+
+    const sessionName =
+      name.trim() || (useWorktree ? branchSlug(worktreeBranch) : dirBasename(finalDir));
+    onCreate(sessionName, finalDir);
+  }, [name, directory, useWorktree, worktreeBranch, worktreePath, createNewBranch, onCreate]);
 
   useEffect(() => {
     if (state !== "open") return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         onClose();
-      } else if (e.key === "Enter" && directory) {
+      } else if (e.key === "Enter" && directory && !creatingWorktree) {
         handleCreate();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state, directory, onClose, handleCreate]);
+  }, [state, directory, creatingWorktree, onClose, handleCreate]);
 
   if (state === "closed") return null;
 
@@ -184,6 +281,85 @@ export default function NewSessionDialog({
               </button>
             )}
 
+            {/* Worktree section — shown once a directory is selected */}
+            {directory && (
+              <div className="mt-3 rounded-md border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+                {dirCollides && (
+                  <div className="flex items-start gap-2 px-3 py-2 bg-warning/8 border-b border-warning/15 text-[11px] text-warning">
+                    <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Another session is using this directory. Sessions on the same directory can
+                      pollute each other&apos;s files, builds, and git state.
+                    </span>
+                  </div>
+                )}
+                <label className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none hover:bg-white/[0.03] transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={useWorktree}
+                    onChange={(e) => setUseWorktree(e.target.checked)}
+                    className="accent-accent"
+                  />
+                  <GitBranch className="size-3.5 text-muted-foreground" />
+                  <span className="text-[12px] text-white/90">Create as a git worktree</span>
+                  {currentBranch && (
+                    <span className="ml-auto text-[10px] text-tertiary">from {currentBranch}</span>
+                  )}
+                </label>
+
+                {useWorktree && (
+                  <div className="px-3 pb-3 space-y-2.5 border-t border-white/[0.06] pt-2.5">
+                    <div className="space-y-1">
+                      <label
+                        className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider"
+                        htmlFor="worktree-branch"
+                      >
+                        Branch
+                      </label>
+                      <input
+                        id="worktree-branch"
+                        value={worktreeBranch}
+                        onChange={(e) => setWorktreeBranch(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-[12px] font-mono bg-white/[0.04] border border-white/[0.06] rounded text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
+                      />
+                      <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={createNewBranch}
+                          onChange={(e) => setCreateNewBranch(e.target.checked)}
+                          className="accent-accent"
+                        />
+                        Create as new branch
+                        {!createNewBranch && (
+                          <span className="text-[10px] text-tertiary">(checkout existing)</span>
+                        )}
+                      </label>
+                    </div>
+                    <div className="space-y-1">
+                      <label
+                        className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider"
+                        htmlFor="worktree-path"
+                      >
+                        Worktree Path
+                      </label>
+                      <input
+                        id="worktree-path"
+                        value={worktreePath}
+                        onChange={(e) => setWorktreePath(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-[11px] font-mono bg-white/[0.04] border border-white/[0.06] rounded text-white/80 placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
+                      />
+                    </div>
+                    {worktreeError && (
+                      <div className="flex items-start gap-2 px-2 py-1.5 rounded bg-error/10 border border-error/20 text-[11px] text-error">
+                        <AlertTriangle className="size-3 shrink-0 mt-0.5" />
+                        <span className="break-words">{worktreeError}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Session history / Recent directories */}
             {!directory && (
               <div className="space-y-1 pt-1">
@@ -257,15 +433,20 @@ export default function NewSessionDialog({
           <button
             type="button"
             onClick={handleCreate}
-            disabled={!directory}
-            className="px-4 py-2 text-sm rounded-md font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed text-white relative overflow-hidden border-2 border-transparent"
+            disabled={!directory || creatingWorktree}
+            className="px-4 py-2 text-sm rounded-md font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed text-white relative overflow-hidden border-2 border-transparent flex items-center gap-2"
             style={{
               background: directory
                 ? "linear-gradient(rgba(255,255,255,0.08), rgba(255,255,255,0.08)) padding-box, linear-gradient(to right, #1FF2AB, #24A965) border-box"
                 : undefined,
             }}
           >
-            Create Session
+            {creatingWorktree && <Loader2 className="size-3.5 animate-spin" />}
+            {creatingWorktree
+              ? "Creating worktree..."
+              : useWorktree
+                ? "Create Worktree + Session"
+                : "Create Session"}
           </button>
         </div>
       </div>

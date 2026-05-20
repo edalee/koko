@@ -167,6 +167,17 @@ type WorkflowRun struct {
 	HTMLURL    string `json:"htmlUrl"`
 }
 
+// Worktree represents a git worktree.
+type Worktree struct {
+	Path                  string `json:"path"`
+	Branch                string `json:"branch"`     // empty if detached
+	HeadSHA               string `json:"headSha"`
+	IsMain                bool   `json:"isMain"`
+	IsDetached            bool   `json:"isDetached"`
+	HasUncommittedChanges bool   `json:"hasUncommittedChanges"`
+	Prunable              bool   `json:"prunable"` // worktree dir is missing
+}
+
 // BranchCI represents CI status for a git branch.
 type BranchCI struct {
 	Branch string        `json:"branch"`

@@ -13,6 +13,7 @@ import {
   FileMinus,
   FilePlus,
   FileText,
+  GitBranch,
   GitPullRequest,
   Loader2,
   Plug,
@@ -30,8 +31,9 @@ import type { SubagentProcess } from "../hooks/useSubagents";
 import type { BranchCI, GitHubPR, WorkflowRun } from "../types";
 import NotificationBadge from "./NotificationBadge";
 import NotificationsPanel from "./NotificationsPanel";
+import WorktreesModule from "./WorktreesModule";
 
-type SidebarModule = "files" | "context" | "notifications";
+type SidebarModule = "files" | "context" | "notifications" | "worktrees";
 
 interface RightSidebarProps {
   isCollapsed: boolean;
@@ -51,6 +53,8 @@ interface RightSidebarProps {
   onRefreshContext: () => void;
   onInjectCommand: (command: string) => void;
   hasActiveSession: boolean;
+  activeDirectory: string | null;
+  onOpenWorktreeSession: (name: string, directory: string) => void;
   onFileClick?: (path: string, staged: boolean) => void;
   onFileView?: (path: string) => void;
   prs: GitHubPR[];
@@ -280,6 +284,8 @@ export default function RightSidebar({
   onRefreshContext,
   onInjectCommand,
   hasActiveSession,
+  activeDirectory,
+  onOpenWorktreeSession,
   onFileClick,
   onFileView,
   prs,
@@ -341,6 +347,18 @@ export default function RightSidebar({
           {agentCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-accent" />
           )}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleModuleClick("worktrees")}
+          className={`p-1.5 rounded-md transition-colors ${
+            activeModule === "worktrees"
+              ? "text-accent bg-white/[0.08]"
+              : "text-muted-foreground hover:text-white hover:bg-white/5"
+          }`}
+          title="Worktrees"
+        >
+          <GitBranch className="size-4" />
         </button>
 
         <div className="w-5 border-t border-white/[0.06] my-1" />
@@ -449,6 +467,12 @@ export default function RightSidebar({
                 )}
               </div>
             </div>
+          )}
+          {activeModule === "worktrees" && (
+            <WorktreesModule
+              activeDirectory={activeDirectory}
+              onOpenSession={onOpenWorktreeSession}
+            />
           )}
           {activeModule === "notifications" && (
             <div className="h-full flex flex-col">

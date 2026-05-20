@@ -1,8 +1,10 @@
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Folder,
+  GitBranch,
   Plus,
   Search,
   SquareTerminal,
@@ -21,6 +23,7 @@ interface SessionSidebarProps {
   sessions: SessionTab[];
   activeSessionId: string | null;
   sessionStates: Map<string, SessionState>;
+  sessionBranches?: Map<string, string>;
   onSessionSelect: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
@@ -39,6 +42,7 @@ export default function SessionSidebar({
   sessions,
   activeSessionId,
   sessionStates,
+  sessionBranches,
   onSessionSelect,
   onNewSession,
   onDeleteSession,
@@ -200,6 +204,10 @@ export default function SessionSidebar({
                         const shortcutIdx = flatIndex.get(session.id);
                         const shortcutKey =
                           shortcutIdx !== undefined && shortcutIdx < 9 ? shortcutIdx + 1 : null;
+                        const branch = sessionBranches?.get(session.directory);
+                        // Collision = >1 connected session sharing the same dir
+                        const connectedInGroup = group.sessions.filter((s) => s.connected).length;
+                        const hasCollision = connectedInGroup > 1 && session.connected;
 
                         return (
                           // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: session item
@@ -243,21 +251,44 @@ export default function SessionSidebar({
                                 />
                               ) : (
                                 // biome-ignore lint/a11y/noStaticElementInteractions: double-click rename
-                                <span
-                                  className={`text-sm truncate block ${
-                                    state === "disconnected" ? "text-white/50" : "text-white"
-                                  }`}
+                                <div
+                                  className="flex items-center gap-1.5 min-w-0"
                                   onDoubleClick={(e) => {
                                     e.stopPropagation();
                                     startRename(session);
                                   }}
                                 >
-                                  {session.name}
-                                </span>
+                                  <span
+                                    className={`text-sm truncate ${
+                                      state === "disconnected" ? "text-white/50" : "text-white"
+                                    }`}
+                                  >
+                                    {session.name}
+                                  </span>
+                                  {hasCollision && (
+                                    <span
+                                      className="shrink-0 text-warning"
+                                      title="Another session is using this directory — consider a worktree"
+                                    >
+                                      <AlertTriangle className="size-3" />
+                                    </span>
+                                  )}
+                                </div>
                               )}
-                              {!session.connected && (
-                                <span className="text-[10px] text-tertiary">Click to resume</span>
-                              )}
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {!session.connected && (
+                                  <span className="text-[10px] text-tertiary">Click to resume</span>
+                                )}
+                                {branch && (
+                                  <span
+                                    className="flex items-center gap-1 text-[10px] text-tertiary truncate"
+                                    title={`Branch: ${branch}`}
+                                  >
+                                    <GitBranch className="size-2.5 shrink-0" />
+                                    <span className="truncate">{branch}</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Actions */}
