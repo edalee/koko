@@ -162,6 +162,43 @@ func (cs *ConfigService) ClearHiddenPRs() (int, error) {
 	return count, cs.SaveConfig(cfg)
 }
 
+// SetTrackedRepos persists the list of GitHub repos to track for PRs.
+// Empty list = "use the defaults". Entries may be "owner/repo" or just
+// "repo" (treated as epidemicsound/repo for backward compat).
+func (cs *ConfigService) SetTrackedRepos(repos []string) error {
+	cs.mu.Lock()
+	// Normalise: trim, drop empties, dedupe
+	seen := make(map[string]bool)
+	normalised := make([]string, 0, len(repos))
+	for _, r := range repos {
+		r = strings.TrimSpace(r)
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		normalised = append(normalised, r)
+	}
+	cs.config.GitHubRepos = normalised
+	cfg := cs.config
+	cs.mu.Unlock()
+	return cs.SaveConfig(cfg)
+}
+
+// GetTrackedRepos returns the configured repo list, or the built-in
+// defaults if the user hasn't customised it.
+func (cs *ConfigService) GetTrackedRepos() []string {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	if len(cs.config.GitHubRepos) > 0 {
+		out := make([]string, len(cs.config.GitHubRepos))
+		copy(out, cs.config.GitHubRepos)
+		return out
+	}
+	out := make([]string, len(defaultTrackedRepos))
+	copy(out, defaultTrackedRepos)
+	return out
+}
+
 // GetHiddenPRs returns the set of hidden PR keys.
 func (cs *ConfigService) GetHiddenPRs() map[string]bool {
 	cs.mu.Lock()

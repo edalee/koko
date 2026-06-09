@@ -340,6 +340,7 @@ export default function App() {
           <SettingsPanel
             safeWorkingConfig={safeWorkingConfig}
             onSafeWorkingChange={updateSafeWorking}
+            onReposChanged={refresh}
           />
         </OverlayPage>
 

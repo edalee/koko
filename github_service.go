@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-var trackedRepos = []string{
+// defaultTrackedRepos is the initial PR-watch list when the user hasn't
+// customised it via Settings. Entries may be "owner/repo" or just "repo"
+// (bare names resolve to epidemicsound/<repo>).
+var defaultTrackedRepos = []string{
 	"conductor-bot",
 	"zufolo",
 	"roneat",
@@ -26,10 +29,22 @@ var trackedRepos = []string{
 	"drm-claude-plugins",
 }
 
-type GitHubService struct{}
+type GitHubService struct {
+	config *ConfigService
+}
 
-func NewGitHubService() *GitHubService {
-	return &GitHubService{}
+func NewGitHubService(config *ConfigService) *GitHubService {
+	return &GitHubService{config: config}
+}
+
+// resolveRepo normalises a tracked-repo entry to "owner/repo". Bare names
+// (no slash) are treated as belonging to the epidemicsound org for
+// backward compatibility.
+func resolveRepo(entry string) string {
+	if strings.Contains(entry, "/") {
+		return entry
+	}
+	return "epidemicsound/" + entry
 }
 
 type ghPRJSON struct {
@@ -642,10 +657,21 @@ func (g *GitHubService) FetchBranchCI(repoSlug string, branch string) (BranchCI,
 }
 
 func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
+	repos := defaultTrackedRepos
+	if g.config != nil {
+		repos = g.config.GetTrackedRepos()
+	}
 	var allPRs []GitHubPR
-	for _, repo := range trackedRepos {
+	for _, entry := range repos {
+		fullRepo := resolveRepo(entry)
+		// Display name = short repo (last segment) so existing PR-hide
+		// keys ("repo#number") continue to work.
+		displayRepo := fullRepo
+		if idx := strings.LastIndex(fullRepo, "/"); idx >= 0 {
+			displayRepo = fullRepo[idx+1:]
+		}
 		out, err := exec.Command("gh", "pr", "list",
-			"--repo", "epidemicsound/"+repo,
+			"--repo", fullRepo,
 			"--json", "number,title,author,reviewDecision,url,body,additions,deletions,changedFiles,headRefName,baseRefName,createdAt,updatedAt,mergeable,mergeStateStatus,isDraft,labels,statusCheckRollup,assignees",
 			"--limit", "10",
 		).Output()
@@ -674,7 +700,7 @@ func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
 				})
 			}
 			allPRs = append(allPRs, GitHubPR{
-				Repo:             repo,
+				Repo:             displayRepo,
 				Number:           pr.Number,
 				Title:            pr.Title,
 				Author:           pr.Author.Login,

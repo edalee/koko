@@ -22,6 +22,10 @@ export function GetSessions() {
   return window['go']['main']['ConfigService']['GetSessions']();
 }
 
+export function GetTrackedRepos() {
+  return window['go']['main']['ConfigService']['GetTrackedRepos']();
+}
+
 export function HidePR(arg1, arg2) {
   return window['go']['main']['ConfigService']['HidePR'](arg1, arg2);
 }
@@ -32,6 +36,10 @@ export function SaveConfig(arg1) {
 
 export function SaveSessions(arg1) {
   return window['go']['main']['ConfigService']['SaveSessions'](arg1);
+}
+
+export function SetTrackedRepos(arg1) {
+  return window['go']['main']['ConfigService']['SetTrackedRepos'](arg1);
 }
 
 export function UnhidePR(arg1, arg2) {

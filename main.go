@@ -32,9 +32,9 @@ func main() {
 	}
 
 	tm := NewTerminalManager()
-	gh := NewGitHubService()
 	git := NewGitService()
 	cfg := NewConfigService()
+	gh := NewGitHubService(cfg)
 	pm := NewProcessMonitor()
 	claude := NewClaudeService()
 	api := NewAPIServer(tm, git, cfg)
