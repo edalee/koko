@@ -8,10 +8,22 @@ import (
 )
 
 var trackedRepos = []string{
-	"drumstick2",
-	"drumstick-ui",
-	"trigon",
 	"conductor-bot",
+	"zufolo",
+	"roneat",
+	"stylophone",
+	"mellotron",
+	"youtube-data-service",
+	"centralised-licensing-service",
+	"licensing-api",
+	"bagpipe",
+	"windchime",
+	"hackweek-video",
+	"claim-worker",
+	"tanbur",
+	"theremin",
+	"aentidote-portal",
+	"drm-claude-plugins",
 }
 
 type GitHubService struct{}
