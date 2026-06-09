@@ -102,7 +102,9 @@ func (gs *GitService) findBaseBranch(dir string) (string, error) {
 }
 
 func (gs *GitService) getUncommittedChanges(dir string) ([]FileChange, error) {
-	out, err := gs.runGit(dir, "status", "--porcelain")
+	// -uall: expand untracked directories into individual files so they
+	// show up as proper "added" entries with real basenames.
+	out, err := gs.runGit(dir, "status", "--porcelain", "-uall")
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +154,12 @@ func (gs *GitService) parseStatusOutput(output string) []FileChange {
 		x := line[0] // staged (index) status
 		y := line[1] // unstaged (working tree) status
 		path := strings.TrimSpace(line[3:])
+		// Defensive: collapse a trailing slash (would render as an empty
+		// basename) — `-uall` already prevents this for untracked dirs.
+		path = strings.TrimRight(path, "/")
+		if path == "" {
+			continue
+		}
 
 		// Untracked files
 		if x == '?' {
@@ -249,18 +257,46 @@ func (gs *GitService) GetFileDiff(dir, path string, staged bool) (FileDiffData, 
 		Language:    lang,
 	}
 
-	// Get the unified diff hunks
+	// Get the unified diff hunks.
+	//
+	// Strategy:
+	//   1) try the working-tree (or index, if staged) diff
+	//   2) if empty, the file was committed on this branch — diff against
+	//      the merge-base of the default branch
+	//   3) if still empty, the file is genuinely new and untracked —
+	//      synthesise a diff via `git diff --no-index /dev/null <path>`
 	var hunks string
-	var err error
+	var diffOrigin string // "worktree" | "base" | "untracked"
 	if staged {
-		hunks, err = gs.runGit(dir, "diff", "--cached", "--", path)
+		hunks, _ = gs.runGit(dir, "diff", "--cached", "--", path)
+		diffOrigin = "worktree"
 	} else {
-		hunks, err = gs.runGit(dir, "diff", "--", path)
+		hunks, _ = gs.runGit(dir, "diff", "--", path)
+		diffOrigin = "worktree"
 	}
-	if err != nil {
-		// Might be a new untracked file — no diff available
-		hunks = ""
+
+	if strings.TrimSpace(hunks) == "" {
+		if base, err := gs.findBaseBranch(dir); err == nil {
+			if mb, err := gs.runGit(dir, "merge-base", base, "HEAD"); err == nil {
+				mbSha := strings.TrimSpace(mb)
+				if branchHunks, err := gs.runGit(dir, "diff", mbSha+"...HEAD", "--", path); err == nil && strings.TrimSpace(branchHunks) != "" {
+					hunks = branchHunks
+					diffOrigin = "base"
+				}
+			}
+		}
 	}
+
+	if strings.TrimSpace(hunks) == "" {
+		// Untracked: --no-index exits 1 when files differ, so ignore the
+		// error. /dev/null gives an "all added" diff vs the working file.
+		fullPath := filepath.Join(dir, path)
+		if out, _ := exec.Command("git", "-C", dir, "diff", "--no-index", "--", "/dev/null", fullPath).Output(); len(out) > 0 {
+			hunks = string(out)
+			diffOrigin = "untracked"
+		}
+	}
+
 	result.Hunks = hunks
 
 	// Count additions/deletions from hunks
@@ -272,29 +308,30 @@ func (gs *GitService) GetFileDiff(dir, path string, staged bool) (FileDiffData, 
 		}
 	}
 
-	// Get old content
-	if staged {
-		// For staged files, old content is from HEAD
-		old, err := gs.runGit(dir, "show", "HEAD:"+path)
-		if err != nil {
-			// New file — no HEAD version
-			result.OldContent = ""
-		} else {
-			result.OldContent = old
+	// Get old content. Source depends on which diff we ended up using.
+	switch diffOrigin {
+	case "base":
+		if base, err := gs.findBaseBranch(dir); err == nil {
+			if mb, err := gs.runGit(dir, "merge-base", base, "HEAD"); err == nil {
+				if old, err := gs.runGit(dir, "show", strings.TrimSpace(mb)+":"+path); err == nil {
+					result.OldContent = old
+				}
+			}
 		}
-	} else {
-		// For unstaged files, old content is from the index
-		old, err := gs.runGit(dir, "show", ":"+path)
-		if err != nil {
-			// File might not be in the index (untracked), try HEAD
-			old, err = gs.runGit(dir, "show", "HEAD:"+path)
-			if err != nil {
-				result.OldContent = ""
-			} else {
+	case "untracked":
+		// Truly new — no prior content.
+		result.OldContent = ""
+	default: // "worktree"
+		if staged {
+			if old, err := gs.runGit(dir, "show", "HEAD:"+path); err == nil {
 				result.OldContent = old
 			}
 		} else {
-			result.OldContent = old
+			if old, err := gs.runGit(dir, "show", ":"+path); err == nil {
+				result.OldContent = old
+			} else if old, err := gs.runGit(dir, "show", "HEAD:"+path); err == nil {
+				result.OldContent = old
+			}
 		}
 	}
 
