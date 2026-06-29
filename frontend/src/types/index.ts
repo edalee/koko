@@ -99,6 +99,9 @@ export interface SessionTab {
   connected: boolean;
   claudeSessionId?: string;
   lastMsg?: string;
+  // Path of a worktree Koko created when spawning this session.
+  // Used on session close to offer to clean it up.
+  worktreePath?: string;
 }
 
 export interface SessionHistoryEntry {

@@ -39,6 +39,7 @@ export function useSessionTabs() {
               createdAt: number;
               claudeSessionId?: string;
               lastMsg?: string;
+              worktreePath?: string;
             }) => ({
               id: `saved-${++nextPlaceholder}`,
               slug: r.slug || "",
@@ -48,6 +49,7 @@ export function useSessionTabs() {
               connected: false,
               claudeSessionId: r.claudeSessionId || "",
               lastMsg: r.lastMsg || "",
+              worktreePath: r.worktreePath || undefined,
             }),
           );
 
@@ -88,6 +90,7 @@ export function useSessionTabs() {
         createdAt: t.createdAt,
         status: t.connected ? "active" : "disconnected",
         lastMsg: t.lastMsg || "",
+        worktreePath: t.worktreePath || "",
       })),
       ...historyRef.current.map((h) => ({
         slug: h.slug,
@@ -139,7 +142,7 @@ export function useSessionTabs() {
     [],
   );
 
-  const createTab = useCallback(async (name: string, directory: string) => {
+  const createTab = useCallback(async (name: string, directory: string, worktreePath?: string) => {
     const sessionId = await CreateSessionWithOpts({
       name,
       dir: directory,
@@ -155,6 +158,7 @@ export function useSessionTabs() {
       directory,
       createdAt: Date.now(),
       connected: true,
+      worktreePath,
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(sessionId);

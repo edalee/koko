@@ -16,6 +16,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import TerminalPane from "./components/TerminalPane";
 import Toolbar from "./components/Toolbar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
+import WorktreeRemovalDialog from "./components/WorktreeRemovalDialog";
 import { useCI } from "./hooks/useCI";
 import { useCodeViewer } from "./hooks/useCodeViewer";
 import { useFileChanges } from "./hooks/useFileChanges";
@@ -44,6 +45,11 @@ export default function App() {
   } = useSessionTabs();
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
+  const [pendingWorktreeClose, setPendingWorktreeClose] = useState<{
+    tabId: string;
+    worktreePath: string;
+    sessionName: string;
+  } | null>(null);
   const [showNewSession, setShowNewSession] = useState(false);
   const [quickTerminalTabs, setQuickTerminalTabs] = useState<Set<string>>(new Set());
   const [selectedPR, setSelectedPR] = useState<import("./types").GitHubPR | null>(null);
@@ -112,9 +118,27 @@ export default function App() {
     [tabs, switchTab],
   );
 
+  // When closing a session, intercept if Koko created a worktree for it
+  // and ask whether to clean up. Falls through to closeTab otherwise.
+  const requestCloseTab = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab?.worktreePath) {
+        setPendingWorktreeClose({
+          tabId,
+          worktreePath: tab.worktreePath,
+          sessionName: tab.name,
+        });
+        return;
+      }
+      closeTab(tabId);
+    },
+    [tabs, closeTab],
+  );
+
   const handleCloseActive = useCallback(() => {
-    if (activeTabId) closeTab(activeTabId);
-  }, [activeTabId, closeTab]);
+    if (activeTabId) requestCloseTab(activeTabId);
+  }, [activeTabId, requestCloseTab]);
 
   const showQuickTerminal = activeTabId ? quickTerminalTabs.has(activeTabId) : false;
 
@@ -175,7 +199,7 @@ export default function App() {
               sessionBranches={sessionBranches}
               onSessionSelect={switchTab}
               onNewSession={() => setShowNewSession(true)}
-              onDeleteSession={closeTab}
+              onDeleteSession={requestCloseTab}
               onRenameSession={renameTab}
               isCollapsed={isLeftSidebarCollapsed}
               onToggleCollapse={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
@@ -297,7 +321,9 @@ export default function App() {
               hasActiveSession={!!activeTabId}
               activeDirectory={activeTab?.directory ?? null}
               onOpenWorktreeSession={(name, directory) => {
-                createTab(name, directory);
+                // The Worktrees module only opens sessions in worktrees that
+                // already exist; mark them so close-time cleanup is offered.
+                createTab(name, directory, directory);
               }}
               onFileClick={(path, staged) => {
                 if (activeTab?.directory) {
@@ -371,12 +397,23 @@ export default function App() {
         <NewSessionDialog
           open={showNewSession}
           onClose={() => setShowNewSession(false)}
-          onCreate={(name, directory) => {
-            createTab(name, directory);
+          onCreate={(name, directory, worktreePath) => {
+            createTab(name, directory, worktreePath);
             setShowNewSession(false);
           }}
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
+        />
+
+        <WorktreeRemovalDialog
+          open={pendingWorktreeClose !== null}
+          worktreePath={pendingWorktreeClose?.worktreePath ?? ""}
+          sessionName={pendingWorktreeClose?.sessionName ?? ""}
+          onResolved={() => {
+            const tabId = pendingWorktreeClose?.tabId;
+            setPendingWorktreeClose(null);
+            if (tabId) closeTab(tabId);
+          }}
         />
 
         <PRDetailOverlay

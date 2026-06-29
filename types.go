@@ -17,8 +17,9 @@ type SessionRecord struct {
 	ClaudeSessionID string `json:"claudeSessionId,omitempty"` // UUID from Claude Code JSONL
 	CreatedAt       int64  `json:"createdAt"`
 	ClosedAt        int64  `json:"closedAt,omitempty"`
-	Status          string `json:"status"`          // "active", "disconnected", "closed"
+	Status          string `json:"status"`            // "active", "disconnected", "closed"
 	LastMsg         string `json:"lastMsg,omitempty"` // last assistant message snippet
+	WorktreePath    string `json:"worktreePath,omitempty"` // set when Koko created a worktree for this session
 }
 
 // SessionsData holds all persisted session state.

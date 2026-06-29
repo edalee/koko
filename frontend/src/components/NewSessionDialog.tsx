@@ -34,7 +34,7 @@ function shortenPath(path: string): string {
 interface NewSessionDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (name: string, directory: string) => void;
+  onCreate: (name: string, directory: string, worktreePath?: string) => void;
   history: SessionHistoryEntry[];
   activeDirs: string[];
 }
@@ -180,7 +180,7 @@ export default function NewSessionDialog({
 
     const sessionName =
       name.trim() || (useWorktree ? branchSlug(worktreeBranch) : dirBasename(finalDir));
-    onCreate(sessionName, finalDir);
+    onCreate(sessionName, finalDir, useWorktree ? finalDir : undefined);
   }, [name, directory, useWorktree, worktreeBranch, worktreePath, createNewBranch, onCreate]);
 
   useEffect(() => {
