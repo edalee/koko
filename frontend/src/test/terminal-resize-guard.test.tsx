@@ -112,14 +112,18 @@ describe("TerminalPane resize guard", () => {
     expect(Resize).not.toHaveBeenCalled();
   });
 
-  it("relies on ResizeObserver (not tab switch) to trigger fit()", async () => {
-    // With the scroll-pinning rewrite, fit() is no longer called on
-    // active prop change — ResizeObserver handles all resize detection.
+  it("re-fits on tab switch when the pane was resized while backgrounded", async () => {
+    // Inactive panes are hidden with `visibility`, so their box still resizes
+    // with the window and sidebars — but the ResizeObserver deliberately drops
+    // those events to avoid SIGWINCH-storming every background Claude TUI.
+    // Activation is where a backgrounded pane catches up; without it the tab
+    // keeps stale cols and the TUI renders cropped.
     const { rerender } = render(<TerminalPane sessionId="session-1" active={false} />);
 
     fitFn.mockClear();
     (Resize as ReturnType<typeof vi.fn>).mockClear();
 
+    // Container grew while this tab was hidden — xterm is still at 80x24.
     proposeDimensionsFn.mockReturnValue({ cols: 120, rows: 30 });
 
     rerender(<TerminalPane sessionId="session-1" active={true} />);
@@ -128,8 +132,8 @@ describe("TerminalPane resize guard", () => {
       await new Promise((r) => requestAnimationFrame(r));
     });
 
-    // fit() should NOT be called on tab switch — ResizeObserver handles it
-    expect(fitFn).not.toHaveBeenCalled();
+    expect(fitFn).toHaveBeenCalled();
+    expect(Resize).toHaveBeenCalledWith("session-1", 120, 30);
   });
 
   it("ResizeObserver skips fit when dimensions are unchanged", async () => {

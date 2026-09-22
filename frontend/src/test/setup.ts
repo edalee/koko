@@ -9,6 +9,7 @@ vi.mock("../../wailsjs/runtime/runtime", () => ({
   EventsEmit: vi.fn(),
   EventsOff: vi.fn(),
   EventsOffAll: vi.fn(),
+  BrowserOpenURL: vi.fn(),
 }));
 
 // Mock all Wails service bindings
