@@ -58,6 +58,8 @@ type session struct {
 	name            string
 	dir             string
 	claudeSessionID string // Claude Code session UUID for --resume
+	startedAt       time.Time
+	firstInputAt    time.Time // when the user first typed into this session
 	ptmx            *os.File
 	cmd             *exec.Cmd
 	mu              sync.Mutex
@@ -232,6 +234,20 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	cmd.Dir = opts.Dir
 	cmd.Env = env
 
+	// Snapshot Claude's session files before launch, so Claude cannot write its
+	// file in the gap between launch and the first look.
+	projectDir := claudeProjectDir(opts.Dir)
+	preExisting := listJSONL(projectDir)
+
+	// --continue resumes the newest conversation in the directory as of launch,
+	// so the newest file right now is the one it reuses. No need to watch.
+	continueUUID := ""
+	if opts.Resume && opts.ClaudeSessionID == "" {
+		continueUUID = mostRecentJSONL(projectDir)
+	}
+
+	startedAt := time.Now()
+
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: uint16(opts.Rows),
 		Cols: uint16(opts.Cols),
@@ -246,6 +262,7 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		name:            opts.Name,
 		dir:             opts.Dir,
 		claudeSessionID: opts.ClaudeSessionID,
+		startedAt:       startedAt,
 		ptmx:            ptmx,
 		cmd:             cmd,
 		done:            make(chan struct{}),
@@ -257,9 +274,13 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	tm.sessions[id] = s
 	tm.mu.Unlock()
 
-	// Capture Claude session UUID in background
-	if !opts.Resume || opts.ClaudeSessionID == "" {
-		go tm.detectClaudeSessionID(s)
+	// Capture the Claude session UUID, unless the caller already gave us one.
+	if opts.ClaudeSessionID == "" {
+		if continueUUID != "" {
+			tm.setClaudeSessionID(s, continueUUID, "continue")
+		} else {
+			go tm.detectClaudeSessionID(s, projectDir, preExisting)
+		}
 	}
 
 	go tm.readLoop(s)
@@ -267,79 +288,184 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	return id, nil
 }
 
-// detectClaudeSessionID watches the Claude projects dir for the session's .jsonl
-// file and stores the UUID (filename) on the session.
-//
-// Strategy: first look for a new file that wasn't there at startup. If none
-// appears within 30s, fall back to the most recently modified .jsonl file.
-// This handles both fresh sessions (new file) and --continue sessions (reused file).
-func (tm *TerminalManager) detectClaudeSessionID(s *session) {
+// claudeKeyReplacer maps a working directory to Claude Code's project key.
+// Claude replaces both "/" and "." with "-", so /Users/e/.claude/plugins
+// becomes -Users-e--claude-plugins. Handling only "/" names a directory that
+// never exists for any path with a dot in it.
+var claudeKeyReplacer = strings.NewReplacer("/", "-", ".", "-")
+
+// claudeProjectDir returns the directory where Claude Code stores session
+// files for a working directory, or "" if the home directory is unknown.
+func claudeProjectDir(dir string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "projects", claudeKeyReplacer.Replace(dir))
+}
+
+// listJSONL returns the set of .jsonl filenames in dir. A missing directory
+// gives an empty set, because Claude creates it on the first message.
+func listJSONL(dir string) map[string]bool {
+	found := make(map[string]bool)
+	if dir == "" {
+		return found
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return found
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".jsonl") {
+			found[e.Name()] = true
+		}
+	}
+	return found
+}
+
+// captureWindow is how long after the first keystroke we keep looking for
+// Claude's session file. Claude writes it on the first message, so a couple of
+// minutes is ample. The bound matters: without it an idle tab would later claim
+// a file written by a plain `claude` run in the same directory.
+const captureWindow = 2 * time.Minute
+
+// detectClaudeSessionID watches for the .jsonl file Claude writes for this
+// session and records its UUID, which is the filename.
+//
+// Claude writes the file on the first message, not at launch, so waiting on a
+// launch timer missed it. Instead this starts looking once the user types, and
+// gives up captureWindow later.
+//
+// A file counts only if it is new since launch and no other live session holds
+// it. If another session in the same directory has also been typed into and is
+// still unidentified, we cannot tell whose file appeared, so we claim nothing.
+// That leaves both without a UUID, which the session picker can resolve. It is
+// the safe way to fail: a wrong UUID silently resumes someone else's
+// conversation.
+func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, preExisting map[string]bool) {
+	if projectDir == "" {
 		return
 	}
 
-	projectKey := strings.ReplaceAll(s.dir, "/", "-")
-	sessionDir := filepath.Join(home, ".claude", "projects", projectKey)
+	// Poll slowly until the user types, then quickly while the file is due.
+	const idleInterval = 2 * time.Second
+	const activeInterval = 500 * time.Millisecond
 
-	// Record existing files before Claude starts
-	existing := make(map[string]bool)
-	if entries, err := os.ReadDir(sessionDir); err == nil {
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".jsonl") {
-				existing[e.Name()] = true
-			}
+	for {
+		firstInput := s.firstInput()
+		interval := idleInterval
+		if !firstInput.IsZero() {
+			interval = activeInterval
 		}
-	}
-
-	// Poll for a new .jsonl file (Claude creates it on first message)
-	for i := 0; i < 60; i++ { // up to 30 seconds
-		time.Sleep(500 * time.Millisecond)
 
 		select {
 		case <-s.done:
-			return // session ended
-		default:
+			return
+		case <-time.After(interval):
 		}
 
-		entries, err := os.ReadDir(sessionDir)
-		if err != nil {
-			continue
+		firstInput = s.firstInput()
+		if firstInput.IsZero() {
+			continue // nothing typed, so Claude has written nothing
+		}
+		if time.Since(firstInput) > captureWindow {
+			log.Printf("[pty] gave up capturing Claude session UUID for %s", s.slug)
+			return
+		}
+		if tm.dirAmbiguous(s) {
+			continue // another typed-into session here, do not guess
 		}
 
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".jsonl") {
+		for name := range listJSONL(projectDir) {
+			if preExisting[name] {
 				continue
 			}
-			if existing[e.Name()] {
+			info, err := os.Stat(filepath.Join(projectDir, name))
+			if err != nil || info.ModTime().Before(s.startedAt) {
+				// Written before we launched, so it is not ours.
+				preExisting[name] = true
 				continue
 			}
-			// New file found — extract UUID from filename
-			uuid := strings.TrimSuffix(e.Name(), ".jsonl")
-			s.mu.Lock()
-			s.claudeSessionID = uuid
-			s.mu.Unlock()
-			log.Printf("[pty] captured Claude session UUID: %s for %s", uuid, s.slug)
+			uuid := strings.TrimSuffix(name, ".jsonl")
+			if tm.uuidClaimed(uuid, s.id) {
+				// Owned by another session. Never blacklist it: doing so was
+				// what turned one bad guess into a permanent failure.
+				continue
+			}
+			tm.setClaudeSessionID(s, uuid, "new file")
 			return
 		}
 	}
+}
 
-	// No new file appeared — fall back to the most recently modified .jsonl.
-	// This handles --continue sessions where Claude reuses an existing file.
-	uuid := tm.mostRecentJSONL(sessionDir)
-	if uuid != "" {
-		s.mu.Lock()
-		s.claudeSessionID = uuid
-		s.mu.Unlock()
-		log.Printf("[pty] captured Claude session UUID (fallback): %s for %s", uuid, s.slug)
-	} else {
-		log.Printf("[pty] failed to capture Claude session UUID for %s", s.slug)
+// firstInput returns when the user first typed into this session, or the zero
+// time if they have not.
+func (s *session) firstInput() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstInputAt
+}
+
+// dirAmbiguous reports whether another live session shares this directory, has
+// been typed into, and still has no UUID. If so, a new file could belong to
+// either session.
+func (tm *TerminalManager) dirAmbiguous(s *session) bool {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for id, other := range tm.sessions {
+		if id == s.id {
+			continue
+		}
+		other.mu.Lock()
+		rival := other.dir == s.dir && other.claudeSessionID == "" && !other.firstInputAt.IsZero()
+		other.mu.Unlock()
+		if rival {
+			return true
+		}
 	}
+	return false
+}
+
+// setClaudeSessionID records the UUID and tells the frontend, so it does not
+// have to guess when capture happened.
+func (tm *TerminalManager) setClaudeSessionID(s *session, uuid, reason string) {
+	s.mu.Lock()
+	s.claudeSessionID = uuid
+	s.mu.Unlock()
+	log.Printf("[pty] captured Claude session UUID (%s): %s for %s", reason, uuid, s.slug)
+	if tm.ctx != nil {
+		runtime.EventsEmit(tm.ctx, "session:claude-id", map[string]string{
+			"sessionId":       s.id,
+			"claudeSessionId": uuid,
+		})
+	}
+}
+
+// uuidClaimed reports whether a live session other than exceptID already holds
+// this UUID.
+func (tm *TerminalManager) uuidClaimed(uuid, exceptID string) bool {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for id, other := range tm.sessions {
+		if id == exceptID {
+			continue
+		}
+		other.mu.Lock()
+		held := other.claudeSessionID
+		other.mu.Unlock()
+		if held == uuid {
+			return true
+		}
+	}
+	return false
 }
 
 // mostRecentJSONL returns the UUID of the most recently modified .jsonl file
 // in the given directory, or "" if none found.
-func (tm *TerminalManager) mostRecentJSONL(dir string) string {
+func mostRecentJSONL(dir string) string {
+	if dir == "" {
+		return ""
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -437,6 +563,10 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 	// User sent input — clear any pending approval state
 	s.waitingApproval = false
 	s.approvalTool = ""
+	// The first keystroke is what makes Claude write its session file.
+	if s.firstInputAt.IsZero() {
+		s.firstInputAt = time.Now()
+	}
 	_, err = s.ptmx.Write(decoded)
 	return err
 }
@@ -457,6 +587,9 @@ func (tm *TerminalManager) WriteKeystrokes(sessionID string, text string) error 
 	defer s.mu.Unlock()
 	s.waitingApproval = false
 	s.approvalTool = ""
+	if s.firstInputAt.IsZero() {
+		s.firstInputAt = time.Now()
+	}
 
 	buf := []byte{0}
 	for _, b := range []byte(text) {

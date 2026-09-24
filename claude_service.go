@@ -227,14 +227,8 @@ func parseAgentsList(output string) []AgentInfo {
 
 // GetLastMessage returns the last assistant text from the most recent Claude session for a directory.
 func (cs *ClaudeService) GetLastMessage(dir string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
 	// Claude stores sessions at ~/.claude/projects/-<path-with-dashes>/
-	projectKey := strings.ReplaceAll(dir, "/", "-")
-	sessionDir := filepath.Join(home, ".claude", "projects", projectKey)
+	sessionDir := claudeProjectDir(dir)
 
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {

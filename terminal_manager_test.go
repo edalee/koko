@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -201,5 +203,283 @@ func TestGetSessionState_NonexistentReturnsIdle(t *testing.T) {
 	state := tm.GetSessionState("nonexistent")
 	if state != "idle" {
 		t.Fatalf("expected 'idle', got %q", state)
+	}
+}
+
+// --- Claude session UUID capture ---
+
+// newTestManager builds a manager without resolveLoginPath, which spawns an
+// interactive login shell and costs over a second per call.
+func newTestManager() *TerminalManager {
+	return &TerminalManager{
+		sessions:  make(map[string]*session),
+		slugCount: make(map[string]int),
+	}
+}
+
+// newDetectSession builds a session for detectClaudeSessionID tests.
+// A zero firstInputAt means the user has not typed yet.
+func newDetectSession(id string, startedAt, firstInputAt time.Time) *session {
+	return &session{
+		id:           id,
+		slug:         id,
+		dir:          "/tmp",
+		startedAt:    startedAt,
+		firstInputAt: firstInputAt,
+		done:         make(chan struct{}),
+		subscribers:  make(map[chan []byte]struct{}),
+	}
+}
+
+func writeJSONL(t *testing.T, dir, name string, modTime time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatalf("chtimes %s: %v", name, err)
+	}
+}
+
+// waitForUUID polls the session for up to d, so tests do not depend on the
+// detector's exact poll interval.
+func waitForUUID(s *session, d time.Duration) string {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		got := s.claudeSessionID
+		s.mu.Unlock()
+		if got != "" {
+			return got
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return ""
+}
+
+func TestClaudeProjectDir_ReplacesSlashAndDot(t *testing.T) {
+	// Claude maps both separators to "-", so a dotted path must not be
+	// left with its dots intact.
+	got := claudeProjectDir("/Users/e/.claude/plugins/pkg-0.4.1")
+	want := "-Users-e--claude-plugins-pkg-0-4-1"
+	if filepath.Base(got) != want {
+		t.Fatalf("expected key %q, got %q", want, filepath.Base(got))
+	}
+}
+
+func TestDetectClaudeSessionID_CapturesNewFile(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	s := newDetectSession("test-1", time.Now().Add(-time.Minute), time.Now())
+
+	// A file that was already there must be ignored.
+	writeJSONL(t, dir, "old.jsonl", time.Now())
+	preExisting := listJSONL(dir)
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	writeJSONL(t, dir, "new-uuid.jsonl", time.Now())
+
+	if got := waitForUUID(s, 3*time.Second); got != "new-uuid" {
+		t.Fatalf("expected new-uuid, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_WaitsForFirstInput(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	// Nothing typed, so any file here belongs to someone else.
+	s := newDetectSession("test-idle", time.Now().Add(-time.Minute), time.Time{})
+
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "someone-else.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_GivesUpAfterCaptureWindow(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	// Typed long ago, so the capture window has closed.
+	started := time.Now().Add(-2 * captureWindow)
+	s := newDetectSession("test-late", started, started)
+
+	preExisting := listJSONL(dir)
+
+	stopped := make(chan struct{})
+	go func() {
+		tm.detectClaudeSessionID(s, dir, preExisting)
+		close(stopped)
+	}()
+	defer close(s.done)
+
+	writeJSONL(t, dir, "too-late.jsonl", time.Now())
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("detector kept polling past the capture window")
+	}
+	s.mu.Lock()
+	got := s.claudeSessionID
+	s.mu.Unlock()
+	if got != "" {
+		t.Fatalf("expected no capture, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_SkipsWhenAnotherTypedSessionShareDir(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+
+	// A rival in the same directory has been typed into and has no UUID, so
+	// a new file could belong to either session.
+	rival := newDetectSession("test-rival", time.Now().Add(-time.Minute), time.Now())
+	s := newDetectSession("test-amb", time.Now().Add(-time.Minute), time.Now())
+	tm.mu.Lock()
+	tm.sessions[rival.id] = rival
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "whose-is-it.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture while ambiguous, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_SkipsUUIDHeldByLiveSession(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+
+	// A sibling session already owns this UUID. It is identified, so it does
+	// not make the directory ambiguous.
+	owner := newDetectSession("test-owner", time.Now().Add(-time.Minute), time.Now())
+	owner.claudeSessionID = "shared-uuid"
+	tm.mu.Lock()
+	tm.sessions[owner.id] = owner
+	tm.mu.Unlock()
+
+	s := newDetectSession("test-2", time.Now().Add(-time.Minute), time.Now())
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	// Snapshot before writing, so the file counts as new and only the claim
+	// check can stop it being captured.
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "shared-uuid.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture, got %q", got)
+	}
+}
+
+// A claimed file must not be blacklisted. Blacklisting turned one bad guess
+// into a session that could never capture anything.
+func TestDetectClaudeSessionID_RecoversAfterClaimClears(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+
+	owner := newDetectSession("test-owner2", time.Now().Add(-time.Minute), time.Now())
+	owner.claudeSessionID = "contested"
+	tm.mu.Lock()
+	tm.sessions[owner.id] = owner
+	tm.mu.Unlock()
+
+	s := newDetectSession("test-3", time.Now().Add(-time.Minute), time.Now())
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "contested.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1*time.Second); got != "" {
+		t.Fatalf("expected no capture while claimed, got %q", got)
+	}
+
+	// The owner goes away, so the file is free.
+	tm.mu.Lock()
+	delete(tm.sessions, owner.id)
+	tm.mu.Unlock()
+
+	if got := waitForUUID(s, 3*time.Second); got != "contested" {
+		t.Fatalf("expected contested after the claim cleared, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_SkipsFileOlderThanSession(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	now := time.Now()
+	s := newDetectSession("test-4", now, now)
+
+	// Not in preExisting, but written before the session launched.
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "stale.jsonl", now.Add(-time.Hour))
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_StopsWhenSessionEnds(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	s := newDetectSession("test-5", time.Now().Add(-time.Minute), time.Now())
+
+	stopped := make(chan struct{})
+	go func() {
+		tm.detectClaudeSessionID(s, dir, listJSONL(dir))
+		close(stopped)
+	}()
+
+	close(s.done)
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("detector did not stop when the session ended")
+	}
+}
+
+func TestMostRecentJSONL(t *testing.T) {
+	dir := t.TempDir()
+	if got := mostRecentJSONL(dir); got != "" {
+		t.Fatalf("expected empty for empty dir, got %q", got)
+	}
+	if got := mostRecentJSONL(""); got != "" {
+		t.Fatalf("expected empty for empty path, got %q", got)
+	}
+
+	writeJSONL(t, dir, "older.jsonl", time.Now().Add(-time.Hour))
+	writeJSONL(t, dir, "newer.jsonl", time.Now())
+	if err := os.WriteFile(filepath.Join(dir, "ignored.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if got := mostRecentJSONL(dir); got != "newer" {
+		t.Fatalf("expected newer, got %q", got)
 	}
 }
