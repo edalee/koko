@@ -59,7 +59,7 @@ type session struct {
 	dir             string
 	claudeSessionID string // Claude Code session UUID for --resume
 	startedAt       time.Time
-	firstInputAt    time.Time // when the user first typed into this session
+	lastSubmitAt    time.Time // when the user last submitted a line (Enter)
 	ptmx            *os.File
 	cmd             *exec.Cmd
 	mu              sync.Mutex
@@ -323,7 +323,7 @@ func listJSONL(dir string) map[string]bool {
 	return found
 }
 
-// captureWindow is how long after the first keystroke we keep looking for
+// captureWindow is how long after the last submitted line we keep looking for
 // Claude's session file. Claude writes it on the first message, so a couple of
 // minutes is ample. The bound matters: without it an idle tab would later claim
 // a file written by a plain `claude` run in the same directory.
@@ -333,12 +333,13 @@ const captureWindow = 2 * time.Minute
 // session and records its UUID, which is the filename.
 //
 // Claude writes the file on the first message, not at launch, so waiting on a
-// launch timer missed it. Instead this starts looking once the user types, and
-// gives up captureWindow later.
+// launch timer missed it. Instead this starts looking once the user submits a
+// line, and gives up captureWindow after the most recent one.
 //
 // A file counts only if it is new since launch and no other live session holds
-// it. If another session in the same directory has also been typed into and is
-// still unidentified, we cannot tell whose file appeared, so we claim nothing.
+// it. If another session in the same directory has also been submitted to and
+// is still unidentified, we cannot tell whose file appeared, so we claim
+// nothing.
 // That leaves both without a UUID, which the session picker can resolve. It is
 // the safe way to fail: a wrong UUID silently resumes someone else's
 // conversation.
@@ -347,14 +348,14 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 		return
 	}
 
-	// Poll slowly until the user types, then quickly while the file is due.
+	// Poll slowly until a line is submitted, then quickly while the file is due.
 	const idleInterval = 2 * time.Second
 	const activeInterval = 500 * time.Millisecond
 
 	for {
-		firstInput := s.firstInput()
+		lastSubmit := s.lastSubmit()
 		interval := idleInterval
-		if !firstInput.IsZero() {
+		if !lastSubmit.IsZero() {
 			interval = activeInterval
 		}
 
@@ -364,16 +365,16 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 		case <-time.After(interval):
 		}
 
-		firstInput = s.firstInput()
-		if firstInput.IsZero() {
-			continue // nothing typed, so Claude has written nothing
+		lastSubmit = s.lastSubmit()
+		if lastSubmit.IsZero() {
+			continue // nothing submitted, so Claude has written nothing
 		}
-		if time.Since(firstInput) > captureWindow {
+		if time.Since(lastSubmit) > captureWindow {
 			log.Printf("[pty] gave up capturing Claude session UUID for %s", s.slug)
 			return
 		}
 		if tm.dirAmbiguous(s) {
-			continue // another typed-into session here, do not guess
+			continue // another submitted-to session here, do not guess
 		}
 
 		for name := range listJSONL(projectDir) {
@@ -398,17 +399,17 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 	}
 }
 
-// firstInput returns when the user first typed into this session, or the zero
-// time if they have not.
-func (s *session) firstInput() time.Time {
+// lastSubmit returns when the user last pressed Enter in this session, or the
+// zero time if they never have.
+func (s *session) lastSubmit() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.firstInputAt
+	return s.lastSubmitAt
 }
 
 // dirAmbiguous reports whether another live session shares this directory, has
-// been typed into, and still has no UUID. If so, a new file could belong to
-// either session.
+// had a line submitted, and still has no UUID. If so, a new file could belong
+// to either session.
 func (tm *TerminalManager) dirAmbiguous(s *session) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -417,7 +418,7 @@ func (tm *TerminalManager) dirAmbiguous(s *session) bool {
 			continue
 		}
 		other.mu.Lock()
-		rival := other.dir == s.dir && other.claudeSessionID == "" && !other.firstInputAt.IsZero()
+		rival := other.dir == s.dir && other.claudeSessionID == "" && !other.lastSubmitAt.IsZero()
 		other.mu.Unlock()
 		if rival {
 			return true
@@ -563,9 +564,11 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 	// User sent input — clear any pending approval state
 	s.waitingApproval = false
 	s.approvalTool = ""
-	// The first keystroke is what makes Claude write its session file.
-	if s.firstInputAt.IsZero() {
-		s.firstInputAt = time.Now()
+	// Submitting a line is what makes Claude write its session file. Arm on
+	// Enter only: xterm answers Claude's startup queries (DA1, kitty keyboard)
+	// and its focus reports on its own, so plain input arrives at launch.
+	if strings.ContainsRune(string(decoded), '\r') {
+		s.lastSubmitAt = time.Now()
 	}
 	_, err = s.ptmx.Write(decoded)
 	return err
@@ -587,8 +590,8 @@ func (tm *TerminalManager) WriteKeystrokes(sessionID string, text string) error 
 	defer s.mu.Unlock()
 	s.waitingApproval = false
 	s.approvalTool = ""
-	if s.firstInputAt.IsZero() {
-		s.firstInputAt = time.Now()
+	if strings.ContainsRune(text, '\r') {
+		s.lastSubmitAt = time.Now()
 	}
 
 	buf := []byte{0}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -218,14 +219,14 @@ func newTestManager() *TerminalManager {
 }
 
 // newDetectSession builds a session for detectClaudeSessionID tests.
-// A zero firstInputAt means the user has not typed yet.
-func newDetectSession(id string, startedAt, firstInputAt time.Time) *session {
+// A zero lastSubmitAt means the user has not submitted a line yet.
+func newDetectSession(id string, startedAt, lastSubmitAt time.Time) *session {
 	return &session{
 		id:           id,
 		slug:         id,
 		dir:          "/tmp",
 		startedAt:    startedAt,
-		firstInputAt: firstInputAt,
+		lastSubmitAt: lastSubmitAt,
 		done:         make(chan struct{}),
 		subscribers:  make(map[chan []byte]struct{}),
 	}
@@ -287,10 +288,10 @@ func TestDetectClaudeSessionID_CapturesNewFile(t *testing.T) {
 	}
 }
 
-func TestDetectClaudeSessionID_WaitsForFirstInput(t *testing.T) {
+func TestDetectClaudeSessionID_WaitsForFirstSubmit(t *testing.T) {
 	dir := t.TempDir()
 	tm := newTestManager()
-	// Nothing typed, so any file here belongs to someone else.
+	// Nothing submitted, so any file here belongs to someone else.
 	s := newDetectSession("test-idle", time.Now().Add(-time.Minute), time.Time{})
 
 	preExisting := listJSONL(dir)
@@ -307,7 +308,7 @@ func TestDetectClaudeSessionID_WaitsForFirstInput(t *testing.T) {
 func TestDetectClaudeSessionID_GivesUpAfterCaptureWindow(t *testing.T) {
 	dir := t.TempDir()
 	tm := newTestManager()
-	// Typed long ago, so the capture window has closed.
+	// Submitted long ago, so the capture window has closed.
 	started := time.Now().Add(-2 * captureWindow)
 	s := newDetectSession("test-late", started, started)
 
@@ -335,11 +336,11 @@ func TestDetectClaudeSessionID_GivesUpAfterCaptureWindow(t *testing.T) {
 	}
 }
 
-func TestDetectClaudeSessionID_SkipsWhenAnotherTypedSessionShareDir(t *testing.T) {
+func TestDetectClaudeSessionID_SkipsWhenAnotherSubmittedSessionSharesDir(t *testing.T) {
 	dir := t.TempDir()
 	tm := newTestManager()
 
-	// A rival in the same directory has been typed into and has no UUID, so
+	// A rival in the same directory has submitted a line and has no UUID, so
 	// a new file could belong to either session.
 	rival := newDetectSession("test-rival", time.Now().Add(-time.Minute), time.Now())
 	s := newDetectSession("test-amb", time.Now().Add(-time.Minute), time.Now())
@@ -481,5 +482,49 @@ func TestMostRecentJSONL(t *testing.T) {
 
 	if got := mostRecentJSONL(dir); got != "newer" {
 		t.Fatalf("expected newer, got %q", got)
+	}
+}
+
+// Claude enables focus reporting and queries DA1 and the kitty keyboard
+// protocol at startup. xterm answers those on its own, so arming on any input
+// would start the capture window at launch instead of when the user submits.
+func TestWrite_ArmsCaptureOnlyOnEnter(t *testing.T) {
+	tm := newTestManager()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
+	go func() {
+		drain := make([]byte, 256)
+		for {
+			if _, err := r.Read(drain); err != nil {
+				return
+			}
+		}
+	}()
+
+	s := newDetectSession("test-arm", time.Now(), time.Time{})
+	s.ptmx = w
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	// A focus-in report and a DA1 reply are terminal chatter, not a submit.
+	for _, chatter := range []string{"\x1b[I", "\x1b[?62;c", "hello"} {
+		if err := tm.Write(s.id, base64.StdEncoding.EncodeToString([]byte(chatter))); err != nil {
+			t.Fatalf("write %q: %v", chatter, err)
+		}
+		if !s.lastSubmit().IsZero() {
+			t.Fatalf("%q armed the capture window", chatter)
+		}
+	}
+
+	if err := tm.Write(s.id, base64.StdEncoding.EncodeToString([]byte("\r"))); err != nil {
+		t.Fatalf("write enter: %v", err)
+	}
+	if s.lastSubmit().IsZero() {
+		t.Fatal("Enter did not arm the capture window")
 	}
 }
