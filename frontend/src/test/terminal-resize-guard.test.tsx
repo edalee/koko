@@ -169,4 +169,59 @@ describe("TerminalPane resize guard", () => {
     expect(fitFn).not.toHaveBeenCalled();
     expect(Resize).not.toHaveBeenCalled();
   });
+
+  it("does not refit a container that is not laid out", async () => {
+    // QuickTerminal hides its inactive panes with `display: none`, which gives
+    // a 0x0 box. proposeDimensions() still returns a plausible 11x5 there,
+    // because it clamps and reads the parent's specified "100%" height, so the
+    // size has to be measured rather than inferred from the proposal.
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = vi.fn(
+      () => ({ width: 0, height: 0, toJSON: () => ({}) }) as DOMRect,
+    );
+
+    const { rerender } = render(<TerminalPane sessionId="session-hidden" active={false} />);
+    fitFn.mockClear();
+    (Resize as ReturnType<typeof vi.fn>).mockClear();
+    proposeDimensionsFn.mockReturnValue({ cols: 11, rows: 5 });
+
+    rerender(<TerminalPane sessionId="session-hidden" active={true} />);
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(r));
+    });
+
+    Element.prototype.getBoundingClientRect = rect;
+
+    expect(fitFn).not.toHaveBeenCalled();
+    expect(Resize).not.toHaveBeenCalled();
+  });
+
+  it("skips a refit queued just before the tab went inactive", async () => {
+    let observerCallback: ResizeObserverCallback | null = null;
+    globalThis.ResizeObserver = class {
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      constructor(cb: ResizeObserverCallback) {
+        observerCallback = cb;
+      }
+    } as unknown as typeof ResizeObserver;
+
+    const { rerender } = render(<TerminalPane sessionId="session-race" active={true} />);
+    fitFn.mockClear();
+    (Resize as ReturnType<typeof vi.fn>).mockClear();
+    proposeDimensionsFn.mockReturnValue({ cols: 120, rows: 30 });
+
+    // Resize fires while active, then the tab is switched away inside the 50ms
+    // debounce. The queued refit must not size a hidden pane.
+    (observerCallback as unknown as ResizeObserverCallback)([], {} as ResizeObserver);
+    rerender(<TerminalPane sessionId="session-race" active={false} />);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+
+    expect(fitFn).not.toHaveBeenCalled();
+    expect(Resize).not.toHaveBeenCalled();
+  });
 });

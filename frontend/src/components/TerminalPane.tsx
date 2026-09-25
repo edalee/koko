@@ -122,11 +122,15 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     const fit = fitRef.current;
     const term = termRef.current;
     if (!fit || !term) return;
+    // Bail on a container that isn't laid out (QuickTerminal hides its
+    // inactive panes with `display: none`). Measure the box, don't inspect the
+    // proposed dims: proposeDimensions() clamps to Math.max(2, …)/Math.max(1, …)
+    // and reads the parent's specified "100%" height, so a hidden pane still
+    // proposes a plausible-looking 11x5 rather than anything we could detect.
+    const box = containerRef.current?.getBoundingClientRect();
+    if (!box || box.width === 0 || box.height === 0) return;
     const dims = fit.proposeDimensions();
-    // Bail on a container that isn't laid out yet (QuickTerminal hides its
-    // inactive panes with `display: none`). proposeDimensions() returns junk
-    // for a zero-size box, and pushing that to the PTY is worse than skipping.
-    if (!dims || !(dims.cols > 1) || !(dims.rows > 1)) return;
+    if (!dims) return;
     const changed = dims.cols !== term.cols || dims.rows !== term.rows;
     if (!changed && !alwaysNotify) return;
     if (changed) {
@@ -261,7 +265,12 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       // the activation effect below, which re-fits if the size drifted.
       if (!activeRef.current) return;
       if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => refit(sessionIdRef.current), 50);
+      resizeTimer = setTimeout(() => {
+        // Re-check: the tab can go inactive during the 50ms debounce, and
+        // refitting a now-hidden pane would SIGWINCH it to a junk size.
+        if (!activeRef.current) return;
+        refit(sessionIdRef.current);
+      }, 50);
     });
     observer.observe(container);
 
@@ -288,7 +297,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     //      `hadOutputSinceFlushRef` ref and the assignment in the
     //      pty:data handler).
     //   3. Delete the `webglRef.current?.clearTextureAtlas?.()` call
-    //      inside the ResizeObserver above.
+    //      inside refit(), above.
     //   4. (Optional) Keep the "Redraw Terminal" context-menu action
     //      as a user-facing escape hatch; it's harmless even after
     //      the fix lands.

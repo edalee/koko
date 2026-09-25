@@ -1,6 +1,23 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
+// jsdom reports every element as 0x0. TerminalPane treats a zero-size box as
+// "not laid out yet" and skips refitting, so component tests need a plausible
+// default. Individual tests override this to assert the zero-size path.
+Element.prototype.getBoundingClientRect = vi.fn(function (this: Element) {
+  return {
+    x: 0,
+    y: 0,
+    width: 800,
+    height: 600,
+    top: 0,
+    left: 0,
+    right: 800,
+    bottom: 600,
+    toJSON: () => ({}),
+  } as DOMRect;
+});
+
 // Mock Wails runtime — EventsOn returns a cleanup function
 vi.mock("../../wailsjs/runtime/runtime", () => ({
   EventsOn: vi.fn(() => vi.fn()),
