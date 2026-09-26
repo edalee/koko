@@ -6,9 +6,16 @@ import {
   CreateSessionWithOpts,
   GetClaudeSessionID,
 } from "../../wailsjs/go/main/TerminalManager";
+import { EventsOn } from "../../wailsjs/runtime/runtime";
 import type { SessionHistoryEntry, SessionTab } from "../types";
 
 const MAX_HISTORY = 50;
+
+/** Payload of the session:claude-id event emitted by TerminalManager. */
+interface SessionClaudeIDEvent {
+  sessionId: string;
+  claudeSessionId: string;
+}
 
 export function useSessionTabs() {
   const [tabs, setTabs] = useState<SessionTab[]>([]);
@@ -142,86 +149,97 @@ export function useSessionTabs() {
     [],
   );
 
-  const createTab = useCallback(async (name: string, directory: string, worktreePath?: string) => {
-    const sessionId = await CreateSessionWithOpts({
-      name,
-      dir: directory,
-      cols: 80,
-      rows: 24,
-      resume: false,
-      claudeSessionId: "",
+  // Read the UUID once, straight after a session is created.
+  //
+  // For --continue the backend resolves the UUID synchronously, so the
+  // session:claude-id event fires before the caller has the new session id and
+  // the event listener matches no tab. This closes that gap.
+  const mergeClaudeID = useCallback(async (sessionId: string) => {
+    try {
+      const claudeId = await GetClaudeSessionID(sessionId);
+      if (!claudeId) return;
+      setTabs((prev) =>
+        prev.map((t) => (t.id === sessionId ? { ...t, claudeSessionId: claudeId } : t)),
+      );
+    } catch {
+      // Session may already be gone, the event covers the live case.
+    }
+  }, []);
+
+  const createTab = useCallback(
+    async (name: string, directory: string, worktreePath?: string) => {
+      const sessionId = await CreateSessionWithOpts({
+        name,
+        dir: directory,
+        cols: 80,
+        rows: 24,
+        resume: false,
+        claudeSessionId: "",
+      });
+      const newTab: SessionTab = {
+        id: sessionId,
+        slug: "", // will be populated from GetSessions or after capture
+        name,
+        directory,
+        createdAt: Date.now(),
+        connected: true,
+        worktreePath,
+      };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(sessionId);
+
+      // Fresh sessions usually resolve later, on the session:claude-id event.
+      void mergeClaudeID(sessionId);
+      return sessionId;
+    },
+    [mergeClaudeID],
+  );
+
+  // The backend tells us when it captures a Claude session UUID. Claude writes
+  // its session file on the first message, so this can arrive minutes after the
+  // session starts. Polling on a timer missed it, which left the tab with no
+  // UUID and made a later resume fall back to --continue.
+  useEffect(() => {
+    return EventsOn("session:claude-id", (payload: SessionClaudeIDEvent) => {
+      if (!payload?.sessionId || !payload.claudeSessionId) return;
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === payload.sessionId ? { ...t, claudeSessionId: payload.claudeSessionId } : t,
+        ),
+      );
     });
-    const newTab: SessionTab = {
-      id: sessionId,
-      slug: "", // will be populated from GetSessions or after capture
-      name,
-      directory,
-      createdAt: Date.now(),
-      connected: true,
-      worktreePath,
-    };
-    setTabs((prev) => [...prev, newTab]);
-    setActiveTabId(sessionId);
-
-    // Capture Claude session UUID and slug after a short delay
-    setTimeout(async () => {
-      try {
-        const claudeId = await GetClaudeSessionID(sessionId);
-        if (claudeId) {
-          setTabs((prev) =>
-            prev.map((t) => (t.id === sessionId ? { ...t, claudeSessionId: claudeId } : t)),
-          );
-        }
-      } catch {
-        // ignore
-      }
-    }, 5000);
-
-    return sessionId;
   }, []);
 
   const reconnectingRef = useRef<Set<string>>(new Set());
-  const reconnectTab = useCallback(async (tab: SessionTab) => {
-    if (reconnectingRef.current.has(tab.id)) return "";
-    reconnectingRef.current.add(tab.id);
-    try {
-      const sessionId = await CreateSessionWithOpts({
-        name: tab.name,
-        dir: tab.directory,
-        cols: 80,
-        rows: 24,
-        resume: true,
-        claudeSessionId: tab.claudeSessionId || "",
-      });
-      setTabs((prev) =>
-        prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
-      );
-      setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
+  const reconnectTab = useCallback(
+    async (tab: SessionTab) => {
+      if (reconnectingRef.current.has(tab.id)) return "";
+      reconnectingRef.current.add(tab.id);
+      try {
+        const sessionId = await CreateSessionWithOpts({
+          name: tab.name,
+          dir: tab.directory,
+          cols: 80,
+          rows: 24,
+          resume: true,
+          claudeSessionId: tab.claudeSessionId || "",
+        });
+        setTabs((prev) =>
+          prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
+        );
+        setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
 
-      // Capture new Claude session UUID if we didn't have one
-      if (!tab.claudeSessionId) {
-        setTimeout(async () => {
-          try {
-            const claudeId = await GetClaudeSessionID(sessionId);
-            if (claudeId) {
-              setTabs((prev) =>
-                prev.map((t) => (t.id === sessionId ? { ...t, claudeSessionId: claudeId } : t)),
-              );
-            }
-          } catch {
-            // ignore
-          }
-        }, 5000);
+        void mergeClaudeID(sessionId);
+        return sessionId;
+      } catch (err) {
+        console.error("reconnectTab failed:", err);
+        return "";
+      } finally {
+        reconnectingRef.current.delete(tab.id);
       }
-
-      return sessionId;
-    } catch (err) {
-      console.error("reconnectTab failed:", err);
-      return "";
-    } finally {
-      reconnectingRef.current.delete(tab.id);
-    }
-  }, []);
+    },
+    [mergeClaudeID],
+  );
 
   const closeTab = useCallback(
     async (tabId: string) => {
