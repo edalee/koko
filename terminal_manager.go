@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/creack/pty"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -60,6 +62,7 @@ type session struct {
 	claudeSessionID string // Claude Code session UUID for --resume
 	startedAt       time.Time
 	lastSubmitAt    time.Time // when the user last submitted a line (Enter)
+	inPaste         bool      // inside an xterm bracketed paste
 	ptmx            *os.File
 	cmd             *exec.Cmd
 	mu              sync.Mutex
@@ -276,7 +279,7 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 
 	// Capture the Claude session UUID, unless the caller already gave us one.
 	if opts.ClaudeSessionID == "" {
-		if continueUUID != "" {
+		if continueUUID != "" && !tm.uuidClaimed(continueUUID, s.id) {
 			tm.setClaudeSessionID(s, continueUUID, "continue")
 		} else {
 			go tm.detectClaudeSessionID(s, projectDir, preExisting)
@@ -288,20 +291,71 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	return id, nil
 }
 
-// claudeKeyReplacer maps a working directory to Claude Code's project key.
-// Claude replaces both "/" and "." with "-", so /Users/e/.claude/plugins
-// becomes -Users-e--claude-plugins. Handling only "/" names a directory that
-// never exists for any path with a dot in it.
-var claudeKeyReplacer = strings.NewReplacer("/", "-", ".", "-")
+// claudeKeyMaxLen is where Claude Code truncates a project key and appends a
+// hash of the original path.
+const claudeKeyMaxLen = 200
+
+// claudeProjectKey mirrors Claude Code's own mapping from a working directory
+// to its project folder. Taken from CLI 2.1.282:
+//
+//	let r = e.replace(/[^a-zA-Z0-9]/g, "-");
+//	if (r.length <= 200) return r;
+//	return `${r.slice(0, 200)}-${Math.abs(TX(e)).toString(36)}`;
+//
+// Every non-alphanumeric character maps to "-", not just the separators. A
+// repo at my_service is stored as my-service. Anything short of the full rule
+// names a folder that never exists, and the session then never captures a
+// UUID.
+func claudeProjectKey(dir string) string {
+	// JavaScript counts and slices UTF-16 code units, so we must too.
+	units := utf16.Encode([]rune(dir))
+	mapped := make([]rune, len(units))
+	for i, u := range units {
+		switch {
+		case u >= '0' && u <= '9', u >= 'A' && u <= 'Z', u >= 'a' && u <= 'z':
+			mapped[i] = rune(u)
+		default:
+			mapped[i] = '-'
+		}
+	}
+	if len(mapped) <= claudeKeyMaxLen {
+		return string(mapped)
+	}
+	return string(mapped[:claudeKeyMaxLen]) + "-" + claudePathHash(dir)
+}
+
+// claudePathHash mirrors the CLI's string hash, which is
+// `e = (e << 5) - e + charCodeAt(n) | 0` followed by Math.abs(e).toString(36).
+func claudePathHash(dir string) string {
+	var h int32
+	for _, u := range utf16.Encode([]rune(dir)) {
+		h = h*31 + int32(u)
+	}
+	// Math.abs runs on a JS number, so the most negative int32 becomes
+	// 2147483648 rather than wrapping back to itself.
+	n := int64(h)
+	if n < 0 {
+		n = -n
+	}
+	return strconv.FormatInt(n, 36)
+}
 
 // claudeProjectDir returns the directory where Claude Code stores session
 // files for a working directory, or "" if the home directory is unknown.
+//
+// The path is resolved first, to match the cwd the Claude process reports.
+// Clean drops a trailing slash, which api_server.go can pass through, and
+// EvalSymlinks matches process.cwd() for a symlinked checkout.
 func claudeProjectDir(dir string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "projects", claudeKeyReplacer.Replace(dir))
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		resolved = filepath.Clean(dir)
+	}
+	return filepath.Join(home, ".claude", "projects", claudeProjectKey(resolved))
 }
 
 // listJSONL returns the set of .jsonl filenames in dir. A missing directory
@@ -377,12 +431,17 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 			continue // another submitted-to session here, do not guess
 		}
 
+		var candidates []string
 		for name := range listJSONL(projectDir) {
 			if preExisting[name] {
 				continue
 			}
 			info, err := os.Stat(filepath.Join(projectDir, name))
-			if err != nil || info.ModTime().Before(s.startedAt) {
+			if err != nil {
+				// Transient. Blacklisting here could exclude our own file.
+				continue
+			}
+			if info.ModTime().Before(s.startedAt) {
 				// Written before we launched, so it is not ours.
 				preExisting[name] = true
 				continue
@@ -393,9 +452,54 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 				// what turned one bad guess into a permanent failure.
 				continue
 			}
-			tm.setClaudeSessionID(s, uuid, "new file")
+			candidates = append(candidates, uuid)
+		}
+		// Map iteration is unordered, so picking from several would be a coin
+		// flip. dirAmbiguous only knows about Koko's sessions, and a plain
+		// `claude` run in the same directory also writes here.
+		if len(candidates) != 1 {
+			continue
+		}
+		tm.setClaudeSessionID(s, candidates[0], "new file")
+		return
+	}
+}
+
+// noteSubmitLocked arms the capture window when the input contains a submitted
+// Enter. Caller must hold s.mu.
+//
+// xterm.js wraps a paste in \x1b[200~ ... \x1b[201~ and turns its newlines
+// into \r, but Claude does not submit those. Counting them would start the
+// window with nothing written, leaving it free to claim an unrelated file. A
+// paste can span several writes, so the state lives on the session.
+func (s *session) noteSubmitLocked(b []byte) {
+	const pasteStart = "\x1b[200~"
+	const pasteEnd = "\x1b[201~"
+
+	rest := string(b)
+	for rest != "" {
+		if s.inPaste {
+			i := strings.Index(rest, pasteEnd)
+			if i < 0 {
+				return
+			}
+			s.inPaste = false
+			rest = rest[i+len(pasteEnd):]
+			continue
+		}
+		i := strings.Index(rest, pasteStart)
+		typed := rest
+		if i >= 0 {
+			typed = rest[:i]
+		}
+		if strings.ContainsRune(typed, '\r') {
+			s.lastSubmitAt = time.Now()
+		}
+		if i < 0 {
 			return
 		}
+		s.inPaste = true
+		rest = rest[i+len(pasteStart):]
 	}
 }
 
@@ -414,7 +518,7 @@ func (tm *TerminalManager) dirAmbiguous(s *session) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	for id, other := range tm.sessions {
-		if id == s.id {
+		if id == s.id || !other.alive() {
 			continue
 		}
 		other.mu.Lock()
@@ -442,13 +546,26 @@ func (tm *TerminalManager) setClaudeSessionID(s *session, uuid, reason string) {
 	}
 }
 
+// alive reports whether the session's process is still running. readLoop
+// closes done on exit but leaves the entry in tm.sessions, so every scan over
+// that map has to skip the dead ones. A dead session used to hold its UUID and
+// block its directory until the app restarted.
+func (s *session) alive() bool {
+	select {
+	case <-s.done:
+		return false
+	default:
+		return true
+	}
+}
+
 // uuidClaimed reports whether a live session other than exceptID already holds
 // this UUID.
 func (tm *TerminalManager) uuidClaimed(uuid, exceptID string) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	for id, other := range tm.sessions {
-		if id == exceptID {
+		if id == exceptID || !other.alive() {
 			continue
 		}
 		other.mu.Lock()
@@ -567,9 +684,7 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 	// Submitting a line is what makes Claude write its session file. Arm on
 	// Enter only: xterm answers Claude's startup queries (DA1, kitty keyboard)
 	// and its focus reports on its own, so plain input arrives at launch.
-	if strings.ContainsRune(string(decoded), '\r') {
-		s.lastSubmitAt = time.Now()
-	}
+	s.noteSubmitLocked(decoded)
 	_, err = s.ptmx.Write(decoded)
 	return err
 }
@@ -590,9 +705,7 @@ func (tm *TerminalManager) WriteKeystrokes(sessionID string, text string) error 
 	defer s.mu.Unlock()
 	s.waitingApproval = false
 	s.approvalTool = ""
-	if strings.ContainsRune(text, '\r') {
-		s.lastSubmitAt = time.Now()
-	}
+	s.noteSubmitLocked([]byte(text))
 
 	buf := []byte{0}
 	for _, b := range []byte(text) {

@@ -259,14 +259,123 @@ func waitForUUID(s *session, d time.Duration) string {
 	return ""
 }
 
-func TestClaudeProjectDir_ReplacesSlashAndDot(t *testing.T) {
-	// Claude maps both separators to "-", so a dotted path must not be
-	// left with its dots intact.
-	got := claudeProjectDir("/Users/e/.claude/plugins/pkg-0.4.1")
-	want := "-Users-e--claude-plugins-pkg-0-4-1"
-	if filepath.Base(got) != want {
-		t.Fatalf("expected key %q, got %q", want, filepath.Base(got))
+func TestClaudeProjectKey(t *testing.T) {
+	// Claude maps every non-alphanumeric character to "-", not just the
+	// separators. Checked against CLI 2.1.282.
+	cases := []struct{ dir, want string }{
+		{"/Users/e/.claude/plugins/pkg-0.4.1", "-Users-e--claude-plugins-pkg-0-4-1"},
+		{"/Users/e/Projects/my_service", "-Users-e-Projects-my-service"},
+		{"/Users/e/a dir/with@sign+plus", "-Users-e-a-dir-with-sign-plus"},
+		{"/repo", "-repo"},
 	}
+	for _, c := range cases {
+		if got := claudeProjectKey(c.dir); got != c.want {
+			t.Errorf("claudeProjectKey(%q) = %q, want %q", c.dir, got, c.want)
+		}
+	}
+}
+
+// Golden case from a real run. The path is 224 characters, so Claude truncates
+// at 200 and appends a base36 hash of the original.
+func TestClaudeProjectKey_LongPathMatchesClaude(t *testing.T) {
+	dir := "/private/tmp/kp/a_very/long.path with spaces" +
+		"/seg00/seg01/seg02/seg03/seg04/seg05/seg06/seg07/seg08/seg09" +
+		"/seg10/seg11/seg12/seg13/seg14/seg15/seg16/seg17/seg18/seg19" +
+		"/seg20/seg21/seg22/seg23/seg24/seg25/seg26/seg27/seg28/seg29"
+	want := "-private-tmp-kp-a-very-long-path-with-spaces" +
+		"-seg00-seg01-seg02-seg03-seg04-seg05-seg06-seg07-seg08-seg09" +
+		"-seg10-seg11-seg12-seg13-seg14-seg15-seg16-seg17-seg18-seg19" +
+		"-seg20-seg21-seg22-seg23-seg24-seg25-whdjpl"
+
+	got := claudeProjectKey(dir)
+	if got != want {
+		t.Fatalf("key mismatch\n got: %q\nwant: %q", got, want)
+	}
+	if len(got) != claudeKeyMaxLen+1+len("whdjpl") {
+		t.Fatalf("expected a truncated key, got length %d", len(got))
+	}
+}
+
+func TestDetectClaudeSessionID_IgnoresDeadRival(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+
+	// A dead session in the same directory must not block capture. readLoop
+	// leaves the entry in tm.sessions, so this used to last until restart.
+	dead := newDetectSession("test-dead", time.Now().Add(-time.Minute), time.Now())
+	close(dead.done)
+	tm.mu.Lock()
+	tm.sessions[dead.id] = dead
+	tm.mu.Unlock()
+
+	s := newDetectSession("test-live", time.Now().Add(-time.Minute), time.Now())
+	tm.mu.Lock()
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "mine.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 3*time.Second); got != "mine" {
+		t.Fatalf("expected mine, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_RefusesTwoCandidates(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	s := newDetectSession("test-two", time.Now().Add(-time.Minute), time.Now())
+
+	// A plain `claude` run in the same directory also writes here, and
+	// dirAmbiguous cannot see it. Picking by map order would be a coin flip.
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "one.jsonl", time.Now())
+	writeJSONL(t, dir, "two.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture with two candidates, got %q", got)
+	}
+}
+
+func TestNoteSubmit_IgnoresBracketedPaste(t *testing.T) {
+	const start = "\x1b[200~"
+	const end = "\x1b[201~"
+
+	t.Run("paste alone does not arm", func(t *testing.T) {
+		s := newDetectSession("p1", time.Now(), time.Time{})
+		s.noteSubmitLocked([]byte(start + "line one\rline two\r" + end))
+		if !s.lastSubmitAt.IsZero() {
+			t.Fatal("a paste armed the capture window")
+		}
+	})
+
+	t.Run("paste split across writes does not arm", func(t *testing.T) {
+		s := newDetectSession("p2", time.Now(), time.Time{})
+		s.noteSubmitLocked([]byte(start + "first\r"))
+		s.noteSubmitLocked([]byte("second\r"))
+		s.noteSubmitLocked([]byte("third\r" + end))
+		if !s.lastSubmitAt.IsZero() {
+			t.Fatal("a multi-write paste armed the capture window")
+		}
+	})
+
+	t.Run("Enter after the paste arms", func(t *testing.T) {
+		s := newDetectSession("p3", time.Now(), time.Time{})
+		s.noteSubmitLocked([]byte(start + "pasted\r" + end))
+		if !s.lastSubmitAt.IsZero() {
+			t.Fatal("the paste itself armed the window")
+		}
+		s.noteSubmitLocked([]byte("\r"))
+		if s.lastSubmitAt.IsZero() {
+			t.Fatal("Enter after the paste did not arm the window")
+		}
+	})
 }
 
 func TestDetectClaudeSessionID_CapturesNewFile(t *testing.T) {
