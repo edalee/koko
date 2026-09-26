@@ -10,6 +10,21 @@ import { ReplayBuffer, Resize, Write } from "../../wailsjs/go/main/TerminalManag
 import { BrowserOpenURL, EventsOn } from "../../wailsjs/runtime/runtime";
 import "@xterm/xterm/css/xterm.css";
 
+/**
+ * Whether an element has a real box to fit against.
+ *
+ * QuickTerminal hides its inactive panes with `display: none`, which gives a
+ * 0x0 box. The size has to be measured: proposeDimensions() clamps to
+ * Math.max(2, …) and Math.max(1, …) and reads the parent's specified "100%"
+ * height, so a hidden pane still proposes a plausible-looking 11x5 that no
+ * check of the proposal could catch.
+ */
+function isLaidOut(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  const box = el.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
+}
+
 interface TerminalPaneProps {
   sessionId: string;
   active: boolean;
@@ -122,13 +137,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     const fit = fitRef.current;
     const term = termRef.current;
     if (!fit || !term) return;
-    // Bail on a container that isn't laid out (QuickTerminal hides its
-    // inactive panes with `display: none`). Measure the box, don't inspect the
-    // proposed dims: proposeDimensions() clamps to Math.max(2, …)/Math.max(1, …)
-    // and reads the parent's specified "100%" height, so a hidden pane still
-    // proposes a plausible-looking 11x5 rather than anything we could detect.
-    const box = containerRef.current?.getBoundingClientRect();
-    if (!box || box.width === 0 || box.height === 0) return;
+    if (!isLaidOut(containerRef.current)) return;
     const dims = fit.proposeDimensions();
     if (!dims) return;
     const changed = dims.cols !== term.cols || dims.rows !== term.rows;
@@ -201,7 +210,13 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       // WebGL not available, DOM renderer is fine
     }
 
-    fit.fit();
+    // Only fit a laid-out box. QuickTerminal keeps its shells across
+    // close/reopen, so a non-active pane can mount inside `display: none`,
+    // where proposeDimensions() clamps to about 11x5. Fitting to that would
+    // leave xterm on a junk grid, and ReplayBuffer would then write
+    // 120-column output into it. Leaving xterm at its 80x24 default is closer,
+    // and the activation effect fits properly once the pane is visible.
+    if (isLaidOut(container)) fit.fit();
     termRef.current = term;
     fitRef.current = fit;
     serializeRef.current = serialize;

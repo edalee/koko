@@ -224,4 +224,24 @@ describe("TerminalPane resize guard", () => {
     expect(fitFn).not.toHaveBeenCalled();
     expect(Resize).not.toHaveBeenCalled();
   });
+
+  it("does not fit at mount when the pane starts hidden", async () => {
+    // QuickTerminal keeps its shells across close/reopen, so a non-active pane
+    // remounts inside `display: none`. Fitting there would leave xterm on the
+    // clamped ~11x5 grid and ReplayBuffer would write into it.
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = vi.fn(
+      () => ({ width: 0, height: 0, toJSON: () => ({}) }) as DOMRect,
+    );
+    fitFn.mockClear();
+    proposeDimensionsFn.mockReturnValue({ cols: 11, rows: 5 });
+
+    render(<TerminalPane sessionId="session-mount-hidden" active={false} />);
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(r));
+    });
+
+    Element.prototype.getBoundingClientRect = rect;
+    expect(fitFn).not.toHaveBeenCalled();
+  });
 });
