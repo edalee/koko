@@ -112,14 +112,18 @@ describe("TerminalPane resize guard", () => {
     expect(Resize).not.toHaveBeenCalled();
   });
 
-  it("relies on ResizeObserver (not tab switch) to trigger fit()", async () => {
-    // With the scroll-pinning rewrite, fit() is no longer called on
-    // active prop change — ResizeObserver handles all resize detection.
+  it("re-fits on tab switch when the pane was resized while backgrounded", async () => {
+    // Inactive panes are hidden with `visibility`, so their box still resizes
+    // with the window and sidebars — but the ResizeObserver deliberately drops
+    // those events to avoid SIGWINCH-storming every background Claude TUI.
+    // Activation is where a backgrounded pane catches up; without it the tab
+    // keeps stale cols and the TUI renders cropped.
     const { rerender } = render(<TerminalPane sessionId="session-1" active={false} />);
 
     fitFn.mockClear();
     (Resize as ReturnType<typeof vi.fn>).mockClear();
 
+    // Container grew while this tab was hidden — xterm is still at 80x24.
     proposeDimensionsFn.mockReturnValue({ cols: 120, rows: 30 });
 
     rerender(<TerminalPane sessionId="session-1" active={true} />);
@@ -128,8 +132,8 @@ describe("TerminalPane resize guard", () => {
       await new Promise((r) => requestAnimationFrame(r));
     });
 
-    // fit() should NOT be called on tab switch — ResizeObserver handles it
-    expect(fitFn).not.toHaveBeenCalled();
+    expect(fitFn).toHaveBeenCalled();
+    expect(Resize).toHaveBeenCalledWith("session-1", 120, 30);
   });
 
   it("ResizeObserver skips fit when dimensions are unchanged", async () => {
@@ -164,5 +168,80 @@ describe("TerminalPane resize guard", () => {
 
     expect(fitFn).not.toHaveBeenCalled();
     expect(Resize).not.toHaveBeenCalled();
+  });
+
+  it("does not refit a container that is not laid out", async () => {
+    // QuickTerminal hides its inactive panes with `display: none`, which gives
+    // a 0x0 box. proposeDimensions() still returns a plausible 11x5 there,
+    // because it clamps and reads the parent's specified "100%" height, so the
+    // size has to be measured rather than inferred from the proposal.
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = vi.fn(
+      () => ({ width: 0, height: 0, toJSON: () => ({}) }) as DOMRect,
+    );
+
+    const { rerender } = render(<TerminalPane sessionId="session-hidden" active={false} />);
+    fitFn.mockClear();
+    (Resize as ReturnType<typeof vi.fn>).mockClear();
+    proposeDimensionsFn.mockReturnValue({ cols: 11, rows: 5 });
+
+    rerender(<TerminalPane sessionId="session-hidden" active={true} />);
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(r));
+    });
+
+    Element.prototype.getBoundingClientRect = rect;
+
+    expect(fitFn).not.toHaveBeenCalled();
+    expect(Resize).not.toHaveBeenCalled();
+  });
+
+  it("skips a refit queued just before the tab went inactive", async () => {
+    let observerCallback: ResizeObserverCallback | null = null;
+    globalThis.ResizeObserver = class {
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      constructor(cb: ResizeObserverCallback) {
+        observerCallback = cb;
+      }
+    } as unknown as typeof ResizeObserver;
+
+    const { rerender } = render(<TerminalPane sessionId="session-race" active={true} />);
+    fitFn.mockClear();
+    (Resize as ReturnType<typeof vi.fn>).mockClear();
+    proposeDimensionsFn.mockReturnValue({ cols: 120, rows: 30 });
+
+    // Resize fires while active, then the tab is switched away inside the 50ms
+    // debounce. The queued refit must not size a hidden pane.
+    (observerCallback as unknown as ResizeObserverCallback)([], {} as ResizeObserver);
+    rerender(<TerminalPane sessionId="session-race" active={false} />);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+
+    expect(fitFn).not.toHaveBeenCalled();
+    expect(Resize).not.toHaveBeenCalled();
+  });
+
+  it("does not fit at mount when the pane starts hidden", async () => {
+    // QuickTerminal keeps its shells across close/reopen, so a non-active pane
+    // remounts inside `display: none`. Fitting there would leave xterm on the
+    // clamped ~11x5 grid and ReplayBuffer would write into it.
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = vi.fn(
+      () => ({ width: 0, height: 0, toJSON: () => ({}) }) as DOMRect,
+    );
+    fitFn.mockClear();
+    proposeDimensionsFn.mockReturnValue({ cols: 11, rows: 5 });
+
+    render(<TerminalPane sessionId="session-mount-hidden" active={false} />);
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(r));
+    });
+
+    Element.prototype.getBoundingClientRect = rect;
+    expect(fitFn).not.toHaveBeenCalled();
   });
 });
