@@ -10,11 +10,29 @@ import { ReplayBuffer, Resize, Write } from "../../wailsjs/go/main/TerminalManag
 import { BrowserOpenURL, EventsOn } from "../../wailsjs/runtime/runtime";
 import "@xterm/xterm/css/xterm.css";
 
+/**
+ * Whether an element has a real box to fit against.
+ *
+ * QuickTerminal hides its inactive panes with `display: none`, which gives a
+ * 0x0 box. The size has to be measured: proposeDimensions() clamps to
+ * Math.max(2, …) and Math.max(1, …) and reads the parent's specified "100%"
+ * height, so a hidden pane still proposes a plausible-looking 11x5 that no
+ * check of the proposal could catch.
+ */
+function isLaidOut(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  const box = el.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
+}
+
 interface TerminalPaneProps {
   sessionId: string;
   active: boolean;
   onExit?: () => void;
 }
+
+/** Terminal selections can span thousands of lines — cap what we put in a URL. */
+const MAX_SEARCH_QUERY_LEN = 400;
 
 export default function TerminalPane({ sessionId, active, onExit }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -91,6 +109,47 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     navigator.clipboard.writeText(htmlToMarkdown(html));
   }, []);
 
+  // Web-search the selection in the OS default browser. BrowserOpenURL hands
+  // the URL to the system opener, so it follows whatever browser is default.
+  const searchWeb = useCallback(() => {
+    const term = termRef.current;
+    if (!term?.hasSelection()) return;
+    // Array.from splits by code point, not UTF-16 code unit — slicing raw
+    // would split a surrogate pair and make encodeURIComponent throw.
+    const query = Array.from(cleanTerminalText(term.getSelection()).replace(/\s+/g, " ").trim())
+      .slice(0, MAX_SEARCH_QUERY_LEN)
+      .join("");
+    if (!query) return;
+    BrowserOpenURL(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
+  }, []);
+
+  /**
+   * Re-fit the terminal to its container and tell the PTY the new size.
+   *
+   * The dimension guard makes this a no-op when nothing changed, so we never
+   * send a spurious SIGWINCH — those disrupt Claude's scroll position.
+   *
+   * `alwaysNotify` sends the Resize even when the grid is unchanged. Needed
+   * when attaching to a PTY, which starts at its own default size and has to
+   * be told ours regardless.
+   */
+  const refit = useCallback((sid: string, alwaysNotify = false) => {
+    const fit = fitRef.current;
+    const term = termRef.current;
+    if (!fit || !term) return;
+    if (!isLaidOut(containerRef.current)) return;
+    const dims = fit.proposeDimensions();
+    if (!dims) return;
+    const changed = dims.cols !== term.cols || dims.rows !== term.rows;
+    if (!changed && !alwaysNotify) return;
+    if (changed) {
+      fit.fit();
+      // WORKAROUND[xtermjs/xterm.js#5847]: see comment block in the mount effect.
+      webglRef.current?.clearTextureAtlas?.();
+    }
+    Resize(sid, dims.cols, dims.rows);
+  }, []);
+
   // Create terminal once (stable across reconnects)
   useEffect(() => {
     const container = containerRef.current;
@@ -151,7 +210,13 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       // WebGL not available, DOM renderer is fine
     }
 
-    fit.fit();
+    // Only fit a laid-out box. QuickTerminal keeps its shells across
+    // close/reopen, so a non-active pane can mount inside `display: none`,
+    // where proposeDimensions() clamps to about 11x5. Fitting to that would
+    // leave xterm on a junk grid, and ReplayBuffer would then write
+    // 120-column output into it. Leaving xterm at its 80x24 default is closer,
+    // and the activation effect fits properly once the pane is visible.
+    if (isLaidOut(container)) fit.fit();
     termRef.current = term;
     fitRef.current = fit;
     serializeRef.current = serialize;
@@ -210,18 +275,16 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     // Resize — debounce to avoid rapid SIGWINCH during drag.
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
-      if (!activeRef.current) return; // skip hidden tabs
+      // Skip hidden tabs — refitting every backgrounded session on each drag
+      // frame would SIGWINCH-storm every running Claude TUI. They catch up in
+      // the activation effect below, which re-fits if the size drifted.
+      if (!activeRef.current) return;
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
-        if (fitRef.current && termRef.current) {
-          const dims = fitRef.current.proposeDimensions();
-          if (dims && (dims.cols !== termRef.current.cols || dims.rows !== termRef.current.rows)) {
-            fitRef.current.fit();
-            Resize(sessionIdRef.current, dims.cols, dims.rows);
-            // WORKAROUND[xtermjs/xterm.js#5847]: see comment block below.
-            webglRef.current?.clearTextureAtlas?.();
-          }
-        }
+        // Re-check: the tab can go inactive during the 50ms debounce, and
+        // refitting a now-hidden pane would SIGWINCH it to a junk size.
+        if (!activeRef.current) return;
+        refit(sessionIdRef.current);
       }, 50);
     });
     observer.observe(container);
@@ -249,7 +312,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
     //      `hadOutputSinceFlushRef` ref and the assignment in the
     //      pty:data handler).
     //   3. Delete the `webglRef.current?.clearTextureAtlas?.()` call
-    //      inside the ResizeObserver above.
+    //      inside refit(), above.
     //   4. (Optional) Keep the "Redraw Terminal" context-menu action
     //      as a user-facing escape hatch; it's harmless even after
     //      the fix lands.
@@ -275,7 +338,7 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       termRef.current = null;
       fitRef.current = null;
     };
-  }, []); // stable — never recreated
+  }, [refit]); // refit is stable — this effect must never re-run; it owns the terminal
 
   // Subscribe to PTY events — re-subscribes when sessionId changes (reconnect).
   useEffect(() => {
@@ -293,13 +356,9 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       onExitRef.current?.();
     });
 
-    // Initial resize for this session
-    if (fitRef.current) {
-      const dims = fitRef.current.proposeDimensions();
-      if (dims) {
-        Resize(sessionId, dims.cols, dims.rows);
-      }
-    }
+    // Initial resize for this session — always notify, the PTY starts at its
+    // own default size and has no idea how wide we are.
+    refit(sessionId, true);
 
     // Replay buffered output from this session
     ReplayBuffer(sessionId).then((encoded) => {
@@ -313,14 +372,20 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
       cleanupData();
       cleanupExit();
     };
-  }, [sessionId]);
+  }, [sessionId, refit]);
 
-  // Focus terminal when becoming active.
+  // Catch up on layout changes missed while backgrounded, then focus.
+  //
+  // Panes are hidden with `visibility`, not unmounted, so an inactive pane's
+  // box still resizes with the window and the sidebars — but the observer
+  // above deliberately drops those events. Without this, a tab that was
+  // inactive during a resize keeps its stale `cols` forever and the TUI
+  // renders cropped. The guard inside refit() makes the common case a no-op.
   useEffect(() => {
-    if (active && termRef.current) {
-      termRef.current.focus();
-    }
-  }, [active]);
+    if (!active) return;
+    refit(sessionId);
+    termRef.current?.focus();
+  }, [active, sessionId, refit]);
 
   // Close context menu on any click or keypress
   useEffect(() => {
@@ -416,6 +481,10 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
             if (text && termRef.current) Write(sessionIdRef.current, utf8ToBase64(text));
             setCtxMenu(null);
           }}
+          onSearchWeb={() => {
+            searchWeb();
+            setCtxMenu(null);
+          }}
           onSelectAll={() => {
             termRef.current?.selectAll();
             setCtxMenu(null);
@@ -447,6 +516,7 @@ interface CtxMenuProps {
   onCopy: () => void;
   onCopyMarkdown: () => void;
   onPaste: () => void;
+  onSearchWeb: () => void;
   onSelectAll: () => void;
   onClear: () => void;
   onRedraw: () => void;
@@ -459,6 +529,7 @@ function ContextMenu({
   onCopy,
   onCopyMarkdown,
   onPaste,
+  onSearchWeb,
   onSelectAll,
   onClear,
   onRedraw,
@@ -473,7 +544,10 @@ function ContextMenu({
     { label: "Copy", shortcut: "⌘C", action: onCopy, disabled: !hasSelection },
     { label: "Copy as Markdown", shortcut: "⇧⌘C", action: onCopyMarkdown, disabled: !hasSelection },
     { label: "Paste", shortcut: "⌘V", action: onPaste },
-    { label: "---", action: () => {}, separator: true },
+    // `label` doubles as the React key, so separators need distinct ones.
+    { label: "sep-clipboard", action: () => {}, separator: true },
+    { label: "Search Web", action: onSearchWeb, disabled: !hasSelection },
+    { label: "sep-search", action: () => {}, separator: true },
     { label: "Select All", shortcut: "⌘A", action: onSelectAll },
     { label: "Redraw Terminal", action: onRedraw },
     { label: "Clear Terminal", action: onClear },
