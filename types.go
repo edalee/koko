@@ -179,6 +179,16 @@ type Worktree struct {
 	Prunable              bool   `json:"prunable"` // worktree dir is missing
 }
 
+// Conversation is one Claude session stored on disk, as offered by the
+// session picker.
+type Conversation struct {
+	UUID       string `json:"uuid"`       // the session file's name
+	Title      string `json:"title"`      // Claude's own title, else the first prompt
+	Preview    string `json:"preview"`    // last assistant message, truncated
+	ModifiedAt int64  `json:"modifiedAt"` // unix millis
+	SizeBytes  int64  `json:"sizeBytes"`
+}
+
 // BranchCI represents CI status for a git branch.
 type BranchCI struct {
 	Branch string        `json:"branch"`

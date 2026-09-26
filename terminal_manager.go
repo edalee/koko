@@ -354,11 +354,26 @@ func claudeProjectDir(dir string) string {
 	if err != nil {
 		return ""
 	}
+	return filepath.Join(home, ".claude", "projects", claudeProjectKey(normaliseDir(dir)))
+}
+
+// normaliseDir resolves a directory the way the Claude process reports its
+// own cwd. Clean drops a trailing slash, which api_server.go can pass
+// through, and EvalSymlinks matches process.cwd() for a symlinked checkout.
+func normaliseDir(dir string) string {
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		resolved = filepath.Clean(dir)
+		return filepath.Clean(dir)
 	}
-	return filepath.Join(home, ".claude", "projects", claudeProjectKey(resolved))
+	return resolved
+}
+
+// sameDir reports whether two paths name the same directory once resolved.
+// Two directories can share one Claude project folder, because the key folds
+// every non-alphanumeric character to "-", so /x/foo_bar and /x/foo-bar land
+// together. Comparing the cwd recorded in a session file separates them.
+func sameDir(a, b string) bool {
+	return normaliseDir(a) == normaliseDir(b)
 }
 
 // listJSONL returns the set of .jsonl filenames in dir. A missing directory
