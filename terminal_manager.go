@@ -111,10 +111,58 @@ func dirSlug(dir string) string {
 }
 
 // nextSlug generates the next slug for a directory, e.g. "koko-1", "koko-2".
+//
+// The counter is keyed by base slug, not by directory. dirSlug is the
+// basename, so /a/koko and /b/koko produce the same base, and counting per
+// directory handed "koko-1" to both. A slug has to name one session: the CLI,
+// the MCP server and the Slack bot all resolve by it.
+//
+// Caller must hold tm.mu.
 func (tm *TerminalManager) nextSlug(dir string) string {
 	base := dirSlug(dir)
-	tm.slugCount[dir]++
-	return fmt.Sprintf("%s-%d", base, tm.slugCount[dir])
+	tm.slugCount[base]++
+	return fmt.Sprintf("%s-%d", base, tm.slugCount[base])
+}
+
+// reserveSlug records a slug taken from a recovered session, so a later new
+// session cannot hand out the same one.
+//
+// Caller must hold tm.mu.
+func (tm *TerminalManager) reserveSlug(slug string) {
+	base, n, ok := splitSlug(slug)
+	if !ok {
+		return
+	}
+	if n > tm.slugCount[base] {
+		tm.slugCount[base] = n
+	}
+}
+
+// SeedSlugs raises the slug counters past every slug already persisted.
+//
+// Without this the counters start empty on each launch, and saved tabs
+// reconnect lazily, on click. Restart, open a new session in koko, and it
+// takes "koko-1" while the saved koko-1 is still sitting there disconnected.
+func (tm *TerminalManager) SeedSlugs(slugs []string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, s := range slugs {
+		tm.reserveSlug(s)
+	}
+}
+
+// splitSlug splits "koko-12" into "koko" and 12. A slug without a trailing
+// number is not one we generated.
+func splitSlug(slug string) (string, int, bool) {
+	i := strings.LastIndex(slug, "-")
+	if i <= 0 || i == len(slug)-1 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(slug[i+1:])
+	if err != nil || n < 1 {
+		return "", 0, false
+	}
+	return slug[:i], n, true
 }
 
 // resolveLoginPath gets the full PATH from an interactive login shell.
@@ -190,6 +238,7 @@ type CreateSessionOpts struct {
 	Rows            int    `json:"rows"`
 	Resume          bool   `json:"resume"`
 	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume (empty = --continue)
+	Slug            string `json:"slug"`            // reuse an existing slug on recovery
 }
 
 func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
@@ -207,7 +256,14 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	tm.mu.Lock()
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
-	slug := tm.nextSlug(opts.Dir)
+	// A recovered session keeps its slug, so CLI, MCP and Slack references
+	// survive the restart. Reserve it so a later new session cannot repeat it.
+	slug := opts.Slug
+	if slug == "" {
+		slug = tm.nextSlug(opts.Dir)
+	} else {
+		tm.reserveSlug(slug)
+	}
 	tm.mu.Unlock()
 
 	if opts.Cols == 0 {
@@ -860,6 +916,18 @@ func (tm *TerminalManager) GetClaudeSessionID(sessionID string) (string, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.claudeSessionID, nil
+}
+
+// GetSessionSlug returns the slug the backend assigned to a session.
+//
+// The frontend has no other way to learn it. createTab set slug: "" and
+// nothing ever filled it in, so every persisted slug was empty.
+func (tm *TerminalManager) GetSessionSlug(sessionID string) (string, error) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return "", err
+	}
+	return s.slug, nil // set once at creation, never written again
 }
 
 // GetSessionBySlug finds a session by its slug (e.g. "koko-1").
