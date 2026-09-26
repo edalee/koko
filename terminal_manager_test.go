@@ -414,34 +414,121 @@ func TestDetectClaudeSessionID_WaitsForFirstSubmit(t *testing.T) {
 	}
 }
 
-func TestDetectClaudeSessionID_GivesUpAfterCaptureWindow(t *testing.T) {
+func TestDetectClaudeSessionID_StaysArmedForALaterSubmit(t *testing.T) {
 	dir := t.TempDir()
 	tm := newTestManager()
-	// Submitted long ago, so the capture window has closed.
+	// Submitted long ago, so the capture window has closed. Any Enter arms it,
+	// including one that writes no file, so the detector must keep waiting
+	// rather than give up for good.
 	started := time.Now().Add(-2 * captureWindow)
 	s := newDetectSession("test-late", started, started)
 
 	preExisting := listJSONL(dir)
-
-	stopped := make(chan struct{})
-	go func() {
-		tm.detectClaudeSessionID(s, dir, preExisting)
-		close(stopped)
-	}()
+	go tm.detectClaudeSessionID(s, dir, preExisting)
 	defer close(s.done)
 
 	writeJSONL(t, dir, "too-late.jsonl", time.Now())
-
-	select {
-	case <-stopped:
-	case <-time.After(2 * time.Second):
-		t.Fatal("detector kept polling past the capture window")
+	if got := waitForUUID(s, 1200*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture past the window, got %q", got)
 	}
+
+	// The user finally sends a real message.
 	s.mu.Lock()
-	got := s.claudeSessionID
+	s.lastSubmitAt = time.Now()
 	s.mu.Unlock()
-	if got != "" {
-		t.Fatalf("expected no capture, got %q", got)
+	writeJSONL(t, dir, "too-late.jsonl", time.Now())
+
+	if got := waitForUUID(s, 3*time.Second); got != "too-late" {
+		t.Fatalf("expected capture after a fresh submit, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_IgnoresFileOlderThanTheSubmit(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+	now := time.Now()
+	s := newDetectSession("test-foreign", now.Add(-time.Hour), now)
+
+	// New since launch and the only candidate, but written well before the
+	// submit that should have produced it. A plain `claude` run in the same
+	// directory looks exactly like this.
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "someone-elses.jsonl", now.Add(-time.Minute))
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+		t.Fatalf("expected no capture of a pre-submit file, got %q", got)
+	}
+}
+
+func TestDetectClaudeSessionID_IgnoresQuickTerminalShell(t *testing.T) {
+	dir := t.TempDir()
+	tm := newTestManager()
+
+	// A shell registers with the tab's directory and never takes a UUID, so
+	// counting it as a rival blocked capture for as long as the shell lived.
+	shell := newDetectSession("test-shell", time.Now().Add(-time.Minute), time.Now())
+	shell.isShell = true
+	s := newDetectSession("test-claude", time.Now().Add(-time.Minute), time.Now())
+	tm.mu.Lock()
+	tm.sessions[shell.id] = shell
+	tm.sessions[s.id] = s
+	tm.mu.Unlock()
+
+	preExisting := listJSONL(dir)
+	writeJSONL(t, dir, "mine.jsonl", time.Now())
+
+	go tm.detectClaudeSessionID(s, dir, preExisting)
+	defer close(s.done)
+
+	if got := waitForUUID(s, 3*time.Second); got != "mine" {
+		t.Fatalf("expected mine, got %q", got)
+	}
+}
+
+func TestDirAmbiguous_ComparesTheProjectFolder(t *testing.T) {
+	tm := newTestManager()
+	// Claude folds every non-alphanumeric character to "-", so these two
+	// directories share one project folder even though the strings differ.
+	a := newDetectSession("amb-a", time.Now(), time.Now())
+	a.dir = "/x/foo_bar"
+	a.projectDir = claudeProjectDir("/x/foo_bar")
+	b := newDetectSession("amb-b", time.Now(), time.Now())
+	b.dir = "/x/foo-bar"
+	b.projectDir = claudeProjectDir("/x/foo-bar")
+	tm.mu.Lock()
+	tm.sessions[a.id] = a
+	tm.sessions[b.id] = b
+	tm.mu.Unlock()
+
+	if a.projectDir != b.projectDir {
+		t.Fatalf("expected one project folder, got %q and %q", a.projectDir, b.projectDir)
+	}
+	if !tm.dirAmbiguous(a) {
+		t.Fatal("expected the two sessions to be rivals")
+	}
+}
+
+func TestUUIDClaimed_DeadSessionKeepsItsConversation(t *testing.T) {
+	tm := newTestManager()
+	// Reconnecting a disconnected tab resumes its conversation, so a dead
+	// session's UUID is not free for a sibling to take.
+	dead := newDetectSession("own-dead", time.Now(), time.Now())
+	dead.claudeSessionID = "held"
+	close(dead.done)
+	live := newDetectSession("own-live", time.Now(), time.Now())
+	tm.mu.Lock()
+	tm.sessions[dead.id] = dead
+	tm.sessions[live.id] = live
+	tm.mu.Unlock()
+
+	if !tm.uuidClaimed("held", live.id) {
+		t.Fatal("a dead session's UUID was treated as free")
+	}
+	if tm.claimUUID(live, "held", "test") {
+		t.Fatal("claimUUID took a UUID another session holds")
 	}
 }
 

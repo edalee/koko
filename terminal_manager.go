@@ -63,6 +63,8 @@ type session struct {
 	startedAt       time.Time
 	lastSubmitAt    time.Time // when the user last submitted a line (Enter)
 	inPaste         bool      // inside an xterm bracketed paste
+	isShell         bool      // Quick Terminal shell, not a Claude session
+	projectDir      string    // Claude's project folder for dir, resolved once
 	ptmx            *os.File
 	cmd             *exec.Cmd
 	mu              sync.Mutex
@@ -266,6 +268,7 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		dir:             opts.Dir,
 		claudeSessionID: opts.ClaudeSessionID,
 		startedAt:       startedAt,
+		projectDir:      projectDir,
 		ptmx:            ptmx,
 		cmd:             cmd,
 		done:            make(chan struct{}),
@@ -279,8 +282,8 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 
 	// Capture the Claude session UUID, unless the caller already gave us one.
 	if opts.ClaudeSessionID == "" {
-		if continueUUID != "" && !tm.uuidClaimed(continueUUID, s.id) {
-			tm.setClaudeSessionID(s, continueUUID, "continue")
+		if continueUUID != "" && tm.claimUUID(s, continueUUID, "continue") {
+			// Claimed, nothing to watch for.
 		} else {
 			go tm.detectClaudeSessionID(s, projectDir, preExisting)
 		}
@@ -383,6 +386,10 @@ func listJSONL(dir string) map[string]bool {
 // a file written by a plain `claude` run in the same directory.
 const captureWindow = 2 * time.Minute
 
+// submitSlack absorbs clock and filesystem timestamp granularity when matching
+// a session file against the submit that produced it.
+const submitSlack = 2 * time.Second
+
 // detectClaudeSessionID watches for the .jsonl file Claude writes for this
 // session and records its UUID, which is the filename.
 //
@@ -424,8 +431,11 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 			continue // nothing submitted, so Claude has written nothing
 		}
 		if time.Since(lastSubmit) > captureWindow {
-			log.Printf("[pty] gave up capturing Claude session UUID for %s", s.slug)
-			return
+			// Keep waiting rather than returning. Any Enter arms the window,
+			// including one that writes no file, such as an empty prompt or a
+			// startup dialog. Returning here would leave nothing watching when
+			// the first real message finally lands.
+			continue
 		}
 		if tm.dirAmbiguous(s) {
 			continue // another submitted-to session here, do not guess
@@ -446,6 +456,13 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 				preExisting[name] = true
 				continue
 			}
+			if info.ModTime().Before(lastSubmit.Add(-submitSlack)) {
+				// Our file is written in response to the submit. An older one
+				// belongs to something else, most likely a plain `claude` run
+				// in the same directory. Do not blacklist: only this round is
+				// wrong, a later submit may make it ours.
+				continue
+			}
 			uuid := strings.TrimSuffix(name, ".jsonl")
 			if tm.uuidClaimed(uuid, s.id) {
 				// Owned by another session. Never blacklist it: doing so was
@@ -460,8 +477,9 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 		if len(candidates) != 1 {
 			continue
 		}
-		tm.setClaudeSessionID(s, candidates[0], "new file")
-		return
+		if tm.claimUUID(s, candidates[0], "new file") {
+			return
+		}
 	}
 }
 
@@ -511,18 +529,27 @@ func (s *session) lastSubmit() time.Time {
 	return s.lastSubmitAt
 }
 
-// dirAmbiguous reports whether another live session shares this directory, has
-// had a line submitted, and still has no UUID. If so, a new file could belong
-// to either session.
+// dirAmbiguous reports whether another live Claude session watches the same
+// project folder, has had a line submitted, and still has no UUID. If so, a
+// new file could belong to either session.
+//
+// It compares the mapped project folder, not the raw directory. Claude folds
+// every non-alphanumeric character to "-", so /x/foo_bar and /x/foo-bar share
+// one folder while their dir strings differ.
+//
+// Quick Terminal shells are excluded. They register here with the tab's
+// directory and never take a UUID, so counting them would block capture in
+// that directory for as long as the shell lives.
 func (tm *TerminalManager) dirAmbiguous(s *session) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	for id, other := range tm.sessions {
-		if id == s.id || !other.alive() {
+		if id == s.id || other.isShell || !other.alive() {
 			continue
 		}
 		other.mu.Lock()
-		rival := other.dir == s.dir && other.claudeSessionID == "" && !other.lastSubmitAt.IsZero()
+		rival := other.projectDir == s.projectDir &&
+			other.claudeSessionID == "" && !other.lastSubmitAt.IsZero()
 		other.mu.Unlock()
 		if rival {
 			return true
@@ -531,25 +558,9 @@ func (tm *TerminalManager) dirAmbiguous(s *session) bool {
 	return false
 }
 
-// setClaudeSessionID records the UUID and tells the frontend, so it does not
-// have to guess when capture happened.
-func (tm *TerminalManager) setClaudeSessionID(s *session, uuid, reason string) {
-	s.mu.Lock()
-	s.claudeSessionID = uuid
-	s.mu.Unlock()
-	log.Printf("[pty] captured Claude session UUID (%s): %s for %s", reason, uuid, s.slug)
-	if tm.ctx != nil {
-		runtime.EventsEmit(tm.ctx, "session:claude-id", map[string]string{
-			"sessionId":       s.id,
-			"claudeSessionId": uuid,
-		})
-	}
-}
-
 // alive reports whether the session's process is still running. readLoop
-// closes done on exit but leaves the entry in tm.sessions, so every scan over
-// that map has to skip the dead ones. A dead session used to hold its UUID and
-// block its directory until the app restarted.
+// closes done on exit but leaves the entry in tm.sessions, so any scan that
+// cares about current competition has to skip the dead ones.
 func (s *session) alive() bool {
 	select {
 	case <-s.done:
@@ -559,13 +570,21 @@ func (s *session) alive() bool {
 	}
 }
 
-// uuidClaimed reports whether a live session other than exceptID already holds
-// this UUID.
+// uuidClaimed reports whether a session other than exceptID already holds this
+// UUID.
+//
+// Dead sessions count. A session whose Claude exited still owns its
+// conversation, because reconnecting that tab resumes it, so a sibling must
+// not take the UUID for itself.
 func (tm *TerminalManager) uuidClaimed(uuid, exceptID string) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	return tm.uuidClaimedLocked(uuid, exceptID)
+}
+
+func (tm *TerminalManager) uuidClaimedLocked(uuid, exceptID string) bool {
 	for id, other := range tm.sessions {
-		if id == exceptID || !other.alive() {
+		if id == exceptID {
 			continue
 		}
 		other.mu.Lock()
@@ -576,6 +595,30 @@ func (tm *TerminalManager) uuidClaimed(uuid, exceptID string) bool {
 		}
 	}
 	return false
+}
+
+// claimUUID records the UUID unless another session already holds it. The
+// check and the set share one lock, so two sessions racing on the same file
+// cannot both win.
+func (tm *TerminalManager) claimUUID(s *session, uuid, reason string) bool {
+	tm.mu.Lock()
+	if tm.uuidClaimedLocked(uuid, s.id) {
+		tm.mu.Unlock()
+		return false
+	}
+	s.mu.Lock()
+	s.claudeSessionID = uuid
+	s.mu.Unlock()
+	tm.mu.Unlock()
+
+	log.Printf("[pty] captured Claude session UUID (%s): %s for %s", reason, uuid, s.slug)
+	if tm.ctx != nil {
+		runtime.EventsEmit(tm.ctx, "session:claude-id", map[string]string{
+			"sessionId":       s.id,
+			"claudeSessionId": uuid,
+		})
+	}
+	return true
 }
 
 // mostRecentJSONL returns the UUID of the most recently modified .jsonl file
@@ -633,9 +676,12 @@ func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (strin
 	}
 
 	s := &session{
-		id:          id,
-		name:        "Quick Terminal",
-		dir:         dir,
+		id:   id,
+		name: "Quick Terminal",
+		dir:  dir,
+		// A shell never takes a Claude UUID, so it must not count as a rival
+		// when a Claude session in the same directory looks for its file.
+		isShell:     true,
 		ptmx:        ptmx,
 		cmd:         cmd,
 		done:        make(chan struct{}),
@@ -677,7 +723,6 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	// User sent input — clear any pending approval state
 	s.waitingApproval = false
 	s.approvalTool = ""
@@ -685,7 +730,10 @@ func (tm *TerminalManager) Write(sessionID, data string) error {
 	// Enter only: xterm answers Claude's startup queries (DA1, kitty keyboard)
 	// and its focus reports on its own, so plain input arrives at launch.
 	s.noteSubmitLocked(decoded)
-	_, err = s.ptmx.Write(decoded)
+	ptmx := s.ptmx
+	s.mu.Unlock()
+
+	_, err = ptmx.Write(decoded)
 	return err
 }
 
@@ -702,15 +750,19 @@ func (tm *TerminalManager) WriteKeystrokes(sessionID string, text string) error 
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.waitingApproval = false
 	s.approvalTool = ""
 	s.noteSubmitLocked([]byte(text))
+	ptmx := s.ptmx
+	s.mu.Unlock()
 
+	// Written outside the lock: this loop blocks once per byte on a full tty
+	// queue, and holding s.mu across it would stall every other session
+	// through tm.mu.
 	buf := []byte{0}
 	for _, b := range []byte(text) {
 		buf[0] = b
-		if _, err := s.ptmx.Write(buf); err != nil {
+		if _, err := ptmx.Write(buf); err != nil {
 			return err
 		}
 	}
