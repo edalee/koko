@@ -369,6 +369,39 @@ already offers the force path through `WorktreeRemovalDialog`.
 Forcing in bulk is the one action in this plan that could destroy work
 the user cannot get back from git. It is deliberately not offered.
 
+### E) Reload session
+
+A button on the session row in the sidebar, shown on hover next to the
+close button, and a "Reload Session" item in the terminal context menu.
+
+Reload restarts the Claude process in place. Same tab, same slug, same
+directory, same conversation. The user needs it when Claude hangs, when
+`CLAUDE.md` or an MCP server changed and Claude must re-read it, or
+after a Koko update.
+
+It is `reconnectTab` aimed at a connected tab, which nothing does today.
+`switchTab` only reconnects a tab that is already disconnected
+(`useSessionTabs.ts:307`).
+
+Steps:
+
+1. Close the old session, so the ownership guard does not see its UUID
+   as taken. This is the same requirement reconnect has.
+2. Create a session with the stored UUID, `resume: true`, and the tab's
+   slug.
+3. Swap the new session id onto the same tab, exactly as `reconnectTab`
+   does.
+
+Rules:
+
+- Confirm first when `GetSessionState` is not `idle`. Reload kills a
+  Claude that may be mid-tool-call, and anything typed but not sent is
+  lost. The conversation itself is on disk and comes back.
+- A tab with no UUID cannot reload into its conversation. Open the
+  picker instead, under D1, so the user chooses.
+- Reload is the answer to "restart this session". Closing and reopening
+  the tab is not the same: it loses the slug and the conversation.
+
 ## Data flow
 
 ```
@@ -396,8 +429,10 @@ CreateSessionWithOpts ──▶ uuidClaimed? refuse : claude --resume <uuid>
    the open TODO "Reconnect koko-1?".
 3. One conversation, one tab. Enforced in the backend, surfaced in the
    dialog.
-4. A recovered session keeps its slug.
+4. A recovered session keeps its slug. So does a reloaded one.
 5. The newest conversation is first. Recency is the only sort.
+6. Reload never silently discards work in progress. If the session is
+   not idle, it asks.
 
 ## Testing
 
@@ -440,6 +475,11 @@ Frontend:
 - A created tab stores the slug the backend assigned, and persists it.
 - A row held by another tab offers reconnect and no delete button.
 - Clearing session history leaves the conversation list unchanged.
+- Reload closes the old session before creating the new one, so the
+  ownership guard does not refuse it.
+- Reload keeps the tab's slug and conversation id.
+- Reload on a tab with no conversation id opens the picker instead.
+- Reload asks first when the session state is not `idle`.
 
 ## Rollout
 
@@ -449,26 +489,31 @@ Frontend:
 3. Ownership guard, with reconnect dropping the replaced session.
 4. `SessionDialog` step 2, reached from the New Session button.
 5. Route the worktrees module and the disconnected tab through it.
-6. Deletion: per-row delete, clear all conversations for a directory,
+6. Reload session, on the sidebar row and in the context menu.
+7. Deletion: per-row delete, clear all conversations for a directory,
    clear session history, remove Koko's worktrees.
-7. Drop the `--continue` fallback.
+8. Drop the `--continue` fallback.
 
 Steps 1 to 3 are independently mergeable. Step 4 is where behaviour
 changes for the user.
 
-Step 6 is independent of the picker and can move earlier or later.
+Step 6 needs step 2, for the slug, and step 3, for the guard. It does
+not need the dialog, so it can land before step 4.
 
-Step 7 must come last. Every tab saved before `35e7042` has no UUID, so
+Step 7 is independent of the picker and can move earlier or later.
+
+Step 8 must come last. Every tab saved before `35e7042` has no UUID, so
 dropping the fallback earlier would make those tabs start a new
 conversation on reconnect. Once step 5 lands they get the picker
 instead, and the fallback has nothing left to cover.
 
 ## Revert notes
 
-Steps 1 to 3 are additive. Steps 4 and 5 revert together, and the rename
-back to `NewSessionDialog` goes with them, because the entry points call
-it directly. Reverting step 6 restores `--continue`, which is worse but
-not broken, so revert it first if the picker has to go.
+Steps 1 to 3 are additive, and so are steps 6 and 7. Steps 4 and 5
+revert together, and the rename back to `NewSessionDialog` goes with
+them, because the entry points call it directly. Reverting step 8
+restores `--continue`, which is worse but not broken, so revert it first
+if the picker has to go.
 
 ## Out of scope, future plans
 
