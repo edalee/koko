@@ -1,0 +1,155 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// Job names, used as keys in the config, the run record and the CLI.
+const (
+	JobStandup = "standup"
+	JobFocus   = "focus"
+	JobTono    = "tono"
+)
+
+var allJobs = []string{JobStandup, JobFocus, JobTono}
+
+// JobConfig is one job's switch and its run times ("HH:MM", Monday to Friday).
+type JobConfig struct {
+	Enabled bool     `json:"enabled"`
+	Times   []string `json:"times"`
+}
+
+// SlackConfig is the bot that sends the DMs. Koko's own Slack settings are not used.
+type SlackConfig struct {
+	BotToken string `json:"botToken"`
+	UserID   string `json:"userId"`
+}
+
+// FocusConfig sets where focus blocks may go.
+type FocusConfig struct {
+	WindowStart string `json:"windowStart"` // "HH:MM"
+	WindowEnd   string `json:"windowEnd"`   // "HH:MM"
+	MinMinutes  int    `json:"minMinutes"`
+}
+
+// Config is worker.json. Koko's UI writes it, the worker only reads it.
+// It is a separate file because Koko's SaveConfig rewrites config.json from
+// its own struct and would drop any key it does not know.
+type Config struct {
+	Enabled    bool                 `json:"enabled"`
+	TimeZone   string               `json:"timeZone"`
+	CalendarID string               `json:"calendarId"`
+	TonoPath   string               `json:"tonoPath"`
+	Slack      SlackConfig          `json:"slack"`
+	Focus      FocusConfig          `json:"focus"`
+	Jobs       map[string]JobConfig `json:"jobs"`
+}
+
+func defaultConfig() Config {
+	home, _ := os.UserHomeDir()
+	return Config{
+		Enabled:    false,
+		TimeZone:   "Europe/Stockholm",
+		CalendarID: "primary",
+		TonoPath:   filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
+		Focus:      FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
+		Jobs: map[string]JobConfig{
+			JobStandup: {Enabled: true, Times: []string{"07:00"}},
+			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
+			JobTono:    {Enabled: true, Times: []string{"09:30", "12:00", "14:00"}},
+		},
+	}
+}
+
+// Paths under ~/Library/Application Support/koko, next to Koko's own files.
+type Paths struct {
+	Config   string // worker.json
+	Dir      string // worker/
+	State    string // worker/state.json
+	Logs     string // worker/logs/
+	Settings string // worker/claude-settings.json
+	TonoWrap string // worker/tono-claude.sh
+	Cache    string // cache clones for tono
+}
+
+func workerPaths() Paths {
+	configDir, _ := os.UserConfigDir()
+	home, _ := os.UserHomeDir()
+	koko := filepath.Join(configDir, "koko")
+	dir := filepath.Join(koko, "worker")
+	return Paths{
+		Config:   filepath.Join(koko, "worker.json"),
+		Dir:      dir,
+		State:    filepath.Join(dir, "state.json"),
+		Logs:     filepath.Join(dir, "logs"),
+		Settings: filepath.Join(dir, "claude-settings.json"),
+		TonoWrap: filepath.Join(dir, "tono-claude.sh"),
+		Cache:    filepath.Join(home, ".cache", "koko-worker", "repos"),
+	}
+}
+
+// loadConfig reads worker.json over the defaults, so a missing key keeps its default.
+func loadConfig(path string) (Config, error) {
+	cfg := defaultConfig()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return cfg, nil
+	}
+	if err != nil {
+		return cfg, err
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("invalid %s: %w", path, err)
+	}
+	return cfg, cfg.validate()
+}
+
+func (c Config) validate() error {
+	if _, err := time.LoadLocation(c.TimeZone); err != nil {
+		return fmt.Errorf("unknown time zone %q", c.TimeZone)
+	}
+	for name, job := range c.Jobs {
+		for _, t := range job.Times {
+			if _, _, err := parseClock(t); err != nil {
+				return fmt.Errorf("job %s: %w", name, err)
+			}
+		}
+	}
+	for _, t := range []string{c.Focus.WindowStart, c.Focus.WindowEnd} {
+		if _, _, err := parseClock(t); err != nil {
+			return fmt.Errorf("focus window: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c Config) location() *time.Location {
+	loc, err := time.LoadLocation(c.TimeZone)
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}
+
+// parseClock parses "HH:MM".
+func parseClock(s string) (hour, minute int, err error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, 0, fmt.Errorf("bad time %q, want HH:MM", s)
+	}
+	return t.Hour(), t.Minute(), nil
+}
+
+// atClock returns day's date at the "HH:MM" time, in day's location.
+func atClock(day time.Time, clock string) time.Time {
+	h, m, _ := parseClock(clock)
+	return time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, day.Location())
+}
+
+func isWeekday(t time.Time) bool {
+	return t.Weekday() != time.Saturday && t.Weekday() != time.Sunday
+}
