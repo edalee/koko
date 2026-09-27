@@ -62,7 +62,12 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 - The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its `TONO_CLAUDE` wrapper denies the posting commands as a second guard.
 - The DM holds each pass's verified output (tono's `*-merged.log` files), not the raw rounds. The verify step can drop round findings, so the raw output would mislead.
 - Findings lists become Slack bullets. Each pass is cut at 3,000 characters, and the DM links the full log.
-- One DM per review. A failed review sends one warning and is not retried for the same commit.
+- One DM per review. A review that fails for a reason other than the network sends one warning and is not retried for the same commit.
+- A network failure marks nothing, so the scheduler's retry reviews that commit once the internet is back.
+- If another tono run holds the PR's lock, the PR is left for the next slot.
+- One review per cache clone at a time, so a "Run now" never checks out another PR under a review in progress.
+- A review is capped at 45 minutes. On timeout, tono's whole process group gets SIGTERM, so tono's trap removes its lock.
+- The Test button reviews one PR only.
 
 ## Architecture
 
@@ -84,7 +89,7 @@ Koko app (UI)                      koko-worker (background)
 - **One agent with its own scheduler**, not one launchd agent per job. Time changes in the UI then need no plist rewrite.
 - **Catch-up:** each minute the worker checks which jobs were due today and have not run. A job missed while the Mac slept runs on wake.
 - **No internet:** a job waits and retries until it connects, then sends. It is never skipped.
-- **Other failures:** a job is tried 3 times, 5 minutes apart, then you get one warning DM.
+- **Other failures:** a job is tried 3 times, 5 minutes apart, then you get one warning DM. Network retries do not count towards the 3.
 - **Stand-up sections fail on their own.** If Jira, the calendar or a PR list fails, that section says so and the rest still arrives.
 - **"Run now"** is recorded against today's slots, so the scheduler does not repeat it. A stand-up run by hand at 06:55 replaces the 07:00 one.
 - **State** (`state.json`) is changed under a file lock, so the scheduler and a "Run now" never overwrite each other.
@@ -186,6 +191,7 @@ Built on `feat/koko-worker`, not committed:
 - **Tested under launchd:** checks, the stand-up (exact links, bots hidden, Jira verdicts), focus against Monday's real calendar, and tono on kalimba#28 (nothing posted). One real focus block was booked through the worker's own code on 15 January 2027, then deleted.
 - **Tested directly:** install, status and uninstall of the agent.
 - **Checked:** worker and tono runs save no conversations under `~/.claude/projects`.
+- **Tono review of the branch (fixed in the second commit):** empty UI values no longer wipe defaults, a tono timeout no longer leaves its lock, one review per cache clone, the worker sets its own PATH, a stale agent copy is reinstalled, network waits are labelled apart from failures, and six code comments are corrected.
 - **Review fixes:** plain busy focus blocks, locked state, retries, a stand-up that degrades per section, tono's first-run baseline, wake status set only on success, and a working directory for the agent.
 - **Koko app side:** `worker_service.go`, the bindings and `WorkerSettings.tsx`. `go vet`, `tsc` and `biome` are clean. Not yet visible in the app, because nothing is hooked in.
 

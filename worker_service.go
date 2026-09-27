@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,9 +124,55 @@ func (w *WorkerService) SetEnabled(enabled bool) error {
 	return err
 }
 
-// Status returns `koko-worker status` as JSON.
+// Status returns `koko-worker status` as JSON. If the agent runs an older
+// copy of the worker than the one next to Koko, it reinstalls first, so the
+// scheduler and "Run now" never run different builds.
 func (w *WorkerService) Status() (string, error) {
+	if stale, _ := installedCopyStale(); stale {
+		if _, err := runWorker(30*time.Second, "install"); err != nil {
+			return "", err
+		}
+	}
 	return runWorker(15*time.Second, "status")
+}
+
+// installedCopyStale is true if the agent's copy exists and differs from the
+// binary Koko would call.
+func installedCopyStale() (bool, error) {
+	bin, err := workerBinary()
+	if err != nil {
+		return false, err
+	}
+	configDir, _ := os.UserConfigDir()
+	installed := filepath.Join(configDir, "koko", "worker", "bin", "koko-worker")
+	if bin == installed {
+		return false, nil
+	}
+	a, err := fileHash(bin)
+	if err != nil {
+		return false, err
+	}
+	b, err := fileHash(installed)
+	if os.IsNotExist(err) {
+		return false, nil // not installed, so nothing is stale
+	}
+	if err != nil {
+		return false, err
+	}
+	return a != b, nil
+}
+
+func fileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // Check runs one connection check, or all of them if name is empty, and returns JSON.
@@ -136,13 +185,14 @@ func (w *WorkerService) Check(name string) (string, error) {
 }
 
 // RunNow runs a job at once. With test set, it returns the message instead
-// of sending it, and books nothing.
+// of sending it, and books nothing. The limit is long because a tono run
+// reviews each new PR in turn, up to 45 minutes each.
 func (w *WorkerService) RunNow(job string, test bool) (string, error) {
 	args := []string{"run", job}
 	if test {
 		args = append(args, "--test")
 	}
-	return runWorker(60*time.Minute, args...)
+	return runWorker(4*time.Hour, args...)
 }
 
 // ReadLog returns the end of the worker's log.

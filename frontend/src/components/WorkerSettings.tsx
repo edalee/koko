@@ -21,7 +21,8 @@ import {
 } from "../../wailsjs/go/main/WorkerService";
 import { cn } from "../lib/utils";
 
-// Mirrors cmd/koko-worker/config.go. The worker fills in defaults for missing keys.
+// Mirrors cmd/koko-worker/config.go. The worker fills in defaults for missing
+// or empty values, so an empty text box keeps the default.
 interface JobConfig {
   enabled: boolean;
   times: string[];
@@ -38,7 +39,7 @@ interface WorkerConfig {
 }
 
 interface RunRecord {
-  status: "ok" | "failed" | "retry";
+  status: "ok" | "failed" | "retry" | "offline";
   at: string;
   message?: string;
 }
@@ -93,6 +94,13 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
     multi: true,
   },
 ];
+
+const STATUS_LABELS: Record<string, string> = {
+  ok: "ok",
+  failed: "failed",
+  retry: "failed, trying again",
+  offline: "waiting for internet",
+};
 
 const CONNECTION_NAMES: Record<string, string> = {
   slack: "Slack",
@@ -407,10 +415,10 @@ export default function WorkerSettings() {
                         className={cn(
                           last.status === "ok" && "text-success",
                           last.status === "failed" && "text-error",
-                          last.status === "retry" && "text-warning",
+                          (last.status === "retry" || last.status === "offline") && "text-warning",
                         )}
                       >
-                        {last.status === "retry" ? "waiting for internet" : last.status}
+                        {STATUS_LABELS[last.status] ?? last.status}
                       </span>
                     </>
                   ) : (

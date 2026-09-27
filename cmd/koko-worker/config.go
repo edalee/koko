@@ -65,7 +65,8 @@ func defaultConfig() Config {
 	}
 }
 
-// Paths under ~/Library/Application Support/koko, next to Koko's own files.
+// Paths the worker uses. All but Cache sit under ~/Library/Application
+// Support/koko, next to Koko's own files.
 type Paths struct {
 	Config   string // worker.json
 	Dir      string // worker/
@@ -73,7 +74,7 @@ type Paths struct {
 	Logs     string // worker/logs/
 	Settings string // worker/claude-settings.json
 	TonoWrap string // worker/tono-claude.sh
-	Cache    string // cache clones for tono
+	Cache    string // ~/.cache/koko-worker/repos, cache clones for tono
 }
 
 func workerPaths() Paths {
@@ -92,7 +93,8 @@ func workerPaths() Paths {
 	}
 }
 
-// loadConfig reads worker.json over the defaults, so a missing key keeps its default.
+// loadConfig reads worker.json over the defaults. A missing or empty value
+// keeps its default, and so does a job entry without times.
 func loadConfig(path string) (Config, error) {
 	cfg := defaultConfig()
 	data, err := os.ReadFile(path)
@@ -105,7 +107,54 @@ func loadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("invalid %s: %w", path, err)
 	}
+	cfg.fillDefaults()
 	return cfg, cfg.validate()
+}
+
+// fillDefaults puts back defaults the JSON left empty. The Koko UI sends
+// every field, so an empty text box must not wipe a default. A job entry in
+// the JSON replaces its default whole, so its times are put back too.
+func (c *Config) fillDefaults() {
+	def := defaultConfig()
+	if c.TimeZone == "" {
+		c.TimeZone = def.TimeZone
+	}
+	if c.CalendarID == "" {
+		c.CalendarID = def.CalendarID
+	}
+	if c.TonoPath == "" {
+		c.TonoPath = def.TonoPath
+	}
+	if c.Focus.WindowStart == "" {
+		c.Focus.WindowStart = def.Focus.WindowStart
+	}
+	if c.Focus.WindowEnd == "" {
+		c.Focus.WindowEnd = def.Focus.WindowEnd
+	}
+	if c.Focus.MinMinutes <= 0 {
+		c.Focus.MinMinutes = def.Focus.MinMinutes
+	}
+	if c.Jobs == nil {
+		c.Jobs = map[string]JobConfig{}
+	}
+	for name, d := range def.Jobs {
+		j, ok := c.Jobs[name]
+		if !ok {
+			c.Jobs[name] = d
+			continue
+		}
+		var times []string
+		for _, t := range j.Times {
+			if t != "" {
+				times = append(times, t)
+			}
+		}
+		if len(times) == 0 {
+			times = d.Times
+		}
+		j.Times = times
+		c.Jobs[name] = j
+	}
 }
 
 func (c Config) validate() error {

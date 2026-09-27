@@ -38,7 +38,7 @@ type GCalEvent struct {
 
 func (e GCalEvent) allDay() bool { return e.Start.DateTime == "" && e.Start.Date != "" }
 
-// myResponse is my own attendee status, or "" for an event without attendees.
+// myResponse is your own attendee status, or "" for an event without attendees.
 func (e GCalEvent) myResponse() string {
 	for _, a := range e.Attendees {
 		if a.Self {
@@ -71,7 +71,7 @@ type Gap struct{ Start, End time.Time }
 // findFocusGaps returns today's free gaps of at least MinMinutes inside the
 // focus window, from now on.
 //
-// Timed events block unless I declined them, they are marked free, they are
+// Timed events block unless you declined them, they are marked free, they are
 // cancelled, or they are a working-location marker. Tentative and unanswered
 // invites block. Focus blocks already booked block too, so a second run on
 // the same day books nothing. An all-day event that is marked busy, or looks
@@ -106,7 +106,7 @@ func findFocusGaps(events []GCalEvent, fc FocusConfig, now time.Time) []Gap {
 	cursor := atClock(now, fc.WindowStart)
 	windowEnd := atClock(now, fc.WindowEnd)
 	if now.After(cursor) {
-		// Start late runs on the next 5 minutes, so blocks begin on a clean time.
+		// If the run starts late, round up to the next 5 minutes, so blocks begin on a clean time.
 		rounded := now.Truncate(time.Minute)
 		if m := rounded.Minute() % 5; m != 0 || rounded.Before(now) {
 			rounded = rounded.Add(time.Duration(5-m) * time.Minute)

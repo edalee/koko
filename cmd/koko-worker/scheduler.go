@@ -12,10 +12,13 @@ import (
 const (
 	StatusOK      = "ok"
 	StatusFailed  = "failed"
-	StatusRetry   = "retry" // no internet, a network error mid-run, or a failure with tries left
+	StatusOffline = "offline" // a network error: retried until the internet is back
+	StatusRetry   = "retry"   // any other failure, with tries left
 	retryInterval = 5 * time.Minute
-	maxAttempts   = 3 // a failure that is not a network error is tried this many times
-	wakeLead      = 2 * time.Minute
+	// maxFailures is how many non-network failures a slot gets before it is
+	// final. Network errors do not count. A reported error is final at once.
+	maxFailures = 3
+	wakeLead    = 2 * time.Minute
 )
 
 // RunRecord is the outcome of one scheduled slot, such as tono at 12:00 today.
@@ -25,7 +28,8 @@ type RunRecord struct {
 	Status   string    `json:"status"`
 	At       time.Time `json:"at"`
 	Message  string    `json:"message,omitempty"`
-	Attempts int       `json:"attempts"`
+	Attempts int       `json:"attempts"` // every run of the slot
+	Failures int       `json:"failures"` // runs that failed for a reason other than the network
 	NextTry  time.Time `json:"nextTry,omitempty"`
 }
 
@@ -72,6 +76,23 @@ func saveState(path string, st State) error {
 	return os.Rename(tmp, path)
 }
 
+// lockFile takes an exclusive lock on path, waiting if another process holds
+// it. Call the returned function to release it.
+func lockFile(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
+}
+
 // updateState changes the state on disk under a file lock. It reloads first,
 // so two processes (the scheduler and a "Run now") never overwrite each
 // other's changes with a stale copy.
@@ -79,21 +100,18 @@ func updateState(path string, change func(*State)) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	unlock, err := lockFile(path + ".lock")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		return err
-	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	defer unlock()
 	st := loadState(path)
 	change(&st)
 	return saveState(path, st)
 }
 
-// pruneState drops run records older than a week, so the file stays small.
+// pruneState drops run records older than a week and tono review marks older
+// than 60 days, so the file stays small.
 func pruneState(st *State, now time.Time) {
 	for k, r := range st.Runs {
 		if now.Sub(r.Slot) > 7*24*time.Hour {
@@ -134,7 +152,8 @@ func dueRuns(cfg Config, st State, now time.Time) []DueRun {
 				continue
 			}
 			rec, seen := st.Runs[slotKey(job, slot)]
-			if !seen || (rec.Status == StatusRetry && !now.Before(rec.NextTry)) {
+			retry := rec.Status == StatusRetry || rec.Status == StatusOffline
+			if !seen || (retry && !now.Before(rec.NextTry)) {
 				slots = append(slots, slot)
 			}
 		}
@@ -153,8 +172,11 @@ func recordRun(st *State, run DueRun, status, message string, now time.Time) {
 		rec := st.Runs[key]
 		rec.Job, rec.Slot, rec.Status, rec.At, rec.Message = run.Job, slot, status, now, message
 		rec.Attempts++
+		if status == StatusRetry || status == StatusFailed {
+			rec.Failures++
+		}
 		rec.NextTry = time.Time{}
-		if status == StatusRetry {
+		if status == StatusRetry || status == StatusOffline {
 			rec.NextTry = now.Add(retryInterval)
 		}
 		st.Runs[key] = rec
@@ -176,11 +198,11 @@ func manualSlots(cfg Config, job string, now time.Time) []time.Time {
 	return out
 }
 
-// attempts is the highest attempt count across the run's slots.
-func attempts(st State, run DueRun) int {
+// failures is the highest non-network failure count across the run's slots.
+func failures(st State, run DueRun) int {
 	n := 0
 	for _, slot := range run.Slots {
-		if a := st.Runs[slotKey(run.Job, slot)].Attempts; a > n {
+		if a := st.Runs[slotKey(run.Job, slot)].Failures; a > n {
 			n = a
 		}
 	}

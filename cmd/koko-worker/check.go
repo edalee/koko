@@ -64,7 +64,7 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		out, err := exec.CommandContext(ctx, "claude", "--version").Output()
 		r.OK, r.Detail = err == nil, strings.TrimSpace(string(out))
 		if err != nil {
-			r.Detail = "claude not found on the worker's PATH: " + agentPATH()
+			r.Detail = "claude not found on the worker's PATH: " + os.Getenv("PATH")
 			r.Fix = "Install Claude Code, or link it into ~/.local/bin."
 		}
 

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -297,9 +300,15 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		return tonoBaseline(ctx, env, prs)
 	}
 	var failures []string
+	var netErr error
+	reviewed := 0
 	for _, p := range prs {
 		if onlyURL != "" && p.URL != onlyURL {
 			continue
+		}
+		// A test run reviews one PR, so the Test button stays quick.
+		if env.test && onlyURL == "" && reviewed > 0 {
+			break
 		}
 		d, err := prDetail(ctx, p.URL)
 		if err != nil {
@@ -311,6 +320,18 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		}
 		report, logPath, err := tonoReview(ctx, env, p, d.HeadRefOid)
 		link := slackLink(p.URL, p.short())
+		var busy tonoBusyError
+		switch {
+		case errors.As(err, &busy):
+			// Another tono run holds this PR. Leave it unmarked for the next slot.
+			log.Printf("tono: %s skipped: %v", p.short(), err)
+			continue
+		case err != nil && (isNetworkError(err) || !online(ctx)):
+			// Not marked, so the scheduler's retry reviews it once the internet is back.
+			netErr = err
+			continue
+		}
+		reviewed++
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", p.short(), err))
 			if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not review %s: %s", link, truncate(err.Error(), 400))); nerr != nil {
@@ -319,16 +340,42 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		} else if nerr := env.notify(ctx, fmt.Sprintf("*Tono: %s* %s\n\n%s", link, p.Title, cutForSlack(report, logPath))); nerr != nil {
 			return nerr
 		}
-		// A failed review is marked too, so it is not re-reported three times a day.
+		// A review that failed for a reason other than the network is marked
+		// too, so it is not re-reported three times a day.
 		if err := env.persist(func(st *State) { st.TonoReviewed[key] = time.Now() }); err != nil {
 			return err
 		}
+	}
+	if netErr != nil {
+		return netErr
 	}
 	if len(failures) > 0 {
 		return reportedError{fmt.Errorf("tono: %s", strings.Join(failures, "; "))}
 	}
 	return nil
 }
+
+// groupCommand starts name in its own process group. When ctx ends, the whole
+// group gets SIGTERM, so tono's trap runs and Claude's children stop too. If
+// they are still there a minute later, Go kills them outright.
+func groupCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = time.Minute
+	return cmd
+}
+
+// tonoBusyError means tono found its lock for this PR taken, and skipped.
+type tonoBusyError struct{ error }
+
+// tonoSkipExit is the exit code tono uses when another review holds the lock.
+const tonoSkipExit = 2
+
+// tonoTimeout caps one review. On timeout, tono's whole process group gets
+// SIGTERM, so tono's trap removes its lock. A plain kill would leave the lock
+// behind and block every later review of that PR.
+const tonoTimeout = 45 * time.Minute
 
 // tonoBaseline runs the first time tono is switched on. It marks the open
 // PRs' current commits as seen, so only new PRs and new commits get reviewed.
@@ -358,13 +405,19 @@ func tonoBaseline(ctx context.Context, env Env, prs []SearchPR) error {
 type reportedError struct{ error }
 
 // tonoReview runs the tono CLI at the PR head in a cache clone. It never
-// touches your working clones.
+// touches your working clones. One review per cache clone at a time, so a
+// "Run now" cannot check out another PR under a review in progress.
 func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (string, string, error) {
 	dir := filepath.Join(env.paths.Cache, strings.ReplaceAll(p.repo(), "/", "__"))
+	if err := os.MkdirAll(env.paths.Cache, 0o700); err != nil {
+		return "", "", err
+	}
+	unlock, err := lockFile(dir + ".lock")
+	if err != nil {
+		return "", "", err
+	}
+	defer unlock()
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(env.paths.Cache, 0o700); err != nil {
-			return "", "", err
-		}
 		if _, err := gh(ctx, "repo", "clone", p.repo(), dir, "--", "--filter=blob:none", "--quiet"); err != nil {
 			return "", "", err
 		}
@@ -378,9 +431,9 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (strin
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, tonoTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, env.cfg.TonoPath, fmt.Sprint(p.Number), "--all", "-l", "high", "-R", p.repo())
+	cmd := groupCommand(ctx, env.cfg.TonoPath, fmt.Sprint(p.Number), "--all", "-l", "high", "-R", p.repo())
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TONO_CLAUDE="+env.paths.TonoWrap)
 	// stdout is the report. stderr has tono's progress lines, which go only to the log.
@@ -388,13 +441,17 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	started := time.Now()
-	err := cmd.Run()
+	err = cmd.Run()
 
 	logPath := filepath.Join(env.paths.Logs, fmt.Sprintf("tono-%s-%d-%s.log", shortRepo(p.repo()), p.Number, headSHA[:min(8, len(headSHA))]))
 	_ = os.MkdirAll(env.paths.Logs, 0o700)
 	_ = os.WriteFile(logPath, append(stderr.Bytes(), stdout.Bytes()...), 0o600)
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", logPath, fmt.Errorf("timed out after 45 minutes")
+		return "", logPath, fmt.Errorf("timed out after %s", tonoTimeout)
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == tonoSkipExit {
+		return "", logPath, tonoBusyError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
 	}
 	if err != nil {
 		return "", logPath, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))

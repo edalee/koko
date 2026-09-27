@@ -23,6 +23,23 @@ func agentPATH() string {
 	}, ":")
 }
 
+// workerPATH puts agentPATH's folders first, then keeps the rest of current.
+// Koko started from the Dock has a bare PATH without gh or claude.
+func workerPATH(current string) string {
+	parts := strings.Split(agentPATH(), ":")
+	seen := map[string]bool{}
+	for _, p := range parts {
+		seen[p] = true
+	}
+	for _, p := range strings.Split(current, ":") {
+		if p != "" && !seen[p] {
+			parts = append(parts, p)
+			seen[p] = true
+		}
+	}
+	return strings.Join(parts, ":")
+}
+
 func agentPlistPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library", "LaunchAgents", agentLabel+".plist")

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -153,7 +155,7 @@ func TestDueRuns(t *testing.T) {
 	})
 	t.Run("retry waits five minutes", func(t *testing.T) {
 		st := State{Runs: map[string]RunRecord{}}
-		recordRun(&st, DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}, StatusRetry, "offline", monday(7, 1))
+		recordRun(&st, DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}, StatusOffline, "offline", monday(7, 1))
 		if got := dueString(dueRuns(cfg, st, monday(7, 5))); got != "" {
 			t.Errorf("too early: got %q", got)
 		}
@@ -389,14 +391,25 @@ func TestManualSlots(t *testing.T) {
 	}
 }
 
-func TestAttemptsCountAcrossRetries(t *testing.T) {
+func TestFailuresSkipNetworkRetries(t *testing.T) {
 	st := State{Runs: map[string]RunRecord{}}
+	cfg := testConfig()
 	run := DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}
-	for i := 1; i <= 3; i++ {
-		recordRun(&st, run, StatusRetry, "boom", monday(7, i*5))
-		if got := attempts(st, run); got != i {
-			t.Fatalf("after %d tries: attempts = %d", i, got)
-		}
+	recordRun(&st, run, StatusOffline, "no such host", monday(7, 1))
+	recordRun(&st, run, StatusOffline, "no such host", monday(7, 6))
+	if got := failures(st, run); got != 0 {
+		t.Fatalf("network retries counted as failures: %d", got)
+	}
+	if d := dueString(dueRuns(cfg, st, monday(7, 11))); d != "standup[07:00]" {
+		t.Errorf("offline slot not retried: %q", d)
+	}
+	recordRun(&st, run, StatusRetry, "boom", monday(7, 11))
+	recordRun(&st, run, StatusRetry, "boom", monday(7, 16))
+	if got := failures(st, run); got != 2 {
+		t.Fatalf("failures = %d, want 2", got)
+	}
+	if got := st.Runs[slotKey(JobStandup, monday(7, 0))].Attempts; got != 4 {
+		t.Errorf("attempts = %d, want 4", got)
 	}
 }
 
@@ -417,5 +430,62 @@ func TestUpdateStateKeepsConcurrentChanges(t *testing.T) {
 	}
 	if got := len(loadState(path).TonoReviewed); got != 20 {
 		t.Errorf("lost updates: %d of 20 kept", got)
+	}
+}
+
+func TestLoadConfigKeepsDefaults(t *testing.T) {
+	path := t.TempDir() + "/worker.json"
+	// What the Koko UI sends when you only fill in Slack, plus a hand-edited job.
+	body := `{"enabled": true, "tonoPath": "", "timeZone": "", "focus": {"windowStart": ""},
+		"slack": {"botToken": "x", "userId": "U1"},
+		"jobs": {"tono": {"enabled": true}, "focus": {"enabled": false, "times": [""]}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := defaultConfig()
+	if cfg.TonoPath != def.TonoPath || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
+		t.Errorf("empty values not defaulted: %+v", cfg)
+	}
+	if got := strings.Join(cfg.Jobs[JobTono].Times, ","); got != "09:30,12:00,14:00" {
+		t.Errorf("tono times = %q", got)
+	}
+	if cfg.Jobs[JobFocus].Enabled || strings.Join(cfg.Jobs[JobFocus].Times, ",") != "09:15" {
+		t.Errorf("focus = %+v", cfg.Jobs[JobFocus])
+	}
+	if !cfg.Jobs[JobStandup].Enabled {
+		t.Error("missing stand-up entry not defaulted")
+	}
+}
+
+func TestWorkerPATH(t *testing.T) {
+	got := workerPATH("/usr/bin:/custom/bin")
+	if !strings.HasPrefix(got, agentPATH()) || !strings.HasSuffix(got, ":/custom/bin") || strings.Count(got, "/usr/bin:") != 1 {
+		t.Errorf("got %q", got)
+	}
+}
+
+// A timed-out tono must run its trap, which removes its lock. A plain kill
+// would leave the lock and block every later review of that PR.
+func TestGroupCommandRunsTrapOnTimeout(t *testing.T) {
+	dir := t.TempDir()
+	lock := dir + "/review.lock"
+	script := dir + "/fake-tono"
+	body := "#!/bin/bash\nmkdir " + lock + "\ntrap 'rmdir " + lock + "' EXIT INT TERM\nsleep 30 &\nwait\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_ = groupCommand(ctx, script).Run()
+	if took := time.Since(start); took > 10*time.Second {
+		t.Errorf("took %s to stop", took)
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Error("the trap did not run: the lock is still there")
 	}
 }

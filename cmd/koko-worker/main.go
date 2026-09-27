@@ -27,6 +27,7 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	_ = os.Setenv("PATH", workerPATH(os.Getenv("PATH")))
 	paths := workerPaths()
 	if err := os.MkdirAll(paths.Logs, 0o700); err != nil {
 		fatal(err)
@@ -64,7 +65,7 @@ func usage() {
                                          run standup, focus or tono now. --test prints
                                          instead of sending a DM, and books nothing.
                                          --date runs as if it were 07:00 that day
-  koko-worker check [name]               check connections: slack, github, jira, calendar, tono, wake
+  koko-worker check [name]               check connections: slack, github, claude, jira, calendar, tono, wake
   koko-worker status                     JSON status for the Koko app
   koko-worker install | uninstall        switch the launchd agent on or off
 `)
@@ -196,19 +197,19 @@ func serveTick(ctx context.Context, cfg Config, paths Paths) {
 		case err == nil:
 			log.Printf("%s: done", run.Job)
 		case isNetworkError(err) || !online(ctx):
-			status, msg = StatusRetry, err.Error()
+			status, msg = StatusOffline, err.Error()
 			log.Printf("%s: network problem, retrying in %s: %v", run.Job, retryInterval, err)
 		case errors.As(err, &reported):
 			// The job has already sent you the details.
 			status, msg = StatusFailed, err.Error()
 			log.Printf("%s: failed: %v", run.Job, err)
-		case attempts(*env.state, run)+1 < maxAttempts:
+		case failures(*env.state, run)+1 < maxFailures:
 			status, msg = StatusRetry, err.Error()
 			log.Printf("%s: failed, retrying in %s: %v", run.Job, retryInterval, err)
 		default:
 			status, msg = StatusFailed, err.Error()
-			log.Printf("%s: failed after %d tries: %v", run.Job, maxAttempts, err)
-			_ = env.notify(ctx, fmt.Sprintf(":warning: koko-worker %s failed after %d tries: %s", run.Job, maxAttempts, truncate(err.Error(), 500)))
+			log.Printf("%s: failed after %d tries: %v", run.Job, maxFailures, err)
+			_ = env.notify(ctx, fmt.Sprintf(":warning: koko-worker %s failed after %d tries: %s", run.Job, maxFailures, truncate(err.Error(), 500)))
 		}
 		if err := env.persist(func(st *State) { recordRun(st, run, status, msg, time.Now()) }); err != nil {
 			log.Printf("state: %v", err)

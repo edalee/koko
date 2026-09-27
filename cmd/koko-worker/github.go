@@ -107,7 +107,7 @@ func isBot(p SearchPR) bool {
 		strings.Contains(login, "dependabot") || strings.Contains(login, "renovate")
 }
 
-// reviewQueue keeps PRs by people other than me, oldest first.
+// reviewQueue keeps PRs by people other than you, oldest first. me is your GitHub login.
 func reviewQueue(prs []SearchPR, me string) []SearchPR {
 	var out []SearchPR
 	for _, p := range prs {
@@ -157,7 +157,7 @@ func myOpenPRs(ctx context.Context) ([]SearchPR, error) {
 	return prs, err
 }
 
-// reviewRequests includes requests to my teams, not only to me.
+// reviewRequests includes requests to your teams, not only to you.
 func reviewRequests(ctx context.Context) ([]SearchPR, error) {
 	var prs []SearchPR
 	err := ghJSON(ctx, &prs, "search", "prs", "--review-requested", "@me", "--state", "open", "--draft=false",
