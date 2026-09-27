@@ -12,6 +12,18 @@ import type { SessionHistoryEntry, SessionTab } from "../types";
 
 const MAX_HISTORY = 50;
 
+/**
+ * Turns a failed reconnect into a line for the reconnect card. Wails rejects
+ * with the Go error's text, so ErrConversationBusy arrives as its message.
+ */
+export function reconnectMessage(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  if (text.includes("already open in another session")) {
+    return "This conversation is already open in another tab.";
+  }
+  return `Could not reconnect: ${text}`;
+}
+
 /** Payload of the session:claude-id event emitted by TerminalManager. */
 interface SessionClaudeIDEvent {
   sessionId: string;
@@ -188,6 +200,7 @@ export function useSessionTabs() {
         resume: false,
         claudeSessionId: "",
         slug: "", // a new session gets the next free slug from the backend
+        replaces: "", // a new session takes over from nothing
       });
       const newTab: SessionTab = {
         id: sessionId,
@@ -239,16 +252,29 @@ export function useSessionTabs() {
           claudeSessionId: tab.claudeSessionId || "",
           // Keep the slug, so koko-1 still names this session after a restart.
           slug: tab.slug || "",
+          // Name the session being taken over. Its entry lingers in the
+          // backend until something closes it, and the ownership guard would
+          // otherwise see this tab's own conversation as already held.
+          replaces: tab.id,
         });
         setTabs((prev) =>
-          prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
+          prev.map((t) =>
+            t.id === tab.id
+              ? { ...t, id: sessionId, connected: true, reconnectError: undefined }
+              : t,
+          ),
         );
         setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
 
         void mergeSessionMeta(sessionId);
         return sessionId;
       } catch (err) {
+        // Show why on the tab's reconnect card. Logging alone left the tab
+        // looking broken, and every later click failed the same silent way.
         console.error("reconnectTab failed:", err);
+        setTabs((prev) =>
+          prev.map((t) => (t.id === tab.id ? { ...t, reconnectError: reconnectMessage(err) } : t)),
+        );
         return "";
       } finally {
         reconnectingRef.current.delete(tab.id);

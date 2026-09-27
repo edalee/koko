@@ -251,6 +251,11 @@ export default function App() {
                                 {tab.lastMsg}
                               </p>
                             )}
+                            {tab.reconnectError && (
+                              <p className="text-xs text-error pt-1" role="alert">
+                                {tab.reconnectError}
+                              </p>
+                            )}
                             <p className="text-xs text-accent pt-1">Click to reconnect</p>
                           </div>
                         </div>

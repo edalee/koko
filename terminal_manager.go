@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -84,12 +85,17 @@ type TerminalManager struct {
 	nextID    int
 	slugCount map[string]int // base slug -> last number issued, e.g. "koko" -> 3
 	loginPath string         // full PATH from login shell, resolved once at startup
+	// pendingUUIDs holds conversations reserved by a create that has not
+	// reached tm.sessions yet. Without it two creates racing on one UUID both
+	// pass the ownership check.
+	pendingUUIDs map[string]string // conversation id -> id of the create holding it
 }
 
 func NewTerminalManager() *TerminalManager {
 	tm := &TerminalManager{
-		sessions:  make(map[string]*session),
-		slugCount: make(map[string]int),
+		sessions:     make(map[string]*session),
+		slugCount:    make(map[string]int),
+		pendingUUIDs: make(map[string]string),
 	}
 	tm.loginPath = resolveLoginPath()
 	return tm
@@ -148,23 +154,27 @@ func (tm *TerminalManager) reserveSlug(slug string) {
 // means two tabs want one slug, which legacy migration produces by giving
 // every tab in a directory "<base>-1". The second one gets a fresh slug.
 //
+// The session named by except is being replaced, so it is ignored here. Reload
+// replaces a live session, which would otherwise count as a live holder and
+// cost the reload its slug. The caller closes that session itself.
+//
 // Caller must hold tm.mu.
-func (tm *TerminalManager) claimSlugLocked(requested, dir string) (string, []*session) {
+func (tm *TerminalManager) claimSlugLocked(requested, dir, except string) (string, []*session) {
 	if requested == "" {
 		return tm.nextSlug(dir), nil
 	}
 
 	// Check for a live holder before evicting anything, so a dead entry is
 	// never dropped from the map without being handed back to be closed.
-	for _, s := range tm.sessions {
-		if s.slug == requested && s.alive() {
+	for id, s := range tm.sessions {
+		if id != except && s.slug == requested && s.alive() {
 			return tm.nextSlug(dir), nil
 		}
 	}
 
 	var dead []*session
 	for id, s := range tm.sessions {
-		if s.slug == requested {
+		if id != except && s.slug == requested {
 			dead = append(dead, s)
 			delete(tm.sessions, id)
 		}
@@ -274,7 +284,16 @@ type CreateSessionOpts struct {
 	Resume          bool   `json:"resume"`
 	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume (empty = --continue)
 	Slug            string `json:"slug"`            // reuse an existing slug on recovery
+	// Replaces is the session id this one takes over from, set by reconnect.
+	// It is exempt from the ownership and slug checks, and is closed before
+	// the new one starts.
+	Replaces string `json:"replaces"`
 }
+
+// ErrConversationBusy is returned when a caller asks to resume a conversation
+// another session already holds. Two Claude processes writing one conversation
+// file corrupt it, so this refuses rather than letting it happen.
+var ErrConversationBusy = errors.New("that conversation is already open in another session")
 
 func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
 	return tm.CreateSessionWithOpts(CreateSessionOpts{
@@ -287,14 +306,60 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 }
 
 // CreateSessionWithOpts creates a session with full options including Claude session ID for --resume.
+//
+// It refuses when another session already holds the requested conversation.
+// A disabled row in the picker is not enough on its own: the API and the MCP
+// server reach this too, and two Claude processes writing one conversation
+// file corrupt it.
 func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string, error) {
+	if opts.Cols == 0 {
+		opts.Cols = 120
+	}
+	if opts.Rows == 0 {
+		opts.Rows = 40
+	}
+
+	// Snapshot Claude's session files before launch, so Claude cannot write its
+	// file in the gap between launch and the first look.
+	projectDir := claudeProjectDir(opts.Dir)
+	preExisting := listJSONL(projectDir)
+
+	// Work out which conversation this session will open, so every path goes
+	// through the same ownership check. --continue resumes the newest
+	// conversation in the directory as of launch, so resolve that now. It is
+	// the only path the API and the MCP server can reach, and it used to skip
+	// the check entirely.
+	target := opts.ClaudeSessionID
+	continuing := opts.Resume && target == ""
+	if continuing {
+		target = mostRecentJSONL(projectDir)
+	}
+
 	tm.mu.Lock()
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
+	if tm.uuidClaimedLocked(target, opts.Replaces) {
+		if !continuing {
+			tm.mu.Unlock()
+			return "", ErrConversationBusy
+		}
+		// The caller asked for "the latest", not for this conversation in
+		// particular, so start a fresh one rather than refuse.
+		log.Printf("[pty] --continue would open %s, already held, starting fresh", target)
+		target = ""
+		continuing = false
+	}
+	// Reserve the conversation before anything starts. The new session does
+	// not reach tm.sessions until after the PTY is up, and without this two
+	// creates racing on one conversation would both pass the check.
+	if target != "" {
+		tm.pendingUUIDs[target] = id
+	}
 	// A recovered session keeps its slug, so CLI, MCP and Slack references
 	// survive the restart. Reserve it so a later new session cannot repeat it.
-	slug, evicted := tm.claimSlugLocked(opts.Slug, opts.Dir)
+	slug, evicted := tm.claimSlugLocked(opts.Slug, opts.Dir, opts.Replaces)
 	tm.mu.Unlock()
+	defer tm.releaseUUID(target, id)
 
 	// Their process has already exited and readLoop has reaped it, so only
 	// the pty file is left to release.
@@ -304,11 +369,11 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		}
 	}
 
-	if opts.Cols == 0 {
-		opts.Cols = 120
-	}
-	if opts.Rows == 0 {
-		opts.Rows = 40
+	// Close the replaced session before starting its successor. Starting first
+	// left two Claude processes writing one conversation file until the old
+	// one was killed.
+	if opts.Replaces != "" {
+		_ = tm.CloseSession(opts.Replaces)
 	}
 
 	shell := os.Getenv("SHELL")
@@ -316,34 +381,17 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		shell = "/bin/zsh"
 	}
 
-	env := tm.buildEnv()
-
 	claudePath := resolveClaudePath()
 	claudeCmd := fmt.Sprintf("exec %s", claudePath)
-	if opts.Resume {
-		if opts.ClaudeSessionID != "" {
-			// Resume specific session by UUID
-			claudeCmd = fmt.Sprintf("exec %s --resume %s", claudePath, opts.ClaudeSessionID)
-		} else {
-			// Fall back to most recent session in directory
-			claudeCmd = fmt.Sprintf("exec %s --continue", claudePath)
-		}
+	switch {
+	case opts.ClaudeSessionID != "":
+		claudeCmd = fmt.Sprintf("exec %s --resume %s", claudePath, opts.ClaudeSessionID)
+	case continuing:
+		claudeCmd = fmt.Sprintf("exec %s --continue", claudePath)
 	}
-	cmd := exec.Command(shell, "-l", "-c", claudeCmd)
+	cmd := newShellCommand(shell, claudeCmd)
 	cmd.Dir = opts.Dir
-	cmd.Env = env
-
-	// Snapshot Claude's session files before launch, so Claude cannot write its
-	// file in the gap between launch and the first look.
-	projectDir := claudeProjectDir(opts.Dir)
-	preExisting := listJSONL(projectDir)
-
-	// --continue resumes the newest conversation in the directory as of launch,
-	// so the newest file right now is the one it reuses. No need to watch.
-	continueUUID := ""
-	if opts.Resume && opts.ClaudeSessionID == "" {
-		continueUUID = mostRecentJSONL(projectDir)
-	}
+	cmd.Env = tm.buildEnv()
 
 	startedAt := time.Now()
 
@@ -360,7 +408,7 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		slug:            slug,
 		name:            opts.Name,
 		dir:             opts.Dir,
-		claudeSessionID: opts.ClaudeSessionID,
+		claudeSessionID: target,
 		startedAt:       startedAt,
 		projectDir:      projectDir,
 		ptmx:            ptmx,
@@ -370,22 +418,51 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		subscribers:     make(map[chan []byte]struct{}),
 	}
 
+	// Registering and releasing the reservation share one lock, so there is
+	// no moment when the conversation is held by neither.
 	tm.mu.Lock()
 	tm.sessions[id] = s
+	delete(tm.pendingUUIDs, target)
 	tm.mu.Unlock()
 
-	// Capture the Claude session UUID, unless the caller already gave us one.
-	if opts.ClaudeSessionID == "" {
-		if continueUUID != "" && tm.claimUUID(s, continueUUID, "continue") {
-			// Claimed, nothing to watch for.
-		} else {
-			go tm.detectClaudeSessionID(s, projectDir, preExisting)
-		}
+	switch {
+	case continuing:
+		tm.announceClaudeSessionID(s, target, "continue")
+	case target == "":
+		// A fresh conversation. Claude writes its file on the first message.
+		go tm.detectClaudeSessionID(s, projectDir, preExisting)
 	}
 
 	go tm.readLoop(s)
 
 	return id, nil
+}
+
+// emit sends a Wails event. Without a context, as in tests, it does nothing:
+// Wails exits the whole process when handed a nil one.
+func (tm *TerminalManager) emit(name string, data ...interface{}) {
+	if tm.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(tm.ctx, name, data...)
+}
+
+// newShellCommand builds the process a session runs. A variable so tests can
+// run something other than Claude.
+var newShellCommand = func(shell, script string) *exec.Cmd {
+	return exec.Command(shell, "-l", "-c", script)
+}
+
+// announceClaudeSessionID logs a conversation id resolved at create time and
+// tells the frontend, the same way a detected one is announced.
+func (tm *TerminalManager) announceClaudeSessionID(s *session, uuid, reason string) {
+	log.Printf("[pty] captured Claude session UUID (%s): %s for %s", reason, uuid, s.slug)
+	if tm.ctx != nil {
+		runtime.EventsEmit(tm.ctx, "session:claude-id", map[string]string{
+			"sessionId":       s.id,
+			"claudeSessionId": uuid,
+		})
+	}
 }
 
 // claudeKeyMaxLen is where Claude Code truncates a project key and appends a
@@ -679,6 +756,21 @@ func (s *session) alive() bool {
 	}
 }
 
+// releaseUUID drops a pending reservation, but only one this create holds.
+// Keying by owner matters: a create's deferred release could otherwise delete
+// a reservation a later create had made for the same conversation. Safe to
+// call when there is none.
+func (tm *TerminalManager) releaseUUID(uuid, owner string) {
+	if uuid == "" {
+		return
+	}
+	tm.mu.Lock()
+	if tm.pendingUUIDs[uuid] == owner {
+		delete(tm.pendingUUIDs, uuid)
+	}
+	tm.mu.Unlock()
+}
+
 // uuidClaimed reports whether a session other than exceptID already holds this
 // UUID.
 //
@@ -692,6 +784,17 @@ func (tm *TerminalManager) uuidClaimed(uuid, exceptID string) bool {
 }
 
 func (tm *TerminalManager) uuidClaimedLocked(uuid, exceptID string) bool {
+	if uuid == "" {
+		// Every session without a conversation yet holds "", so an empty
+		// query would match one of them and read as held.
+		return false
+	}
+	// A create that has reserved the conversation but not yet registered
+	// holds it too. Every path consults this one function, so the detector
+	// and the --continue claim respect a reservation as well as a session.
+	if owner, ok := tm.pendingUUIDs[uuid]; ok && owner != exceptID {
+		return true
+	}
 	for id, other := range tm.sessions {
 		if id == exceptID {
 			continue
@@ -900,9 +1003,19 @@ func (tm *TerminalManager) CloseSession(sessionID string) error {
 	delete(tm.sessions, sessionID)
 	tm.mu.Unlock()
 
-	_ = s.ptmx.Close()
-	_ = s.cmd.Process.Kill()
-	_ = s.cmd.Wait()
+	if s.ptmx != nil {
+		_ = s.ptmx.Close()
+	}
+	if s.cmd != nil && s.cmd.Process != nil {
+		_ = s.cmd.Process.Kill()
+	}
+	// readLoop owns cmd.Wait and closes done once it returns. Calling Wait
+	// here as well raced it, and exec.Cmd does not allow two callers.
+	select {
+	case <-s.done:
+	case <-time.After(3 * time.Second):
+		log.Printf("[pty] %s still running 3s after kill", sessionID)
+	}
 	return nil
 }
 
@@ -910,7 +1023,7 @@ func (tm *TerminalManager) readLoop(s *session) {
 	defer func() {
 		_ = s.cmd.Wait()
 		close(s.done)
-		runtime.EventsEmit(tm.ctx, "pty:exit:"+s.id)
+		tm.emit("pty:exit:" + s.id)
 	}()
 
 	readBuf := make([]byte, 32*1024)
@@ -937,7 +1050,7 @@ func (tm *TerminalManager) readLoop(s *session) {
 			}
 			s.mu.Unlock()
 			encoded := base64.StdEncoding.EncodeToString(chunk)
-			runtime.EventsEmit(tm.ctx, "pty:data:"+s.id, encoded)
+			tm.emit("pty:data:"+s.id, encoded)
 		}
 		if err != nil {
 			return

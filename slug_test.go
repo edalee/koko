@@ -101,7 +101,7 @@ func TestClaimSlug_ReusesASlugHeldOnlyByADeadSession(t *testing.T) {
 	addSlugSession(tm, "old", "koko-1", false)
 
 	tm.mu.Lock()
-	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko")
+	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko", "")
 	_, stillThere := tm.sessions["old"]
 	tm.mu.Unlock()
 
@@ -121,7 +121,7 @@ func TestClaimSlug_FallsBackWhenALiveSessionHoldsIt(t *testing.T) {
 	tm.SeedSlugs([]string{"koko-1"})
 
 	tm.mu.Lock()
-	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko")
+	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko", "")
 	tm.mu.Unlock()
 
 	if slug == "koko-1" {
@@ -143,7 +143,7 @@ func TestClaimSlug_EvictsNothingWhenAnyHolderIsLive(t *testing.T) {
 	addSlugSession(tm, "live", "koko-1", true)
 
 	tm.mu.Lock()
-	_, evicted := tm.claimSlugLocked("koko-1", "/a/koko")
+	_, evicted := tm.claimSlugLocked("koko-1", "/a/koko", "")
 	_, deadStill := tm.sessions["dead"]
 	tm.mu.Unlock()
 
@@ -152,10 +152,30 @@ func TestClaimSlug_EvictsNothingWhenAnyHolderIsLive(t *testing.T) {
 	}
 }
 
+// Reload replaces a live session. That session must not count as a live holder
+// of its own slug, or the reload would come back under a different one.
+func TestClaimSlug_IgnoresTheSessionBeingReplaced(t *testing.T) {
+	tm := newTestManager()
+	addSlugSession(tm, "reloading", "koko-1", true)
+
+	tm.mu.Lock()
+	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko", "reloading")
+	_, stillThere := tm.sessions["reloading"]
+	tm.mu.Unlock()
+
+	if slug != "koko-1" {
+		t.Errorf("reload lost its slug, got %q", slug)
+	}
+	// The caller closes the replaced session itself, so it is left alone here.
+	if len(evicted) != 0 || !stillThere {
+		t.Errorf("the replaced session was evicted: %d evicted, stillThere=%v", len(evicted), stillThere)
+	}
+}
+
 func TestClaimSlug_EmptyRequestTakesTheNextFree(t *testing.T) {
 	tm := newTestManager()
 	tm.mu.Lock()
-	slug, _ := tm.claimSlugLocked("", "/a/koko")
+	slug, _ := tm.claimSlugLocked("", "/a/koko", "")
 	tm.mu.Unlock()
 	if slug != "koko-1" {
 		t.Errorf("got %q", slug)
