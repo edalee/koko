@@ -77,6 +77,91 @@ func TestSeedSlugs_NeverLowersTheCounter(t *testing.T) {
 	}
 }
 
+// addSlugSession registers a session holding a slug, alive or dead.
+func addSlugSession(tm *TerminalManager, id, slug string, alive bool) {
+	s := &session{
+		id:          id,
+		slug:        slug,
+		done:        make(chan struct{}),
+		subscribers: make(map[chan []byte]struct{}),
+	}
+	if !alive {
+		close(s.done)
+	}
+	tm.mu.Lock()
+	tm.sessions[id] = s
+	tm.mu.Unlock()
+}
+
+// Reconnecting koko-1 finds the old koko-1 still in the map, because readLoop
+// never removes an exited session. That entry is defunct, so the slug is
+// reused and the dead entry evicted, rather than two sessions sharing it.
+func TestClaimSlug_ReusesASlugHeldOnlyByADeadSession(t *testing.T) {
+	tm := newTestManager()
+	addSlugSession(tm, "old", "koko-1", false)
+
+	tm.mu.Lock()
+	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko")
+	_, stillThere := tm.sessions["old"]
+	tm.mu.Unlock()
+
+	if slug != "koko-1" {
+		t.Fatalf("expected the slug back, got %q", slug)
+	}
+	if len(evicted) != 1 || stillThere {
+		t.Fatalf("expected the dead holder evicted, got %d evicted, stillThere=%v", len(evicted), stillThere)
+	}
+}
+
+// Legacy migration gives every tab in a directory "<base>-1", so two tabs can
+// ask for the same slug. The second one must not share it.
+func TestClaimSlug_FallsBackWhenALiveSessionHoldsIt(t *testing.T) {
+	tm := newTestManager()
+	addSlugSession(tm, "live", "koko-1", true)
+	tm.SeedSlugs([]string{"koko-1"})
+
+	tm.mu.Lock()
+	slug, evicted := tm.claimSlugLocked("koko-1", "/a/koko")
+	tm.mu.Unlock()
+
+	if slug == "koko-1" {
+		t.Fatal("two live sessions share koko-1")
+	}
+	if slug != "koko-2" {
+		t.Errorf("expected koko-2, got %q", slug)
+	}
+	if len(evicted) != 0 {
+		t.Errorf("nothing should be evicted when a live holder exists, got %d", len(evicted))
+	}
+}
+
+// A dead holder must not be evicted when a live session also holds the slug,
+// or it would be dropped from the map without being closed.
+func TestClaimSlug_EvictsNothingWhenAnyHolderIsLive(t *testing.T) {
+	tm := newTestManager()
+	addSlugSession(tm, "dead", "koko-1", false)
+	addSlugSession(tm, "live", "koko-1", true)
+
+	tm.mu.Lock()
+	_, evicted := tm.claimSlugLocked("koko-1", "/a/koko")
+	_, deadStill := tm.sessions["dead"]
+	tm.mu.Unlock()
+
+	if len(evicted) != 0 || !deadStill {
+		t.Fatalf("expected nothing evicted, got %d, deadStill=%v", len(evicted), deadStill)
+	}
+}
+
+func TestClaimSlug_EmptyRequestTakesTheNextFree(t *testing.T) {
+	tm := newTestManager()
+	tm.mu.Lock()
+	slug, _ := tm.claimSlugLocked("", "/a/koko")
+	tm.mu.Unlock()
+	if slug != "koko-1" {
+		t.Errorf("got %q", slug)
+	}
+}
+
 func TestReserveSlug_BlocksTheSameSlugLater(t *testing.T) {
 	tm := newTestManager()
 	tm.mu.Lock()

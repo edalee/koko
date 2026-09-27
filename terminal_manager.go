@@ -82,7 +82,7 @@ type TerminalManager struct {
 	sessions  map[string]*session
 	mu        sync.Mutex
 	nextID    int
-	slugCount map[string]int // per-directory slug counter: dir -> next number
+	slugCount map[string]int // base slug -> last number issued, e.g. "koko" -> 3
 	loginPath string         // full PATH from login shell, resolved once at startup
 }
 
@@ -136,6 +136,41 @@ func (tm *TerminalManager) reserveSlug(slug string) {
 	if n > tm.slugCount[base] {
 		tm.slugCount[base] = n
 	}
+}
+
+// claimSlugLocked picks the slug for a new session and returns any dead
+// sessions it displaced, for the caller to close outside the lock.
+//
+// A requested slug is only taken if no live session holds it. A dead holder is
+// the common case: readLoop leaves an exited session in tm.sessions and
+// nothing removes it, so reconnecting koko-1 finds the old koko-1 still there.
+// That entry is defunct, so it is evicted and the slug reused. A live holder
+// means two tabs want one slug, which legacy migration produces by giving
+// every tab in a directory "<base>-1". The second one gets a fresh slug.
+//
+// Caller must hold tm.mu.
+func (tm *TerminalManager) claimSlugLocked(requested, dir string) (string, []*session) {
+	if requested == "" {
+		return tm.nextSlug(dir), nil
+	}
+
+	// Check for a live holder before evicting anything, so a dead entry is
+	// never dropped from the map without being handed back to be closed.
+	for _, s := range tm.sessions {
+		if s.slug == requested && s.alive() {
+			return tm.nextSlug(dir), nil
+		}
+	}
+
+	var dead []*session
+	for id, s := range tm.sessions {
+		if s.slug == requested {
+			dead = append(dead, s)
+			delete(tm.sessions, id)
+		}
+	}
+	tm.reserveSlug(requested)
+	return requested, dead
 }
 
 // SeedSlugs raises the slug counters past every slug already persisted.
@@ -258,13 +293,16 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	id := fmt.Sprintf("session-%d", tm.nextID)
 	// A recovered session keeps its slug, so CLI, MCP and Slack references
 	// survive the restart. Reserve it so a later new session cannot repeat it.
-	slug := opts.Slug
-	if slug == "" {
-		slug = tm.nextSlug(opts.Dir)
-	} else {
-		tm.reserveSlug(slug)
-	}
+	slug, evicted := tm.claimSlugLocked(opts.Slug, opts.Dir)
 	tm.mu.Unlock()
+
+	// Their process has already exited and readLoop has reaped it, so only
+	// the pty file is left to release.
+	for _, dead := range evicted {
+		if dead.ptmx != nil {
+			_ = dead.ptmx.Close()
+		}
+	}
 
 	if opts.Cols == 0 {
 		opts.Cols = 120
