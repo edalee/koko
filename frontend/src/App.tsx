@@ -402,12 +402,18 @@ export default function App() {
         <SessionDialog
           open={showNewSession}
           onClose={() => setShowNewSession(false)}
-          onCreate={(name, directory, worktreePath) => {
-            createTab(name, directory, worktreePath);
+          onCreate={async (name, directory, worktreePath, resume) => {
+            // Let a failure reach the dialog, which shows it and stays open.
+            await createTab(name, directory, worktreePath, resume);
+            setShowNewSession(false);
+          }}
+          onOpenHeld={(tabId) => {
+            switchTab(tabId);
             setShowNewSession(false);
           }}
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
+          tabs={tabs}
         />
 
         <WorktreeRemovalDialog

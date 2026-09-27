@@ -17,3 +17,7 @@ export function GetLastMessage(arg1) {
 export function GetMCPServers(arg1) {
   return window['go']['main']['ClaudeService']['GetMCPServers'](arg1);
 }
+
+export function ListConversations(arg1) {
+  return window['go']['main']['ClaudeService']['ListConversations'](arg1);
+}

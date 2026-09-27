@@ -158,6 +158,26 @@ export namespace main {
 	        this.description = source["description"];
 	    }
 	}
+	export class Conversation {
+	    uuid: string;
+	    title: string;
+	    preview: string;
+	    modifiedAt: number;
+	    sizeBytes: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Conversation(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uuid = source["uuid"];
+	        this.title = source["title"];
+	        this.preview = source["preview"];
+	        this.modifiedAt = source["modifiedAt"];
+	        this.sizeBytes = source["sizeBytes"];
+	    }
+	}
 	export class ContextInfo {
 	    usedPercentage: number;
 	    remainingPercentage: number;

@@ -47,6 +47,7 @@ vi.mock("../../wailsjs/go/main/ClaudeService", () => ({
   GetCommands: vi.fn().mockResolvedValue([]),
   GetMCPServers: vi.fn().mockResolvedValue([]),
   GetLastMessage: vi.fn().mockResolvedValue(""),
+  ListConversations: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../../wailsjs/go/main/ConfigService", () => ({
