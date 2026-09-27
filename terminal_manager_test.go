@@ -215,7 +215,7 @@ func newTestManager() *TerminalManager {
 	return &TerminalManager{
 		sessions:     make(map[string]*session),
 		slugCount:    make(map[string]int),
-		pendingUUIDs: make(map[string]bool),
+		pendingUUIDs: make(map[string]string),
 	}
 }
 

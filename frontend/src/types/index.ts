@@ -102,6 +102,8 @@ export interface SessionTab {
   // Path of a worktree Koko created when spawning this session.
   // Used on session close to offer to clean it up.
   worktreePath?: string;
+  // Why the last reconnect failed, shown on the reconnect card. Not persisted.
+  reconnectError?: string;
 }
 
 export interface SessionHistoryEntry {
