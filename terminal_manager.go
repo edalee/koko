@@ -83,7 +83,7 @@ type TerminalManager struct {
 	sessions  map[string]*session
 	mu        sync.Mutex
 	nextID    int
-	slugCount map[string]int // per-directory slug counter: dir -> next number
+	slugCount map[string]int // base slug -> last number issued, e.g. "koko" -> 3
 	loginPath string         // full PATH from login shell, resolved once at startup
 	// pendingUUIDs holds conversations reserved by a create that has not
 	// reached tm.sessions yet. Without it two creates racing on one UUID both
@@ -117,10 +117,97 @@ func dirSlug(dir string) string {
 }
 
 // nextSlug generates the next slug for a directory, e.g. "koko-1", "koko-2".
+//
+// The counter is keyed by base slug, not by directory. dirSlug is the
+// basename, so /a/koko and /b/koko produce the same base, and counting per
+// directory handed "koko-1" to both. A slug has to name one session: the CLI,
+// the MCP server and the Slack bot all resolve by it.
+//
+// Caller must hold tm.mu.
 func (tm *TerminalManager) nextSlug(dir string) string {
 	base := dirSlug(dir)
-	tm.slugCount[dir]++
-	return fmt.Sprintf("%s-%d", base, tm.slugCount[dir])
+	tm.slugCount[base]++
+	return fmt.Sprintf("%s-%d", base, tm.slugCount[base])
+}
+
+// reserveSlug records a slug taken from a recovered session, so a later new
+// session cannot hand out the same one.
+//
+// Caller must hold tm.mu.
+func (tm *TerminalManager) reserveSlug(slug string) {
+	base, n, ok := splitSlug(slug)
+	if !ok {
+		return
+	}
+	if n > tm.slugCount[base] {
+		tm.slugCount[base] = n
+	}
+}
+
+// claimSlugLocked picks the slug for a new session and returns any dead
+// sessions it displaced, for the caller to close outside the lock.
+//
+// A requested slug is only taken if no live session holds it. A dead holder is
+// the common case: readLoop leaves an exited session in tm.sessions and
+// nothing removes it, so reconnecting koko-1 finds the old koko-1 still there.
+// That entry is defunct, so it is evicted and the slug reused. A live holder
+// means two tabs want one slug, which legacy migration produces by giving
+// every tab in a directory "<base>-1". The second one gets a fresh slug.
+//
+// The session named by except is being replaced, so it is ignored here. Reload
+// replaces a live session, which would otherwise count as a live holder and
+// cost the reload its slug. The caller closes that session itself.
+//
+// Caller must hold tm.mu.
+func (tm *TerminalManager) claimSlugLocked(requested, dir, except string) (string, []*session) {
+	if requested == "" {
+		return tm.nextSlug(dir), nil
+	}
+
+	// Check for a live holder before evicting anything, so a dead entry is
+	// never dropped from the map without being handed back to be closed.
+	for id, s := range tm.sessions {
+		if id != except && s.slug == requested && s.alive() {
+			return tm.nextSlug(dir), nil
+		}
+	}
+
+	var dead []*session
+	for id, s := range tm.sessions {
+		if id != except && s.slug == requested {
+			dead = append(dead, s)
+			delete(tm.sessions, id)
+		}
+	}
+	tm.reserveSlug(requested)
+	return requested, dead
+}
+
+// SeedSlugs raises the slug counters past every slug already persisted.
+//
+// Without this the counters start empty on each launch, and saved tabs
+// reconnect lazily, on click. Restart, open a new session in koko, and it
+// takes "koko-1" while the saved koko-1 is still sitting there disconnected.
+func (tm *TerminalManager) SeedSlugs(slugs []string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, s := range slugs {
+		tm.reserveSlug(s)
+	}
+}
+
+// splitSlug splits "koko-12" into "koko" and 12. A slug without a trailing
+// number is not one we generated.
+func splitSlug(slug string) (string, int, bool) {
+	i := strings.LastIndex(slug, "-")
+	if i <= 0 || i == len(slug)-1 {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(slug[i+1:])
+	if err != nil || n < 1 {
+		return "", 0, false
+	}
+	return slug[:i], n, true
 }
 
 // resolveLoginPath gets the full PATH from an interactive login shell.
@@ -196,9 +283,10 @@ type CreateSessionOpts struct {
 	Rows            int    `json:"rows"`
 	Resume          bool   `json:"resume"`
 	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume (empty = --continue)
+	Slug            string `json:"slug"`            // reuse an existing slug on recovery
 	// Replaces is the session id this one takes over from, set by reconnect.
-	// The session it names is exempt from the ownership check, and is closed
-	// once the new one is running.
+	// It is exempt from the ownership and slug checks, and is closed before
+	// the new one starts.
 	Replaces string `json:"replaces"`
 }
 
@@ -267,9 +355,19 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	if target != "" {
 		tm.pendingUUIDs[target] = id
 	}
-	slug := tm.nextSlug(opts.Dir)
+	// A recovered session keeps its slug, so CLI, MCP and Slack references
+	// survive the restart. Reserve it so a later new session cannot repeat it.
+	slug, evicted := tm.claimSlugLocked(opts.Slug, opts.Dir, opts.Replaces)
 	tm.mu.Unlock()
 	defer tm.releaseUUID(target, id)
+
+	// Their process has already exited and readLoop has reaped it, so only
+	// the pty file is left to release.
+	for _, dead := range evicted {
+		if dead.ptmx != nil {
+			_ = dead.ptmx.Close()
+		}
+	}
 
 	// Close the replaced session before starting its successor. Starting first
 	// left two Claude processes writing one conversation file until the old
@@ -427,11 +525,26 @@ func claudeProjectDir(dir string) string {
 	if err != nil {
 		return ""
 	}
+	return filepath.Join(home, ".claude", "projects", claudeProjectKey(normaliseDir(dir)))
+}
+
+// normaliseDir resolves a directory the way the Claude process reports its
+// own cwd. Clean drops a trailing slash, which api_server.go can pass
+// through, and EvalSymlinks matches process.cwd() for a symlinked checkout.
+func normaliseDir(dir string) string {
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		resolved = filepath.Clean(dir)
+		return filepath.Clean(dir)
 	}
-	return filepath.Join(home, ".claude", "projects", claudeProjectKey(resolved))
+	return resolved
+}
+
+// sameDir reports whether two paths name the same directory once resolved.
+// Two directories can share one Claude project folder, because the key folds
+// every non-alphanumeric character to "-", so /x/foo_bar and /x/foo-bar land
+// together. Comparing the cwd recorded in a session file separates them.
+func sameDir(a, b string) bool {
+	return normaliseDir(a) == normaliseDir(b)
 }
 
 // listJSONL returns the set of .jsonl filenames in dir. A missing directory
@@ -969,6 +1082,18 @@ func (tm *TerminalManager) GetClaudeSessionID(sessionID string) (string, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.claudeSessionID, nil
+}
+
+// GetSessionSlug returns the slug the backend assigned to a session.
+//
+// The frontend has no other way to learn it. createTab set slug: "" and
+// nothing ever filled it in, so every persisted slug was empty.
+func (tm *TerminalManager) GetSessionSlug(sessionID string) (string, error) {
+	s, err := tm.getSession(sessionID)
+	if err != nil {
+		return "", err
+	}
+	return s.slug, nil // set once at creation, never written again
 }
 
 // GetSessionBySlug finds a session by its slug (e.g. "koko-1").

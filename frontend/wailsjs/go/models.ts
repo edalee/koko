@@ -181,6 +181,7 @@ export namespace main {
 	    rows: number;
 	    resume: boolean;
 	    claudeSessionId: string;
+	    slug: string;
 	    replaces: string;
 
 	    static createFrom(source: any = {}) {
@@ -195,6 +196,7 @@ export namespace main {
 	        this.rows = source["rows"];
 	        this.resume = source["resume"];
 	        this.claudeSessionId = source["claudeSessionId"];
+	        this.slug = source["slug"];
 	        this.replaces = source["replaces"];
 	    }
 	}

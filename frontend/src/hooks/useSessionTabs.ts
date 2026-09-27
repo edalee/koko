@@ -5,6 +5,7 @@ import {
   CloseSession,
   CreateSessionWithOpts,
   GetClaudeSessionID,
+  GetSessionSlug,
 } from "../../wailsjs/go/main/TerminalManager";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
 import type { SessionHistoryEntry, SessionTab } from "../types";
@@ -161,21 +162,32 @@ export function useSessionTabs() {
     [],
   );
 
-  // Read the UUID once, straight after a session is created.
+  // Read the slug and UUID once, straight after a session is created.
+  //
+  // The slug is assigned by the backend and has no other route to the
+  // frontend. It used to be left as "" for ever, so every persisted slug was
+  // empty and koko-1 named nothing.
   //
   // For --continue the backend resolves the UUID synchronously, so the
   // session:claude-id event fires before the caller has the new session id and
-  // the event listener matches no tab. This closes that gap.
-  const mergeClaudeID = useCallback(async (sessionId: string) => {
-    try {
-      const claudeId = await GetClaudeSessionID(sessionId);
-      if (!claudeId) return;
-      setTabs((prev) =>
-        prev.map((t) => (t.id === sessionId ? { ...t, claudeSessionId: claudeId } : t)),
-      );
-    } catch {
-      // Session may already be gone, the event covers the live case.
-    }
+  // the event listener matches no tab. This closes that gap too.
+  const mergeSessionMeta = useCallback(async (sessionId: string) => {
+    const [slug, claudeId] = await Promise.all([
+      GetSessionSlug(sessionId).catch(() => ""),
+      GetClaudeSessionID(sessionId).catch(() => ""),
+    ]);
+    if (!slug && !claudeId) return;
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === sessionId
+          ? {
+              ...t,
+              slug: slug || t.slug,
+              claudeSessionId: claudeId || t.claudeSessionId,
+            }
+          : t,
+      ),
+    );
   }, []);
 
   const createTab = useCallback(
@@ -187,11 +199,12 @@ export function useSessionTabs() {
         rows: 24,
         resume: false,
         claudeSessionId: "",
+        slug: "", // a new session gets the next free slug from the backend
         replaces: "", // a new session takes over from nothing
       });
       const newTab: SessionTab = {
         id: sessionId,
-        slug: "", // will be populated from GetSessions or after capture
+        slug: "", // filled in by mergeSessionMeta below
         name,
         directory,
         createdAt: Date.now(),
@@ -201,11 +214,12 @@ export function useSessionTabs() {
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(sessionId);
 
-      // Fresh sessions usually resolve later, on the session:claude-id event.
-      void mergeClaudeID(sessionId);
+      // The slug is ready now. The UUID usually resolves later, on the
+      // session:claude-id event.
+      void mergeSessionMeta(sessionId);
       return sessionId;
     },
-    [mergeClaudeID],
+    [mergeSessionMeta],
   );
 
   // The backend tells us when it captures a Claude session UUID. Claude writes
@@ -236,6 +250,8 @@ export function useSessionTabs() {
           rows: 24,
           resume: true,
           claudeSessionId: tab.claudeSessionId || "",
+          // Keep the slug, so koko-1 still names this session after a restart.
+          slug: tab.slug || "",
           // Name the session being taken over. Its entry lingers in the
           // backend until something closes it, and the ownership guard would
           // otherwise see this tab's own conversation as already held.
@@ -250,7 +266,7 @@ export function useSessionTabs() {
         );
         setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
 
-        void mergeClaudeID(sessionId);
+        void mergeSessionMeta(sessionId);
         return sessionId;
       } catch (err) {
         // Show why on the tab's reconnect card. Logging alone left the tab
@@ -264,7 +280,7 @@ export function useSessionTabs() {
         reconnectingRef.current.delete(tab.id);
       }
     },
-    [mergeClaudeID],
+    [mergeSessionMeta],
   );
 
   const closeTab = useCallback(

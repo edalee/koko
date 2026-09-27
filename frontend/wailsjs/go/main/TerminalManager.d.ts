@@ -12,6 +12,8 @@ export function CreateShellSession(arg1:string,arg2:number,arg3:number):Promise<
 
 export function GetClaudeSessionID(arg1:string):Promise<string>;
 
+export function GetSessionSlug(arg1:string):Promise<string>;
+
 export function GetSessionBySlug(arg1:string):Promise<main.SessionInfo>;
 
 export function GetSessionPID(arg1:string):Promise<number>;
