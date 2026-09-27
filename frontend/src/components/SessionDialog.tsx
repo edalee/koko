@@ -31,7 +31,7 @@ function shortenPath(path: string): string {
   return path;
 }
 
-interface NewSessionDialogProps {
+interface SessionDialogProps {
   open: boolean;
   onClose: () => void;
   onCreate: (name: string, directory: string, worktreePath?: string) => void;
@@ -60,13 +60,13 @@ function randomSlug(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
-export default function NewSessionDialog({
+export default function SessionDialog({
   open,
   onClose,
   onCreate,
   history,
   activeDirs,
-}: NewSessionDialogProps) {
+}: SessionDialogProps) {
   const [state, setState] = useState<AnimState>("closed");
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
