@@ -213,8 +213,9 @@ func TestGetSessionState_NonexistentReturnsIdle(t *testing.T) {
 // interactive login shell and costs over a second per call.
 func newTestManager() *TerminalManager {
 	return &TerminalManager{
-		sessions:  make(map[string]*session),
-		slugCount: make(map[string]int),
+		sessions:     make(map[string]*session),
+		slugCount:    make(map[string]int),
+		pendingUUIDs: make(map[string]bool),
 	}
 }
 

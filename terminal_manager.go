@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -84,12 +85,17 @@ type TerminalManager struct {
 	nextID    int
 	slugCount map[string]int // per-directory slug counter: dir -> next number
 	loginPath string         // full PATH from login shell, resolved once at startup
+	// pendingUUIDs holds conversations reserved by a create that has not
+	// reached tm.sessions yet. Without it two creates racing on one UUID both
+	// pass the ownership check.
+	pendingUUIDs map[string]bool
 }
 
 func NewTerminalManager() *TerminalManager {
 	tm := &TerminalManager{
-		sessions:  make(map[string]*session),
-		slugCount: make(map[string]int),
+		sessions:     make(map[string]*session),
+		slugCount:    make(map[string]int),
+		pendingUUIDs: make(map[string]bool),
 	}
 	tm.loginPath = resolveLoginPath()
 	return tm
@@ -190,7 +196,16 @@ type CreateSessionOpts struct {
 	Rows            int    `json:"rows"`
 	Resume          bool   `json:"resume"`
 	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume (empty = --continue)
+	// Replaces is the session id this one takes over from, set by reconnect.
+	// The session it names is exempt from the ownership check, and is closed
+	// once the new one is running.
+	Replaces string `json:"replaces"`
 }
+
+// ErrConversationBusy is returned when a caller asks to resume a conversation
+// another session already holds. Two Claude processes writing one conversation
+// file corrupt it, so this refuses rather than letting it happen.
+var ErrConversationBusy = errors.New("that conversation is already open in another session")
 
 func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
 	return tm.CreateSessionWithOpts(CreateSessionOpts{
@@ -203,12 +218,31 @@ func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resum
 }
 
 // CreateSessionWithOpts creates a session with full options including Claude session ID for --resume.
+//
+// It refuses when another session already holds the requested conversation.
+// A disabled row in the picker is not enough on its own: the API and the MCP
+// server reach this too, and two Claude processes writing one conversation
+// file corrupt it.
 func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string, error) {
 	tm.mu.Lock()
+	// Reserve the conversation before anything is started, so two creates
+	// racing on one UUID cannot both pass the check. The session is not in
+	// tm.sessions until much later, which is the gap this closes.
+	if opts.ClaudeSessionID != "" {
+		if tm.uuidClaimedLocked(opts.ClaudeSessionID, opts.Replaces) || tm.pendingUUIDs[opts.ClaudeSessionID] {
+			tm.mu.Unlock()
+			return "", ErrConversationBusy
+		}
+		tm.pendingUUIDs[opts.ClaudeSessionID] = true
+	}
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
 	slug := tm.nextSlug(opts.Dir)
 	tm.mu.Unlock()
+
+	// Held until the session is in tm.sessions, or dropped if we never get
+	// there. releaseUUID is idempotent.
+	defer tm.releaseUUID(opts.ClaudeSessionID)
 
 	if opts.Cols == 0 {
 		opts.Cols = 120
@@ -278,7 +312,14 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 
 	tm.mu.Lock()
 	tm.sessions[id] = s
+	delete(tm.pendingUUIDs, opts.ClaudeSessionID)
 	tm.mu.Unlock()
+
+	// The replaced session has handed over. Close it now, so its UUID is not
+	// held twice and dead entries do not pile up in tm.sessions.
+	if opts.Replaces != "" && opts.Replaces != id {
+		_ = tm.CloseSession(opts.Replaces)
+	}
 
 	// Capture the Claude session UUID, unless the caller already gave us one.
 	if opts.ClaudeSessionID == "" {
@@ -570,6 +611,16 @@ func (s *session) alive() bool {
 	}
 }
 
+// releaseUUID drops a pending reservation. Safe to call when there is none.
+func (tm *TerminalManager) releaseUUID(uuid string) {
+	if uuid == "" {
+		return
+	}
+	tm.mu.Lock()
+	delete(tm.pendingUUIDs, uuid)
+	tm.mu.Unlock()
+}
+
 // uuidClaimed reports whether a session other than exceptID already holds this
 // UUID.
 //
@@ -583,6 +634,11 @@ func (tm *TerminalManager) uuidClaimed(uuid, exceptID string) bool {
 }
 
 func (tm *TerminalManager) uuidClaimedLocked(uuid, exceptID string) bool {
+	if uuid == "" {
+		// Every session without a conversation yet holds "", so an empty
+		// query would match one of them and read as held.
+		return false
+	}
 	for id, other := range tm.sessions {
 		if id == exceptID {
 			continue

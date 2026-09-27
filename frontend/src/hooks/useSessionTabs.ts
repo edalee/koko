@@ -175,6 +175,7 @@ export function useSessionTabs() {
         rows: 24,
         resume: false,
         claudeSessionId: "",
+        replaces: "", // a new session takes over from nothing
       });
       const newTab: SessionTab = {
         id: sessionId,
@@ -223,6 +224,10 @@ export function useSessionTabs() {
           rows: 24,
           resume: true,
           claudeSessionId: tab.claudeSessionId || "",
+          // Name the session being taken over. Its entry lingers in the
+          // backend until something closes it, and the ownership guard would
+          // otherwise see this tab's own conversation as already held.
+          replaces: tab.id,
         });
         setTabs((prev) =>
           prev.map((t) => (t.id === tab.id ? { ...t, id: sessionId, connected: true } : t)),
