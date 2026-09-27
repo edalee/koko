@@ -30,6 +30,7 @@ func NewApp(tm *TerminalManager, cfg *ConfigService, api *APIServer) *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.tm.setContext(ctx)
+	a.seedSlugs()
 	a.installStatusLine()
 
 	// Ensure API key exists and start API server
@@ -41,6 +42,24 @@ func (a *App) startup(ctx context.Context) {
 	// Install MCP server registration and permission hook
 	a.installMCPServer()
 	a.installPermissionHook()
+}
+
+// seedSlugs raises the slug counters past every slug already on disk, before
+// the frontend can create anything.
+//
+// Saved tabs reconnect lazily, on click, so without this a new session opened
+// straight after a restart takes "koko-1" while the saved koko-1 is still
+// sitting there disconnected.
+func (a *App) seedSlugs() {
+	records := a.cfg.GetSessions().Sessions
+	slugs := make([]string, 0, len(records))
+	for _, r := range records {
+		if r.Slug != "" {
+			slugs = append(slugs, r.Slug)
+		}
+	}
+	a.tm.SeedSlugs(slugs)
+	log.Printf("[slugs] seeded from %d persisted sessions", len(slugs))
 }
 
 func (a *App) installStatusLine() {

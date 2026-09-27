@@ -181,7 +181,8 @@ export namespace main {
 	    rows: number;
 	    resume: boolean;
 	    claudeSessionId: string;
-	
+	    slug: string;
+
 	    static createFrom(source: any = {}) {
 	        return new CreateSessionOpts(source);
 	    }
@@ -194,6 +195,7 @@ export namespace main {
 	        this.rows = source["rows"];
 	        this.resume = source["resume"];
 	        this.claudeSessionId = source["claudeSessionId"];
+	        this.slug = source["slug"];
 	    }
 	}
 	export class FileChange {

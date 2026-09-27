@@ -22,6 +22,10 @@ export function GetClaudeSessionID(arg1) {
   return window['go']['main']['TerminalManager']['GetClaudeSessionID'](arg1);
 }
 
+export function GetSessionSlug(arg1) {
+  return window['go']['main']['TerminalManager']['GetSessionSlug'](arg1);
+}
+
 export function GetSessionBySlug(arg1) {
   return window['go']['main']['TerminalManager']['GetSessionBySlug'](arg1);
 }
