@@ -67,6 +67,42 @@ func TestReadConversationHead_FallsBackToFirstPrompt(t *testing.T) {
 	}
 }
 
+// A session that opens with a pasted image puts megabytes into the first user
+// record. In an interactive session Claude writes ai-title after that record,
+// so stopping at it lost the title. cwd comes from the system record before it.
+func TestReadConversationHead_StepsPastAHugeRecord(t *testing.T) {
+	dir := t.TempDir()
+	image := strings.Repeat("A", 900*1024)
+	path := writeConv(t, dir, "img", time.Now(),
+		`{"type":"system","cwd":"/repo"}`,
+		fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"image","data":%q}]},"cwd":"/repo"}`, image),
+		titleLine("Review the screenshot"),
+	)
+
+	head := readConversationHead(path)
+	if head.title != "Review the screenshot" {
+		t.Errorf("title = %q, want the ai-title written after the huge record", head.title)
+	}
+	if head.cwd != "/repo" {
+		t.Errorf("cwd = %q", head.cwd)
+	}
+}
+
+// When no small record carries a cwd, it is salvaged from the huge one. In a
+// user record cwd follows the message body, so the last match is the real one.
+func TestReadConversationHead_SalvagesCWDFromAHugeRecord(t *testing.T) {
+	dir := t.TempDir()
+	// The pasted text itself contains a cwd key, which must not win.
+	body := `"cwd":"/decoy"` + strings.Repeat("B", 600*1024)
+	path := writeConv(t, dir, "salvage", time.Now(),
+		fmt.Sprintf(`{"type":"user","message":{"role":"user","content":%q},"cwd":"/real"}`, body),
+	)
+
+	if got := readConversationHead(path).cwd; got != "/real" {
+		t.Errorf("cwd = %q, want /real", got)
+	}
+}
+
 func TestReadConversationHead_HandlesStringContent(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConv(t, dir, "c", time.Now(),
@@ -237,5 +273,11 @@ func TestShorten(t *testing.T) {
 	}
 	if strings.ContainsRune(shorten(emoji, 10), '�') {
 		t.Error("cut split a character")
+	}
+	// Too small for an ellipsis. r[:n-3] used to slice with a negative bound.
+	for n := 0; n < 4; n++ {
+		if got := shorten("abcdef", n); len([]rune(got)) != n {
+			t.Errorf("shorten(_, %d) = %q", n, got)
+		}
 	}
 }

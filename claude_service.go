@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -266,9 +267,22 @@ func (cs *ClaudeService) GetLastMessage(dir string) (string, error) {
 // directory can hold hundreds, and each one costs two file reads.
 const maxConversations = 20
 
-// headReadLimit bounds the head read for a title and cwd. Both sit within the
-// first few records, but an attachment record can be megabytes on its own.
-const headReadLimit = 512 * 1024
+// headReadBudget bounds how much of a file the head read scans for a title and
+// cwd. In an interactive session Claude writes ai-title after the first user
+// record, and that record can be megabytes when it holds a pasted image, so
+// the read has to be able to step past it.
+const headReadBudget = 4 * 1024 * 1024
+
+// headMaxRecords stops the head read on a file with many small records and no
+// title, rather than walking the whole budget.
+const headMaxRecords = 64
+
+// headLineCap is the longest record the head read parses. A longer one is
+// skipped, and only its cwd is salvaged.
+const headLineCap = 256 * 1024
+
+// cwdField finds a cwd key in raw JSON. Used only on records too long to parse.
+var cwdField = regexp.MustCompile(`"cwd":"((?:[^"\\]|\\.)*)"`)
 
 // tailChunk is how much is read from the end of a session file at a time.
 const tailChunk = 64 * 1024
@@ -367,12 +381,36 @@ func readConversationHead(path string) conversationHead {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(io.LimitReader(f, headReadLimit))
-	scanner.Buffer(make([]byte, 256*1024), 1024*1024)
+	r := bufio.NewReaderSize(io.LimitReader(f, headReadBudget), headLineCap)
 
 	var head conversationHead
 	var fallback string
-	for scanner.Scan() {
+	for records := 0; records < headMaxRecords; records++ {
+		line, isPrefix, err := r.ReadLine()
+		if err != nil {
+			break
+		}
+		if isPrefix {
+			// Too long to parse, most likely a pasted image. Skip to the end
+			// of the record and keep going: stopping here would hide the
+			// ai-title written after it. Take the last cwd match, because in
+			// a user record cwd follows the message body.
+			salvaged := lastCWD(line)
+			for isPrefix && err == nil {
+				line, isPrefix, err = r.ReadLine()
+				if m := lastCWD(line); m != "" {
+					salvaged = m
+				}
+			}
+			if head.cwd == "" {
+				head.cwd = salvaged
+			}
+			if err != nil {
+				break
+			}
+			continue
+		}
+
 		var entry struct {
 			Type        string `json:"type"`
 			AiTitle     string `json:"aiTitle"`
@@ -383,7 +421,7 @@ func readConversationHead(path string) conversationHead {
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
 		if head.cwd == "" && entry.CWD != "" {
@@ -403,6 +441,20 @@ func readConversationHead(path string) conversationHead {
 		head.title = fallback
 	}
 	return head
+}
+
+// lastCWD returns the last cwd value in a fragment of raw JSON, or "".
+func lastCWD(fragment []byte) string {
+	matches := cwdField.FindAllSubmatch(fragment, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	var cwd string
+	quoted := append(append([]byte{'"'}, matches[len(matches)-1][1]...), '"')
+	if err := json.Unmarshal(quoted, &cwd); err != nil {
+		return ""
+	}
+	return cwd
 }
 
 // userContentText pulls plain text out of a user message. The content is
@@ -437,6 +489,11 @@ func shorten(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
+	}
+	if n < 4 {
+		// No room for an ellipsis, and r[:n-3] would slice with a negative
+		// bound and panic.
+		return string(r[:max(n, 0)])
 	}
 	return string(r[:n-3]) + "..."
 }
