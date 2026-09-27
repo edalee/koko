@@ -38,8 +38,11 @@ type State struct {
 	Runs         map[string]RunRecord `json:"runs"`         // key: slotKey
 	TonoReviewed map[string]time.Time `json:"tonoReviewed"` // key: "owner/repo#12@sha"
 	TonoBaseline time.Time            `json:"tonoBaseline,omitempty"`
-	WakeBooked   time.Time            `json:"wakeBooked,omitempty"` // only set when pmset succeeded
-	WakeTried    time.Time            `json:"wakeTried,omitempty"`  // last wake attempted, booked or not
+	// TimesAdded is when each active run time first appeared, keyed "job@HH:MM".
+	// A slot counts only on days when its time was active before the slot came.
+	TimesAdded map[string]time.Time `json:"timesAdded"`
+	WakeBooked time.Time            `json:"wakeBooked,omitempty"` // only set when pmset succeeded
+	WakeTried  time.Time            `json:"wakeTried,omitempty"`  // last wake attempted, booked or not
 }
 
 func slotKey(job string, slot time.Time) string {
@@ -58,7 +61,41 @@ func loadState(path string) State {
 	if st.TonoReviewed == nil {
 		st.TonoReviewed = map[string]time.Time{}
 	}
+	if st.TimesAdded == nil {
+		st.TimesAdded = map[string]time.Time{}
+	}
 	return st
+}
+
+func timeKey(job, clock string) string { return job + "@" + clock }
+
+// syncTimes records when each active run time appeared, and forgets times
+// that are no longer active. A time is active if the worker and its job are
+// switched on. So a time moved to earlier than now, or a job switched on
+// after its time, waits for the next day instead of running at once.
+func syncTimes(cfg Config, st *State, now time.Time) {
+	active := map[string]bool{}
+	if cfg.Enabled {
+		for _, job := range allJobs {
+			jc := cfg.Jobs[job]
+			if !jc.Enabled {
+				continue
+			}
+			for _, clock := range jc.Times {
+				active[timeKey(job, clock)] = true
+			}
+		}
+	}
+	for k := range active {
+		if _, ok := st.TimesAdded[k]; !ok {
+			st.TimesAdded[k] = now
+		}
+	}
+	for k := range st.TimesAdded {
+		if !active[k] {
+			delete(st.TimesAdded, k)
+		}
+	}
 }
 
 func saveState(path string, st State) error {
@@ -91,6 +128,20 @@ func lockFile(path string) (func(), error) {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
 	}, nil
+}
+
+// lockFree is true if nobody holds the lock at path right now.
+func lockFree(path string) bool {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return true
+	}
+	defer func() { _ = f.Close() }()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return false
+	}
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return true
 }
 
 // updateState changes the state on disk under a file lock. It reloads first,
@@ -133,7 +184,8 @@ type DueRun struct {
 }
 
 // dueRuns lists the jobs to run at now. Only today's slots count: a slot
-// missed on an earlier day is dropped, not caught up.
+// missed on an earlier day is dropped, not caught up. A slot whose time was
+// set after it came round waits for the next day (see syncTimes).
 func dueRuns(cfg Config, st State, now time.Time) []DueRun {
 	now = now.In(cfg.location())
 	if !cfg.Enabled || !isWeekday(now) {
@@ -150,6 +202,9 @@ func dueRuns(cfg Config, st State, now time.Time) []DueRun {
 			slot := atClock(now, clock)
 			if now.Before(slot) {
 				continue
+			}
+			if added, ok := st.TimesAdded[timeKey(job, clock)]; !ok || !added.Before(slot) {
+				continue // the time was set after this slot came round
 			}
 			rec, seen := st.Runs[slotKey(job, slot)]
 			retry := rec.Status == StatusRetry || rec.Status == StatusOffline

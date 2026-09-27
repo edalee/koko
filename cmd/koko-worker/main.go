@@ -10,11 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
-	"strings"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -46,7 +46,7 @@ func main() {
 	case "status":
 		err = cmdStatus(paths)
 	case "install":
-		err = install(paths)
+		err = install(paths, len(os.Args) > 2 && os.Args[2] == "--if-idle")
 	case "uninstall":
 		err = uninstall(paths)
 	default:
@@ -67,7 +67,8 @@ func usage() {
                                          --date runs as if it were 07:00 that day
   koko-worker check [name]               check connections: slack, github, claude, jira, calendar, tono, wake
   koko-worker status                     JSON status for the Koko app
-  koko-worker install | uninstall        switch the launchd agent on or off
+  koko-worker install [--if-idle]        switch the launchd agent on. --if-idle skips it while a job runs
+  koko-worker uninstall                  switch the launchd agent off
 `)
 }
 
@@ -110,8 +111,9 @@ func runJob(ctx context.Context, env Env, job, onlyURL string) error {
 }
 
 // cmdRun runs one job now. It ignores the schedule and the on/off switches.
-// A real run is recorded against today's slots, so the scheduler does not
-// repeat it.
+// It holds the job's lock, so a scheduled run of the same job waits for it.
+// A successful real run of a whole job (no --pr) is recorded against the
+// slots it covers (see manualSlots), so the scheduler does not repeat it.
 func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	test := fs.Bool("test", false, "print instead of DM, book nothing")
@@ -138,6 +140,13 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 			return fmt.Errorf("bad --date %q, want YYYY-MM-DD", *date)
 		}
 		env.now = day.Add(7 * time.Hour)
+	}
+	if !*test {
+		unlock, err := lockFile(jobLockPath(paths, job))
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
 	runErr := runJob(ctx, env, job, *pr)
 	if !*test && runErr == nil && *pr == "" {
@@ -175,45 +184,26 @@ func serve(ctx context.Context, paths Paths) error {
 }
 
 func serveTick(ctx context.Context, cfg Config, paths Paths) {
-	due := dueRuns(cfg, loadState(paths.State), time.Now())
-	if len(due) > 0 && !online(ctx) {
-		// Wait for the internet. The next tick tries again, and nothing is recorded.
-		return
+	if err := updateState(paths.State, func(st *State) { syncTimes(cfg, st, time.Now()) }); err != nil {
+		log.Printf("state: %v", err)
 	}
-	for _, run := range due {
-		if ctx.Err() != nil {
-			return
+	due := dueRuns(cfg, loadState(paths.State), time.Now())
+	// Without internet no job runs, and nothing is recorded, so the next tick
+	// tries again. The wake below is still booked.
+	if len(due) > 0 && online(ctx) {
+		stopAwake := keepAwake()
+		for _, run := range due {
+			if ctx.Err() != nil {
+				break
+			}
+			runDue(ctx, cfg, paths, run)
 		}
-		// Reload per run: a "Run now" may have covered this slot meanwhile.
-		if !stillDue(cfg, loadState(paths.State), run) {
-			continue
-		}
-		log.Printf("%s: running for %s", run.Job, run.Slots[len(run.Slots)-1].Format("15:04"))
-		env := newEnv(cfg, paths, false)
-		err := runJob(ctx, env, run.Job, "")
-		status, msg := StatusOK, ""
-		var reported reportedError
-		switch {
-		case err == nil:
-			log.Printf("%s: done", run.Job)
-		case isNetworkError(err) || !online(ctx):
-			status, msg = StatusOffline, err.Error()
-			log.Printf("%s: network problem, retrying in %s: %v", run.Job, retryInterval, err)
-		case errors.As(err, &reported):
-			// The job has already sent you the details.
-			status, msg = StatusFailed, err.Error()
-			log.Printf("%s: failed: %v", run.Job, err)
-		case failures(*env.state, run)+1 < maxFailures:
-			status, msg = StatusRetry, err.Error()
-			log.Printf("%s: failed, retrying in %s: %v", run.Job, retryInterval, err)
-		default:
-			status, msg = StatusFailed, err.Error()
-			log.Printf("%s: failed after %d tries: %v", run.Job, maxFailures, err)
-			_ = env.notify(ctx, fmt.Sprintf(":warning: koko-worker %s failed after %d tries: %s", run.Job, maxFailures, truncate(err.Error(), 500)))
-		}
-		if err := env.persist(func(st *State) { recordRun(st, run, status, msg, time.Now()) }); err != nil {
-			log.Printf("state: %v", err)
-		}
+		stopAwake()
+	}
+	if ctx.Err() != nil {
+		// Stopping: a pmset call would fail on the cancelled context, and the
+		// failed try would stop the restarted worker from booking this wake.
+		return
 	}
 	if err := updateState(paths.State, func(st *State) {
 		now := time.Now()
@@ -221,6 +211,69 @@ func serveTick(ctx context.Context, cfg Config, paths Paths) {
 		bookWake(ctx, cfg, st, now)
 	}); err != nil {
 		log.Printf("state: %v", err)
+	}
+}
+
+// runDue runs one due job under the job's lock, which a "Run now" of the same
+// job also takes. It rechecks under the lock, because a "Run now" that just
+// finished may have covered the slot.
+func runDue(ctx context.Context, cfg Config, paths Paths, run DueRun) {
+	unlock, err := lockFile(jobLockPath(paths, run.Job))
+	if err != nil {
+		log.Printf("%s: %v", run.Job, err)
+		return
+	}
+	defer unlock()
+	if !stillDue(cfg, loadState(paths.State), run) {
+		return
+	}
+	log.Printf("%s: running for %s", run.Job, run.Slots[len(run.Slots)-1].Format("15:04"))
+	env := newEnv(cfg, paths, false)
+	err = runJob(ctx, env, run.Job, "")
+	status, msg := StatusOK, ""
+	var reported reportedError
+	switch {
+	case err == nil:
+		log.Printf("%s: done", run.Job)
+	case !online(ctx):
+		// Only a real loss of internet counts as a network wait. An error that
+		// merely mentions the network counts as a failure, so it cannot retry
+		// all day without a warning.
+		status, msg = StatusOffline, err.Error()
+		log.Printf("%s: no internet, retrying in %s: %v", run.Job, retryInterval, err)
+	case errors.As(err, &reported):
+		// The job has already sent you the details.
+		status, msg = StatusFailed, err.Error()
+		log.Printf("%s: failed: %v", run.Job, err)
+	case failures(*env.state, run)+1 < maxFailures:
+		status, msg = StatusRetry, err.Error()
+		log.Printf("%s: failed, retrying in %s: %v", run.Job, retryInterval, err)
+	default:
+		status, msg = StatusFailed, err.Error()
+		log.Printf("%s: failed after %d tries: %v", run.Job, maxFailures, err)
+		_ = env.notify(ctx, fmt.Sprintf(":warning: koko-worker %s failed after %d tries: %s", run.Job, maxFailures, truncate(err.Error(), 500)))
+	}
+	if err := env.persist(func(st *State) { recordRun(st, run, status, msg, time.Now()) }); err != nil {
+		log.Printf("state: %v", err)
+	}
+}
+
+func jobLockPath(paths Paths, job string) string {
+	return filepath.Join(paths.Dir, job+".lock")
+}
+
+// keepAwake stops the Mac from idle-sleeping while jobs run, for example after
+// a scheduled wake with nobody at the keyboard. It cannot stop the sleep that
+// closing the lid causes on battery. Call the returned function when done.
+func keepAwake() func() {
+	cmd := exec.Command("caffeinate", "-i", "-w", fmt.Sprint(os.Getpid()))
+	if err := cmd.Start(); err != nil {
+		log.Printf("caffeinate: %v", err)
+		return func() {}
+	}
+	return func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}
 }
 
@@ -246,20 +299,6 @@ func online(ctx context.Context) bool {
 	}
 	_ = resp.Body.Close()
 	return true
-}
-
-func isNetworkError(err error) bool {
-	var ne net.Error
-	if errors.As(err, &ne) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	for _, s := range []string{"no such host", "network is unreachable", "connection refused", "connection reset", "i/o timeout", "tls handshake timeout", "could not resolve"} {
-		if strings.Contains(msg, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // ---- status ----

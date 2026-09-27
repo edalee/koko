@@ -66,7 +66,9 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 - A network failure marks nothing, so the scheduler's retry reviews that commit once the internet is back.
 - If another tono run holds the PR's lock, the PR is left for the next slot.
 - One review per cache clone at a time, so a "Run now" never checks out another PR under a review in progress.
-- A review is capped at 45 minutes. On timeout, tono's whole process group gets SIGTERM, so tono's trap removes its lock.
+- A review is capped at 45 minutes. On timeout, tono's whole process group gets SIGTERM, so tono's trap removes its lock. Anything still running a minute later gets SIGKILL.
+- **Read-only tools:** tono's runs get their own `gh` and `git` first on the PATH. They refuse any command that changes GitHub, including `gh api` calls that send data, and any `git push`. The deny list alone matches only command prefixes.
+- A first clone gets 15 minutes. A failed clone is removed, so it cannot break later reviews.
 - The Test button reviews one PR only.
 
 ## Architecture
@@ -87,8 +89,11 @@ Koko app (UI)                      koko-worker (background)
 - **It runs without the Koko window.** launchd keeps it alive, so jobs run with Koko closed.
 - **Switching on** in the UI installs and starts the launchd agent. **Switching off** stops and removes it.
 - **One agent with its own scheduler**, not one launchd agent per job. Time changes in the UI then need no plist rewrite.
-- **Catch-up:** each minute the worker checks which jobs were due today and have not run. A job missed while the Mac slept runs on wake.
-- **No internet:** a job waits and retries until it connects, then sends. It is never skipped.
+- **Catch-up:** every 30 seconds the worker checks which jobs were due today and have not run. A job missed while the Mac slept runs on wake.
+- **Changed times:** a run time counts only on days when it was set before the slot came round. So moving a time to earlier than now, or switching a job on after its time, waits for the next day.
+- **One run per job at a time:** the scheduler and "Run now" share a lock per job. A stand-up run by hand at 06:55 therefore replaces the 07:00 one.
+- **Staying awake:** while jobs run, `caffeinate` stops the Mac idle-sleeping. It cannot stop the sleep that closing the lid causes on battery.
+- **No internet:** a job waits and retries until it connects, then sends. It is never skipped. Only a real loss of internet counts, not an error that mentions the network. The next wake is still booked while offline.
 - **Other failures:** a job is tried 3 times, 5 minutes apart, then you get one warning DM. Network retries do not count towards the 3.
 - **Stand-up sections fail on their own.** If Jira, the calendar or a PR list fails, that section says so and the rest still arrives.
 - **"Run now"** is recorded against today's slots, so the scheduler does not repeat it. A stand-up run by hand at 06:55 replaces the 07:00 one.
@@ -191,12 +196,13 @@ Built on `feat/koko-worker`, not committed:
 - **Tested under launchd:** checks, the stand-up (exact links, bots hidden, Jira verdicts), focus against Monday's real calendar, and tono on kalimba#28 (nothing posted). One real focus block was booked through the worker's own code on 15 January 2027, then deleted.
 - **Tested directly:** install, status and uninstall of the agent.
 - **Checked:** worker and tono runs save no conversations under `~/.claude/projects`.
+- **Second tono review (fixed in the third commit):** `WorkerService` added to `Bind`, changed times wait for the next day, a job lock shared with "Run now", wakes booked while offline and not lost on shutdown, reinstall only for an idle running agent, read-only `gh` and `git` for tono, `caffeinate` during jobs, a longer first clone, and six more code comments corrected.
 - **Tono review of the branch (fixed in the second commit):** empty UI values no longer wipe defaults, a tono timeout no longer leaves its lock, one review per cache clone, the worker sets its own PATH, a stale agent copy is reinstalled, network waits are labelled apart from failures, and six code comments are corrected.
 - **Review fixes:** plain busy focus blocks, locked state, retries, a stand-up that degrades per section, tono's first-run baseline, wake status set only on success, and a working directory for the agent.
 - **Koko app side:** `worker_service.go`, the bindings and `WorkerSettings.tsx`. `go vet`, `tsc` and `biome` are clean. Not yet visible in the app, because nothing is hooked in.
 
 Still to do:
-1. After the other branch merges: add `NewWorkerService()` to `Bind` in `main.go`, render `<WorkerSettings />` in `SettingsPanel.tsx`, and add `build-worker` and `test-worker` to the `Makefile`.
+1. After the other branch merges: render `<WorkerSettings />` in `SettingsPanel.tsx`, and add `build-worker` and `test-worker` to the `Makefile`. `WorkerService` is already in `Bind`, because a Wails build deletes the bindings of any service not in it.
 2. Bundle `koko-worker` inside `Koko.app` in `make build`.
 3. You enter the Slack bot token and user ID, and add the sudoers rule.
 4. End-to-end test of the serve loop: one stand-up slot two minutes ahead, then one DM and one state record. Then a wake test: Mac asleep, wake, slot, DM.

@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// Slack's limit for one message is 40,000 characters. Long reports are cut
-// well before that, so a DM stays readable.
+// slackMaxText is where long reports are cut, well under Slack's limit of
+// 40,000 characters for one message, so a DM stays readable.
 const slackMaxText = 11000
 
 type slackClient struct {

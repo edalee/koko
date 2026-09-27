@@ -14,7 +14,8 @@ import (
 
 const agentLabel = "com.koko.worker"
 
-// agentPATH is the PATH for launchd, which otherwise has only /usr/bin:/bin.
+// agentPATH is the PATH for launchd, which otherwise has only
+// /usr/bin:/bin:/usr/sbin:/sbin, without gh or claude.
 func agentPATH() string {
 	home, _ := os.UserHomeDir()
 	return strings.Join([]string{
@@ -51,7 +52,17 @@ func launchDomain() string { return fmt.Sprintf("gui/%d", os.Getuid()) }
 
 // install copies this binary to a fixed path and starts it as a launchd agent.
 // The fixed path means a rebuild or a moved Koko.app never breaks the agent.
-func install(paths Paths) error {
+// With ifIdle, it does nothing while a job runs, because reinstalling
+// restarts the agent and would stop that job.
+func install(paths Paths, ifIdle bool) error {
+	if ifIdle {
+		for _, job := range allJobs {
+			if !lockFree(jobLockPath(paths, job)) {
+				fmt.Printf("koko-worker: %s is running, not reinstalling now\n", job)
+				return nil
+			}
+		}
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -95,7 +106,8 @@ func install(paths Paths) error {
 	return nil
 }
 
-// uninstall stops the agent and removes its plist. Config, state and logs stay.
+// uninstall stops the agent, removes its plist and cancels any booked wake.
+// Config, state, logs and the copied binary stay.
 func uninstall(paths Paths) error {
 	_ = exec.Command("launchctl", "bootout", launchDomain()+"/"+agentLabel).Run()
 	if err := os.Remove(agentPlistPath()); err != nil && !os.IsNotExist(err) {
@@ -176,7 +188,6 @@ func bookWake(ctx context.Context, cfg Config, st *State, now time.Time) {
 		// Booked already, or tried and failed: one log line per wake, not one per tick.
 		return
 	}
-	st.WakeTried = want
 	if !st.WakeBooked.IsZero() && st.WakeBooked.After(now) {
 		if err := pmset(ctx, "cancel", st.WakeBooked); err != nil {
 			log.Printf("wake: %v", err)
@@ -184,7 +195,12 @@ func bookWake(ctx context.Context, cfg Config, st *State, now time.Time) {
 		st.WakeBooked = time.Time{}
 	}
 	if err := pmset(ctx, "book", want); err != nil {
-		log.Printf("wake: %v", err)
+		if ctx.Err() == nil {
+			// A real refusal, such as a missing sudoers rule. A cancelled
+			// context is not recorded, so the restarted worker tries again.
+			st.WakeTried = want
+			log.Printf("wake: %v", err)
+		}
 		return
 	}
 	st.WakeBooked = want

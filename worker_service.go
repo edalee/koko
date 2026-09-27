@@ -124,16 +124,26 @@ func (w *WorkerService) SetEnabled(enabled bool) error {
 	return err
 }
 
-// Status returns `koko-worker status` as JSON. If the agent runs an older
-// copy of the worker than the one next to Koko, it reinstalls first, so the
-// scheduler and "Run now" never run different builds.
+// Status returns `koko-worker status` as JSON. If the running agent uses an
+// older copy of the worker than the one next to Koko, it reinstalls, so the
+// scheduler and "Run now" never run different builds. It leaves a stopped
+// agent alone, and waits while a job runs.
 func (w *WorkerService) Status() (string, error) {
-	if stale, _ := installedCopyStale(); stale {
-		if _, err := runWorker(30*time.Second, "install"); err != nil {
-			return "", err
+	out, err := runWorker(15*time.Second, "status")
+	if err != nil {
+		return out, err
+	}
+	var st struct {
+		AgentLoaded bool `json:"agentLoaded"`
+	}
+	if json.Unmarshal([]byte(out), &st) == nil && st.AgentLoaded {
+		if stale, _ := installedCopyStale(); stale {
+			if _, err := runWorker(30*time.Second, "install", "--if-idle"); err != nil {
+				return "", err
+			}
 		}
 	}
-	return runWorker(15*time.Second, "status")
+	return out, nil
 }
 
 // installedCopyStale is true if the agent's copy exists and differs from the

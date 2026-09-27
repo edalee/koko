@@ -37,6 +37,7 @@ func main() {
 	gh := NewGitHubService(cfg)
 	pm := NewProcessMonitor()
 	claude := NewClaudeService()
+	worker := NewWorkerService()
 	api := NewAPIServer(tm, git, cfg)
 	app := NewApp(tm, cfg, api)
 	slackCmd := NewSlackCommandHandler(cfg, tm, git, api)
@@ -77,6 +78,7 @@ func main() {
 			cfg,
 			pm,
 			claude,
+			worker,
 		},
 	})
 

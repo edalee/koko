@@ -56,7 +56,8 @@ func runStandup(ctx context.Context, env Env) error {
 	events, calErr := listEvents(ctx, env.claude, env.cfg, now)
 
 	// Each section degrades on its own, so a stand-up is never lost to one
-	// failing source. A network error still fails the run, so it is retried.
+	// failing source. Without internet the run fails instead, so the
+	// scheduler retries it once the internet is back.
 	var prs []approvedPR
 	approved, prErr := myApprovedPRs(ctx)
 	for _, p := range approved {
@@ -76,7 +77,7 @@ func runStandup(ctx context.Context, env Env) error {
 	}
 
 	for _, err := range []error{calErr, prErr, queueErr} {
-		if err != nil && isNetworkError(err) {
+		if err != nil && !online(ctx) {
 			return err
 		}
 	}
@@ -85,7 +86,7 @@ func runStandup(ctx context.Context, env Env) error {
 	var jiraErr error
 	if len(prs) > 0 {
 		verdicts, jiraErr = judgeTickets(ctx, env, prs)
-		if jiraErr != nil && isNetworkError(jiraErr) {
+		if jiraErr != nil && !online(ctx) {
 			return jiraErr
 		}
 	}
@@ -278,12 +279,75 @@ func formatGaps(gaps []Gap) string {
 // ---- Tono ----
 
 // tonoWrapper is TONO_CLAUDE for tono's own Claude runs. It keeps the runs out
-// of your conversation list and denies posting, as a guard on top of never
-// passing tono's -c flag.
+// of your conversation list and denies the posting commands. It is a guard on
+// top of never passing tono's -c flag (post the findings to the PR). The
+// read-only gh and git in readOnlyShims are the stronger guard.
 const tonoWrapper = `#!/bin/bash
 exec claude "$@" --no-session-persistence \
   "--disallowedTools=Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr merge:*),Bash(gh pr edit:*),Bash(gh pr close:*),Bash(git push:*)"
 `
+
+// readOnlyGH stands in for gh on tono's PATH. It refuses any command that
+// changes GitHub, including gh api calls that send data, and passes reads to
+// the real gh. The deny list alone matches only command prefixes, so it
+// cannot catch flags such as gh api -X PATCH.
+const readOnlyGH = `#!/bin/bash
+# koko-worker: read-only gh for tono runs.
+refuse() { echo "koko-worker: gh $* is refused in tono runs (read-only)" >&2; exit 1; }
+case "$2" in
+  create|delete|edit|close|merge|comment|review|ready|reopen|rerun|cancel|lock|unlock|transfer|rename|archive|unarchive|fork|upload|set|remove|add|pin|unpin|develop|enable|disable|run|sync)
+    refuse "$@" ;;
+esac
+case "$1" in
+  auth) [ "$2" = status ] || refuse "$@" ;;
+  secret|variable|ssh-key|gpg-key|config|extension|alias|codespace|gist|project) refuse "$@" ;;
+  api)
+    for a in "$@"; do
+      case "$a" in -X|--method|-X*|--method=*|-f|-F|-f*|-F*|--field|--field=*|--raw-field|--raw-field=*|--input|--input=*) refuse "$@" ;; esac
+    done ;;
+esac
+exec %q "$@"
+`
+
+// readOnlyGit stands in for git on tono's PATH. It refuses push, wherever the
+// subcommand sits (git -C . push), and passes everything else to the real git.
+const readOnlyGit = `#!/bin/bash
+# koko-worker: git without push for tono runs.
+args=("$@"); i=0
+while [ $i -lt ${#args[@]} ]; do
+  case "${args[$i]}" in
+    -C|-c|--git-dir|--work-tree|--namespace) i=$((i+2)) ;;
+    -*) i=$((i+1)) ;;
+    *) break ;;
+  esac
+done
+case "${args[$i]}" in push|send-pack) echo "koko-worker: git push is refused in tono runs" >&2; exit 1 ;; esac
+exec %q "$@"
+`
+
+// readOnlyShims writes the gh and git stand-ins into dir and returns dir,
+// for the front of tono's PATH.
+func readOnlyShims(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	for name, body := range map[string]string{"gh": readOnlyGH, "git": readOnlyGit} {
+		real, err := exec.LookPath(name)
+		if err != nil {
+			return "", fmt.Errorf("%s not found on PATH", name)
+		}
+		if filepath.Dir(real) == dir {
+			return "", fmt.Errorf("%s resolves to the shim itself", name)
+		}
+		script := strings.Replace(body, "%q", shellQuote(real), 1)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o700); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func runTono(ctx context.Context, env Env, onlyURL string) error {
 	if _, err := os.Stat(env.cfg.TonoPath); err != nil {
@@ -320,13 +384,15 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		}
 		report, logPath, err := tonoReview(ctx, env, p, d.HeadRefOid)
 		link := slackLink(p.URL, p.short())
-		var busy tonoBusyError
+		var skipped tonoSkippedError
 		switch {
-		case errors.As(err, &busy):
-			// Another tono run holds this PR. Leave it unmarked for the next slot.
+		case errors.As(err, &skipped):
+			// tono had nothing to review: another run holds the PR, or it just
+			// became closed or a draft. Leave it unmarked. A closed or draft PR
+			// drops out of the next search anyway.
 			log.Printf("tono: %s skipped: %v", p.short(), err)
 			continue
-		case err != nil && (isNetworkError(err) || !online(ctx)):
+		case err != nil && !online(ctx):
 			// Not marked, so the scheduler's retry reviews it once the internet is back.
 			netErr = err
 			continue
@@ -341,7 +407,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			return nerr
 		}
 		// A review that failed for a reason other than the network is marked
-		// too, so it is not re-reported three times a day.
+		// too, so it is not re-reported at every tono slot.
 		if err := env.persist(func(st *State) { st.TonoReviewed[key] = time.Now() }); err != nil {
 			return err
 		}
@@ -356,20 +422,25 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 }
 
 // groupCommand starts name in its own process group. When ctx ends, the whole
-// group gets SIGTERM, so tono's trap runs and Claude's children stop too. If
-// they are still there a minute later, Go kills them outright.
+// group gets SIGTERM, so tono's trap runs and Claude's children stop too.
+// Anything in the group still running a minute later gets SIGKILL.
 func groupCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
-	cmd.WaitDelay = time.Minute
+	cmd.Cancel = func() error {
+		pgid := cmd.Process.Pid
+		time.AfterFunc(time.Minute, func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+		return syscall.Kill(-pgid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = time.Minute + 10*time.Second
 	return cmd
 }
 
-// tonoBusyError means tono found its lock for this PR taken, and skipped.
-type tonoBusyError struct{ error }
+// tonoSkippedError means tono exited with tonoSkipExit.
+type tonoSkippedError struct{ error }
 
-// tonoSkipExit is the exit code tono uses when another review holds the lock.
+// tonoSkipExit is tono's "nothing to review" exit code: another run holds the
+// lock, or the PR is closed or a draft.
 const tonoSkipExit = 2
 
 // tonoTimeout caps one review. On timeout, tono's whole process group gets
@@ -418,8 +489,12 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (strin
 	}
 	defer unlock()
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if _, err := gh(ctx, "repo", "clone", p.repo(), dir, "--", "--filter=blob:none", "--quiet"); err != nil {
-			return "", "", err
+		cloneCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		out, err := exec.CommandContext(cloneCtx, "gh", "repo", "clone", p.repo(), dir, "--", "--filter=blob:none", "--quiet").CombinedOutput()
+		cancel()
+		if err != nil {
+			_ = os.RemoveAll(dir) // a half-made clone would break every later review
+			return "", "", fmt.Errorf("clone %s: %v: %s", p.repo(), err, truncate(strings.TrimSpace(string(out)), 300))
 		}
 	}
 	for _, args := range [][]string{
@@ -435,7 +510,11 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (strin
 	defer cancel()
 	cmd := groupCommand(ctx, env.cfg.TonoPath, fmt.Sprint(p.Number), "--all", "-l", "high", "-R", p.repo())
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "TONO_CLAUDE="+env.paths.TonoWrap)
+	shims, err := readOnlyShims(filepath.Join(env.paths.Dir, "tono-bin"))
+	if err != nil {
+		return "", "", err
+	}
+	cmd.Env = append(os.Environ(), "TONO_CLAUDE="+env.paths.TonoWrap, "PATH="+shims+":"+os.Getenv("PATH"))
 	// stdout is the report. stderr has tono's progress lines, which go only to the log.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -451,7 +530,7 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (strin
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == tonoSkipExit {
-		return "", logPath, tonoBusyError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
+		return "", logPath, tonoSkippedError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
 	}
 	if err != nil {
 		return "", logPath, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))

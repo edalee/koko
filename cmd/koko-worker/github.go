@@ -107,7 +107,8 @@ func isBot(p SearchPR) bool {
 		strings.Contains(login, "dependabot") || strings.Contains(login, "renovate")
 }
 
-// reviewQueue keeps PRs by people other than you, oldest first. me is your GitHub login.
+// reviewQueue keeps PRs by people other than you, oldest first. Bot PRs, such
+// as Dependabot's, are dropped too. me is your GitHub login.
 func reviewQueue(prs []SearchPR, me string) []SearchPR {
 	var out []SearchPR
 	for _, p := range prs {

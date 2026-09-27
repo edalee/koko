@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,13 @@ func testConfig() Config {
 	return cfg
 }
 
+// readyState is a state in which every time in cfg was set a week earlier.
+func readyState(cfg Config) State {
+	st := loadState("/nonexistent")
+	syncTimes(cfg, &st, monday(0, 0).AddDate(0, 0, -7))
+	return st
+}
+
 func dueString(runs []DueRun) string {
 	var parts []string
 	for _, r := range runs {
@@ -127,7 +135,7 @@ func dueString(runs []DueRun) string {
 
 func TestDueRuns(t *testing.T) {
 	cfg := testConfig()
-	empty := State{Runs: map[string]RunRecord{}}
+	empty := readyState(cfg)
 
 	t.Run("nothing before the first slot", func(t *testing.T) {
 		if got := dueString(dueRuns(cfg, empty, monday(6, 59))); got != "" {
@@ -146,7 +154,7 @@ func TestDueRuns(t *testing.T) {
 		}
 	})
 	t.Run("done slots are not rerun", func(t *testing.T) {
-		st := State{Runs: map[string]RunRecord{}}
+		st := readyState(cfg)
 		recordRun(&st, DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}, StatusOK, "", monday(7, 1))
 		recordRun(&st, DueRun{Job: JobFocus, Slots: []time.Time{monday(9, 15)}}, StatusFailed, "boom", monday(9, 16))
 		if got := dueString(dueRuns(cfg, st, monday(9, 20))); got != "" {
@@ -154,7 +162,7 @@ func TestDueRuns(t *testing.T) {
 		}
 	})
 	t.Run("retry waits five minutes", func(t *testing.T) {
-		st := State{Runs: map[string]RunRecord{}}
+		st := readyState(cfg)
 		recordRun(&st, DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}, StatusOffline, "offline", monday(7, 1))
 		if got := dueString(dueRuns(cfg, st, monday(7, 5))); got != "" {
 			t.Errorf("too early: got %q", got)
@@ -178,7 +186,8 @@ func TestDueRuns(t *testing.T) {
 	t.Run("job switched off", func(t *testing.T) {
 		c := testConfig()
 		c.Jobs[JobTono] = JobConfig{Enabled: false, Times: []string{"09:30"}}
-		if got := dueString(dueRuns(c, empty, monday(9, 40))); got != "standup[07:00] focus[09:15]" {
+		st := readyState(c)
+		if got := dueString(dueRuns(c, st, monday(9, 40))); got != "standup[07:00] focus[09:15]" {
 			t.Errorf("got %q", got)
 		}
 	})
@@ -384,7 +393,7 @@ func TestManualSlots(t *testing.T) {
 	if len(got) != 2 || got[1].Format("15:04") != "12:00" {
 		t.Errorf("tono: got %v", got)
 	}
-	st := State{Runs: map[string]RunRecord{}}
+	st := readyState(cfg)
 	recordRun(&st, DueRun{Job: JobStandup, Slots: manualSlots(cfg, JobStandup, monday(6, 55))}, StatusOK, "run by hand", monday(6, 56))
 	if d := dueString(dueRuns(cfg, st, monday(7, 0))); d != "" {
 		t.Errorf("stand-up run by hand is due again: %q", d)
@@ -392,8 +401,8 @@ func TestManualSlots(t *testing.T) {
 }
 
 func TestFailuresSkipNetworkRetries(t *testing.T) {
-	st := State{Runs: map[string]RunRecord{}}
 	cfg := testConfig()
+	st := readyState(cfg)
 	run := DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}
 	recordRun(&st, run, StatusOffline, "no such host", monday(7, 1))
 	recordRun(&st, run, StatusOffline, "no such host", monday(7, 6))
@@ -487,5 +496,90 @@ func TestGroupCommandRunsTrapOnTimeout(t *testing.T) {
 	}
 	if _, err := os.Stat(lock); !os.IsNotExist(err) {
 		t.Error("the trap did not run: the lock is still there")
+	}
+}
+
+func TestTimeMovedEarlierWaitsForTomorrow(t *testing.T) {
+	cfg := testConfig()
+	st := readyState(cfg)
+	recordRun(&st, DueRun{Job: JobStandup, Slots: []time.Time{monday(7, 0)}}, StatusOK, "", monday(7, 1))
+
+	// At 09:00 you move the stand-up from 07:00 to 08:00.
+	cfg.Jobs[JobStandup] = JobConfig{Enabled: true, Times: []string{"08:00"}}
+	syncTimes(cfg, &st, monday(9, 0))
+	if got := dueString(dueRuns(cfg, st, monday(9, 1))); got != "" {
+		t.Errorf("ran again after the time moved: %q", got)
+	}
+	tuesday := monday(8, 0).AddDate(0, 0, 1)
+	if got := dueString(dueRuns(cfg, st, tuesday)); got != "standup[08:00]" {
+		t.Errorf("tomorrow: got %q", got)
+	}
+}
+
+func TestJobSwitchedOnLateWaitsForTomorrow(t *testing.T) {
+	cfg := testConfig()
+	cfg.Jobs[JobTono] = JobConfig{Enabled: false, Times: []string{"09:30"}}
+	st := readyState(cfg)
+	cfg.Jobs[JobTono] = JobConfig{Enabled: true, Times: []string{"09:30"}}
+	syncTimes(cfg, &st, monday(10, 0))
+	if got := dueString(dueRuns(cfg, st, monday(10, 0))); strings.Contains(got, "tono") {
+		t.Errorf("tono ran straight after being switched on: %q", got)
+	}
+}
+
+func TestCatchUpAfterSleepStillWorks(t *testing.T) {
+	// Times set last week, the Mac asleep all morning: the stand-up still runs at 13:00.
+	cfg := testConfig()
+	st := readyState(cfg)
+	syncTimes(cfg, &st, monday(13, 0))
+	if got := dueString(dueRuns(cfg, st, monday(13, 0))); !strings.HasPrefix(got, "standup[07:00]") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestReadOnlyShims(t *testing.T) {
+	dir := t.TempDir()
+	realDir := dir + "/real"
+	if err := os.MkdirAll(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Fake gh and git that only say they ran.
+	for _, name := range []string{"gh", "git"} {
+		if err := os.WriteFile(realDir+"/"+name, []byte("#!/bin/bash\necho ran\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", realDir+":/usr/bin:/bin")
+	shims, err := readOnlyShims(dir + "/shims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(name string, args ...string) bool {
+		out, err := exec.Command(shims+"/"+name, args...).CombinedOutput()
+		return err == nil && strings.TrimSpace(string(out)) == "ran"
+	}
+	allowed := [][]string{
+		{"gh", "pr", "view", "28"}, {"gh", "pr", "diff", "28"}, {"gh", "pr", "checkout", "28"},
+		{"gh", "api", "repos/o/r/pulls/28/comments", "--jq", ".[].body"}, {"gh", "repo", "clone", "o/r"},
+		{"gh", "run", "view", "123"}, {"gh", "auth", "status"},
+		{"git", "log", "--oneline"}, {"git", "-C", ".", "diff", "main"}, {"git", "-c", "x=y", "show"},
+	}
+	refused := [][]string{
+		{"gh", "pr", "comment", "28", "-b", "x"}, {"gh", "pr", "review", "28", "--approve"}, {"gh", "pr", "merge", "28"},
+		{"gh", "api", "-X", "PATCH", "repos/o/r/issues/comments/1"}, {"gh", "api", "--method=POST", "x"},
+		{"gh", "api", "repos/o/r/issues/28/comments", "-f", "body=x"}, {"gh", "api", "x", "--input", "f"},
+		{"gh", "workflow", "run", "deploy"}, {"gh", "repo", "delete", "o/r"}, {"gh", "auth", "token"},
+		{"gh", "secret", "list"}, {"gh", "issue", "create"},
+		{"git", "push"}, {"git", "-C", ".", "push", "origin"}, {"git", "-c", "a=b", "push"},
+	}
+	for _, a := range allowed {
+		if !run(a[0], a[1:]...) {
+			t.Errorf("refused, want allowed: %v", a)
+		}
+	}
+	for _, r := range refused {
+		if run(r[0], r[1:]...) {
+			t.Errorf("allowed, want refused: %v", r)
+		}
 	}
 }
