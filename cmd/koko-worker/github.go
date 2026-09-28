@@ -178,6 +178,34 @@ func myLogin(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// teamMembers returns the logins in "org/team-slug", lower-cased.
+func teamMembers(ctx context.Context, team string) (map[string]bool, error) {
+	org, slug, _ := strings.Cut(team, "/")
+	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("orgs/%s/teams/%s/members", org, slug), "--jq", ".[].login")
+	if err != nil {
+		return nil, err
+	}
+	members := map[string]bool{}
+	for _, login := range strings.Fields(string(out)) {
+		members[strings.ToLower(login)] = true
+	}
+	if len(members) == 0 {
+		return nil, fmt.Errorf("team %s has no members, or you cannot see them", team)
+	}
+	return members, nil
+}
+
+// hasTonoComment is true if the PR already carries a tono comment, for
+// example from a teammate who ran tono with -c (post the findings).
+func hasTonoComment(ctx context.Context, repo string, number int) (bool, error) {
+	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
+		"--jq", `.[] | select(.body | contains("<!-- tono:")) | .id`)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
 func slackLink(url, text string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 	return "<" + url + "|" + r.Replace(text) + ">"

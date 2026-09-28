@@ -37,8 +37,7 @@ type RunRecord struct {
 type State struct {
 	Runs         map[string]RunRecord  `json:"runs"`         // key: slotKey
 	TonoReviewed map[string]time.Time  `json:"tonoReviewed"` // key: "owner/repo#12@sha"
-	TonoBaseline time.Time             `json:"tonoBaseline,omitempty"`
-	TonoResults  map[string]TonoResult `json:"tonoResults"` // key: "owner/repo#12@sha"
+	TonoResults  map[string]TonoResult `json:"tonoResults"`  // key: "owner/repo#12@sha"
 	// TimesAdded is when each active run time first appeared, keyed "job@HH:MM".
 	// A slot counts only on days when its time was active before the slot came.
 	TimesAdded map[string]time.Time `json:"timesAdded"`

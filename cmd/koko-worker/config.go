@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -45,7 +46,11 @@ type Config struct {
 	CalendarID string `json:"calendarId"`
 	TonoPath   string `json:"tonoPath"`
 	// TonoOwnPRsOnly stops tono reviewing the PRs that wait for your review.
-	TonoOwnPRsOnly bool                 `json:"tonoOwnPRsOnly"`
+	TonoOwnPRsOnly bool `json:"tonoOwnPRsOnly"`
+	// TonoTeam is "org/team-slug". tono reviews only PRs opened by its members.
+	TonoTeam string `json:"tonoTeam"`
+	// TonoMaxAgeDays is how recently a PR must have been opened for tono to review it.
+	TonoMaxAgeDays int                  `json:"tonoMaxAgeDays"`
 	Slack          SlackConfig          `json:"slack"`
 	Focus          FocusConfig          `json:"focus"`
 	Jobs           map[string]JobConfig `json:"jobs"`
@@ -54,11 +59,13 @@ type Config struct {
 func defaultConfig() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		Enabled:    false,
-		TimeZone:   "Europe/Stockholm",
-		CalendarID: "primary",
-		TonoPath:   filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
-		Focus:      FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
+		Enabled:        false,
+		TimeZone:       "Europe/Stockholm",
+		CalendarID:     "primary",
+		TonoPath:       filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
+		TonoTeam:       "epidemicsound/content-protection",
+		TonoMaxAgeDays: 4,
+		Focus:          FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
 		Jobs: map[string]JobConfig{
 			JobStandup: {Enabled: true, Times: []string{"07:00"}},
 			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
@@ -129,6 +136,12 @@ func (c *Config) fillDefaults() {
 	if c.TonoPath == "" {
 		c.TonoPath = def.TonoPath
 	}
+	if c.TonoTeam == "" {
+		c.TonoTeam = def.TonoTeam
+	}
+	if c.TonoMaxAgeDays <= 0 {
+		c.TonoMaxAgeDays = def.TonoMaxAgeDays
+	}
 	if c.Focus.WindowStart == "" {
 		c.Focus.WindowStart = def.Focus.WindowStart
 	}
@@ -171,6 +184,9 @@ func (c Config) validate() error {
 				return fmt.Errorf("job %s: %w", name, err)
 			}
 		}
+	}
+	if org, team, ok := strings.Cut(c.TonoTeam, "/"); !ok || org == "" || team == "" {
+		return fmt.Errorf("tono team %q, want org/team-slug", c.TonoTeam)
 	}
 	for _, t := range []string{c.Focus.WindowStart, c.Focus.WindowEnd} {
 		if _, _, err := parseClock(t); err != nil {

@@ -197,7 +197,8 @@ func runStandup(ctx context.Context, env Env) error {
 
 // reviewSection is the stand-up's "Needs your review" section: a summary of
 // tono's reviews, one line per PR, and the reviews not yet posted, for the
-// thread. It returns the keys of the reviews it puts in the thread.
+// thread. It returns the keys of the reviews it puts in the thread. A PR
+// keeps its review after new commits, because tono reviews each PR once.
 func reviewSection(ctx context.Context, env Env, queue []SearchPR, queueErr error) (string, [][]string, []string) {
 	var b strings.Builder
 	b.WriteString("*Needs your review*\n")
@@ -210,41 +211,44 @@ func reviewSection(ctx context.Context, env Env, queue []SearchPR, queueErr erro
 		return b.String(), nil, nil
 	}
 
+	scope, scopeErr := loadScope(ctx, env.cfg, env.now)
 	counts := map[string]int{}
 	var lines []string
 	var thread [][]string
 	var posted []string
 	for _, p := range queue {
 		line := fmt.Sprintf("• %s %s (%s)", slackLink(p.URL, p.short()), p.Title, p.Author.Login)
-		status := "not reviewed yet"
-		if d, err := prDetail(ctx, p.URL); err == nil {
-			key := tonoKey(p.repo(), p.Number, d.HeadRefOid)
-			if r, ok := env.state.TonoResults[key]; ok {
-				switch {
-				case r.Failed != "":
-					status = "tono could not review it"
-					counts["failed"]++
-				default:
-					v := overallVerdict(r.Verdicts)
-					status = strings.ToLower(verdictLabel(v))
-					counts[v]++
-					counts["reviewed"]++
-					if !r.Posted && r.Report != "" {
-						if report := loadReport(r.Report); len(report) > 0 {
-							thread = append(thread, report)
-							posted = append(posted, key)
-						}
-					}
-				}
-			} else if olderReview(env.state, p) {
-				status = "reviewed at an older commit, new review pending"
+		r, reviewed := latestResult(env.state, p.repo(), p.Number)
+		var status string
+		switch {
+		case reviewed && r.Failed != "":
+			status = "tono could not review it"
+			counts["failed"]++
+		case reviewed:
+			v := overallVerdict(r.Verdicts)
+			status = strings.ToLower(verdictLabel(v))
+			if d, err := prDetail(ctx, p.URL); err == nil && d.HeadRefOid != r.SHA {
+				status += " (reviewed at an earlier commit)"
 			}
+			counts[v]++
+			counts["reviewed"]++
+			if !r.Posted && r.Report != "" {
+				if report := loadReport(r.Report); len(report) > 0 {
+					thread = append(thread, report)
+					posted = append(posted, tonoKey(r.Repo, r.Number, r.SHA))
+				}
+			}
+		case scopeErr == nil && scope.outside(p) != "":
+			status = "outside tono's scope: " + scope.outside(p)
+			counts["outside"]++
+		default:
+			status = "not reviewed yet"
+			counts["waiting"]++
 		}
 		lines = append(lines, line+": "+status)
 	}
-	notReviewed := len(queue) - counts["reviewed"] - counts["failed"]
 
-	fmt.Fprintf(&b, "%d PRs wait for your review. Tono has reviewed %d at their latest commit (code, docs and comments)", len(queue), counts["reviewed"])
+	fmt.Fprintf(&b, "%d PRs wait for your review. Tono has reviewed %d (code, docs and comments)", len(queue), counts["reviewed"])
 	if counts["reviewed"] > 0 {
 		fmt.Fprintf(&b, ": %d ready to approve, %d with follow-ups, %d not mergeable", counts[verdictReady], counts[verdictFollowUps], counts[verdictNotMergeable])
 		if n := counts[""]; n > 0 {
@@ -252,27 +256,23 @@ func reviewSection(ctx context.Context, env Env, queue []SearchPR, queueErr erro
 		}
 	}
 	b.WriteString(".")
-	if notReviewed > 0 {
-		fmt.Fprintf(&b, " %d not reviewed yet.", notReviewed)
+	if counts["waiting"] > 0 {
+		fmt.Fprintf(&b, " %d not reviewed yet.", counts["waiting"])
 	}
 	if counts["failed"] > 0 {
 		fmt.Fprintf(&b, " %d could not be reviewed.", counts["failed"])
+	}
+	if counts["outside"] > 0 {
+		fmt.Fprintf(&b, " %d are outside tono's scope, which is PRs opened by %s in the last %d days.", counts["outside"], env.cfg.TonoTeam, env.cfg.TonoMaxAgeDays)
+	}
+	if scopeErr != nil {
+		fmt.Fprintf(&b, " _Could not load tono's scope: %s_", truncate(scopeErr.Error(), 150))
 	}
 	if len(thread) > 0 {
 		b.WriteString(" New reviews are in the thread.")
 	}
 	b.WriteString("\n\n" + strings.Join(lines, "\n"))
 	return b.String(), thread, posted
-}
-
-// olderReview is true if tono reviewed an earlier commit of the PR.
-func olderReview(st *State, p SearchPR) bool {
-	for _, r := range st.TonoResults {
-		if r.Repo == p.repo() && r.Number == p.Number {
-			return true
-		}
-	}
-	return false
 }
 
 func ticketLine(v ticketVerdict) string {
@@ -457,6 +457,62 @@ func readOnlyShims(dir string) (string, error) {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
+// tonoScope is which PRs tono may review: opened by a member of the team, in
+// the last TonoMaxAgeDays days.
+type tonoScope struct {
+	team    string
+	days    int
+	members map[string]bool
+	since   time.Time
+}
+
+func loadScope(ctx context.Context, cfg Config, now time.Time) (tonoScope, error) {
+	members, err := teamMembers(ctx, cfg.TonoTeam)
+	if err != nil {
+		return tonoScope{}, err
+	}
+	return tonoScope{
+		team: cfg.TonoTeam, days: cfg.TonoMaxAgeDays, members: members,
+		since: now.AddDate(0, 0, -cfg.TonoMaxAgeDays),
+	}, nil
+}
+
+// outside says why a PR is outside the scope, or "" if it is inside.
+func (s tonoScope) outside(p SearchPR) string {
+	if !s.members[strings.ToLower(p.Author.Login)] {
+		return "not opened by " + s.team
+	}
+	created, err := time.Parse(time.RFC3339, p.CreatedAt)
+	if err != nil || created.Before(s.since) {
+		return fmt.Sprintf("opened more than %d days ago", s.days)
+	}
+	return ""
+}
+
+// latestResult is tono's most recent result for the PR, at any commit.
+func latestResult(st *State, repo string, number int) (TonoResult, bool) {
+	var best TonoResult
+	found := false
+	for _, r := range st.TonoResults {
+		if r.Repo == repo && r.Number == number && (!found || r.At.After(best.At)) {
+			best, found = r, true
+		}
+	}
+	return best, found
+}
+
+// reviewedBefore is true if tono has looked at the PR at any commit, even if
+// the review failed. Each PR gets one review.
+func reviewedBefore(st *State, repo string, number int) bool {
+	prefix := fmt.Sprintf("%s#%d@", repo, number)
+	for k := range st.TonoReviewed {
+		if strings.HasPrefix(k, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // tonoTarget is one PR for tono to review.
 type tonoTarget struct {
 	pr   SearchPR
@@ -511,12 +567,9 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	if err != nil {
 		return err
 	}
-	if onlyURL == "" && env.state.TonoBaseline.IsZero() && !env.test {
-		// Your own backlog is marked as seen. The review queue is still reviewed.
-		if err := tonoBaseline(ctx, env, targets); err != nil {
-			return err
-		}
-		env.state = ptr(loadState(env.paths.State))
+	scope, err := loadScope(ctx, env.cfg, env.now)
+	if err != nil {
+		return err
 	}
 	var failures []string
 	var netErr error
@@ -530,14 +583,24 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		if env.test && onlyURL == "" && reviewed > 0 {
 			break
 		}
+		// A PR named with --pr is reviewed whatever the scope says.
+		if onlyURL == "" {
+			if scope.outside(p) != "" || reviewedBefore(env.state, p.repo(), p.Number) {
+				continue
+			}
+			onGitHub, err := hasTonoComment(ctx, p.repo(), p.Number)
+			if err != nil {
+				return err
+			}
+			if onGitHub {
+				continue // someone already posted a tono review on the PR
+			}
+		}
 		d, err := prDetail(ctx, p.URL)
 		if err != nil {
 			return err
 		}
 		key := tonoKey(p.repo(), p.Number, d.HeadRefOid)
-		if _, done := env.state.TonoReviewed[key]; done && onlyURL == "" {
-			continue
-		}
 		sections, verdicts, err := tonoReview(ctx, env, p, d.HeadRefOid)
 		link := slackLink(p.URL, p.short())
 		var skipped tonoSkippedError
@@ -590,8 +653,9 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 				}
 			}
 		}
-		// A review that failed for a reason other than the network is marked
-		// too, so it is not re-reported at every tono slot.
+		// Each PR gets one review. A review that failed for a reason other
+		// than the network is marked too, so it is not re-reported at every
+		// tono slot.
 		if err := env.persist(func(st *State) {
 			st.TonoReviewed[key] = time.Now()
 			st.TonoResults[key] = result
@@ -607,8 +671,6 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	}
 	return nil
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // saveReport writes a review's sections to dir, for the stand-up thread.
 func saveReport(dir, key string, sections []string) (string, error) {
@@ -723,34 +785,6 @@ const tonoSkipExit = 2
 // SIGTERM, so tono's trap removes its lock. A plain kill would leave the lock
 // behind and block every later review of that PR.
 const tonoTimeout = 45 * time.Minute
-
-// tonoBaseline runs the first time tono is switched on. It marks your own open
-// PRs' current commits as seen, so only your new PRs and new commits get
-// reviewed. The PRs waiting for your review are not marked: they all get a
-// review.
-func tonoBaseline(ctx context.Context, env Env, targets []tonoTarget) error {
-	keys := map[string]bool{}
-	for _, t := range targets {
-		if !t.mine {
-			continue
-		}
-		d, err := prDetail(ctx, t.pr.URL)
-		if err != nil {
-			return err
-		}
-		keys[tonoKey(t.pr.repo(), t.pr.Number, d.HeadRefOid)] = true
-	}
-	if err := env.persist(func(st *State) {
-		now := time.Now()
-		for k := range keys {
-			st.TonoReviewed[k] = now
-		}
-		st.TonoBaseline = now
-	}); err != nil {
-		return err
-	}
-	return env.notify(ctx, fmt.Sprintf("Tono is on. I marked your %d open PRs as seen, so only your new PRs and new commits get a review. PRs waiting for your review all get one.", len(keys)))
-}
 
 // reportedError is a failure the job has already sent you, so the scheduler
 // logs it without a second DM.

@@ -40,7 +40,7 @@ The times are defaults. The UI can change them.
 3. **Follow-up steps** for each ready PR.
 4. **Needs your review:** open, non-draft PRs that request your review, oldest first. Your own PRs and bot PRs (Dependabot, Renovate) are hidden.
    - It opens with a summary: how many PRs wait, how many tono has reviewed at their current commit (code, docs and comments), and of those how many look ready to approve, have follow-ups, or are not mergeable.
-   - Each PR shows its tono verdict, or "not reviewed yet".
+   - Each PR shows its tono verdict, "not reviewed yet", or "outside tono's scope" with the reason. "Not reviewed yet" counts only PRs in scope.
    - Each full review of a PR in this list goes in the stand-up's thread, once per commit.
 
 **Layout:** the DM uses Slack blocks, with a divider between sections. Long sections are split at line breaks under Slack's 3,000-character limit per block, and a message that needs more than 50 blocks continues in a second message. Tono DMs use the same layout.
@@ -60,10 +60,12 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 
 ### Tono
 
-- PRs waiting for your review (people, not bots) are reviewed too, oldest first, after your own. They get no DM of their own: the stand-up summarises them and posts each review in its thread. There is no first-run baseline for them, so the first run reviews the whole queue (about 8 minutes each).
+- **Scope:** tono reviews only PRs opened by a member of `epidemicsound/content-protection` in the last 4 days (`tonoTeam`, `tonoMaxAgeDays`). The members come from GitHub at every run.
+- **One review per PR:** a PR tono has reviewed, at any commit, is not reviewed again. Neither is a PR that already carries a tono comment, for example from a teammate who ran tono with `-c`.
+- **Sources:** your own open PRs, then the PRs waiting for your review (people, not bots), oldest first. Others' PRs get no DM of their own: the stand-up summarises them and posts each review in its thread.
+- **"Run now" with a PR URL** reviews that PR whatever the scope says.
 - The verdict comes from the draft PR comment in each verified pass: mergeable, mergeable with follow-ups, or not mergeable. "Ready to approve" means every pass says mergeable or mergeable with follow-ups, and the code review says mergeable.
-- Your own open, non-draft PRs. Each head commit gets one review, keyed `repo#number@sha`.
-- **First run:** it marks your open PRs' current commits as seen and tells you how many, so it does not review the whole backlog. After that, only new PRs and new commits get reviewed.
+- Results are keyed `repo#number@sha`, so the stand-up can say when a PR has new commits since its review.
 - The review runs in a cache clone at the PR head, never in your working clones.
 - It calls the tono CLI directly: `tono <number> --all -l high`. The CLI posts nothing to GitHub without `-c`.
 - The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its `TONO_CLAUDE` wrapper denies the posting commands as a second guard.

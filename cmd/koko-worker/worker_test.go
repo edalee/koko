@@ -644,3 +644,58 @@ func TestReportRoundTrip(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestTonoScope(t *testing.T) {
+	now := monday(9, 30)
+	s := tonoScope{
+		team: "epidemicsound/content-protection", days: 4,
+		members: map[string]bool{"jamie-r-es": true, "edalee": true},
+		since:   now.AddDate(0, 0, -4),
+	}
+	pr := func(login, created string) SearchPR {
+		p := SearchPR{CreatedAt: created}
+		p.Author.Login = login
+		return p
+	}
+	for _, c := range []struct {
+		pr   SearchPR
+		want string
+	}{
+		{pr("jamie-r-es", "2026-09-27T10:00:00Z"), ""},
+		{pr("Jamie-R-ES", "2026-09-25T08:00:00Z"), ""}, // logins are not case-sensitive
+		{pr("jamie-r-es", "2026-09-20T10:00:00Z"), "opened more than 4 days ago"},
+		{pr("someone-else", "2026-09-27T10:00:00Z"), "not opened by epidemicsound/content-protection"},
+		{pr("edalee", "not a date"), "opened more than 4 days ago"},
+	} {
+		if got := s.outside(c.pr); got != c.want {
+			t.Errorf("%s %s: got %q, want %q", c.pr.Author.Login, c.pr.CreatedAt, got, c.want)
+		}
+	}
+}
+
+func TestOneReviewPerPR(t *testing.T) {
+	st := loadState("/nonexistent")
+	st.TonoReviewed[tonoKey("o/r", 12, "aaa")] = monday(9, 0)
+	st.TonoResults[tonoKey("o/r", 12, "aaa")] = TonoResult{Repo: "o/r", Number: 12, SHA: "aaa", At: monday(9, 0)}
+	st.TonoResults[tonoKey("o/r", 12, "bbb")] = TonoResult{Repo: "o/r", Number: 12, SHA: "bbb", At: monday(12, 0)}
+	if !reviewedBefore(&st, "o/r", 12) {
+		t.Error("a new commit must not bring a second review")
+	}
+	if reviewedBefore(&st, "o/r", 1) || reviewedBefore(&st, "o/r2", 12) {
+		t.Error("other PRs count as reviewed")
+	}
+	if r, ok := latestResult(&st, "o/r", 12); !ok || r.SHA != "bbb" {
+		t.Errorf("latest = %+v", r)
+	}
+}
+
+func TestTonoScopeConfig(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.TonoTeam != "epidemicsound/content-protection" || cfg.TonoMaxAgeDays != 4 {
+		t.Errorf("defaults: %q, %d", cfg.TonoTeam, cfg.TonoMaxAgeDays)
+	}
+	cfg.TonoTeam = "content-protection"
+	if cfg.validate() == nil {
+		t.Error("want an error for a team without its org")
+	}
+}
