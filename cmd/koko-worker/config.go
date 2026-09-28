@@ -40,13 +40,15 @@ type FocusConfig struct {
 // It is a separate file because Koko's SaveConfig rewrites config.json from
 // its own struct and would drop any key it does not know.
 type Config struct {
-	Enabled    bool                 `json:"enabled"`
-	TimeZone   string               `json:"timeZone"`
-	CalendarID string               `json:"calendarId"`
-	TonoPath   string               `json:"tonoPath"`
-	Slack      SlackConfig          `json:"slack"`
-	Focus      FocusConfig          `json:"focus"`
-	Jobs       map[string]JobConfig `json:"jobs"`
+	Enabled    bool   `json:"enabled"`
+	TimeZone   string `json:"timeZone"`
+	CalendarID string `json:"calendarId"`
+	TonoPath   string `json:"tonoPath"`
+	// TonoOwnPRsOnly stops tono reviewing the PRs that wait for your review.
+	TonoOwnPRsOnly bool                 `json:"tonoOwnPRsOnly"`
+	Slack          SlackConfig          `json:"slack"`
+	Focus          FocusConfig          `json:"focus"`
+	Jobs           map[string]JobConfig `json:"jobs"`
 }
 
 func defaultConfig() Config {
@@ -74,6 +76,7 @@ type Paths struct {
 	Logs     string // worker/logs/
 	Settings string // worker/claude-settings.json
 	TonoWrap string // worker/tono-claude.sh
+	Reviews  string // worker/reviews/, tono reports for the stand-up thread
 	Cache    string // ~/.cache/koko-worker/repos, cache clones for tono
 }
 
@@ -89,6 +92,7 @@ func workerPaths() Paths {
 		Logs:     filepath.Join(dir, "logs"),
 		Settings: filepath.Join(dir, "claude-settings.json"),
 		TonoWrap: filepath.Join(dir, "tono-claude.sh"),
+		Reviews:  filepath.Join(dir, "reviews"),
 		Cache:    filepath.Join(home, ".cache", "koko-worker", "repos"),
 	}
 }

@@ -39,6 +39,11 @@ The times are defaults. The UI can change them.
 2. **Ready to merge:** your open PRs that are approved, not drafts, mergeable, with every check green. Claude reads each Jira ticket and says whether the PR covers it. If it does, the ticket can be closed after the merge. For approved PRs that are not ready, it says what blocks them.
 3. **Follow-up steps** for each ready PR.
 4. **Needs your review:** open, non-draft PRs that request your review, oldest first. Your own PRs and bot PRs (Dependabot, Renovate) are hidden.
+   - It opens with a summary: how many PRs wait, how many tono has reviewed at their current commit (code, docs and comments), and of those how many look ready to approve, have follow-ups, or are not mergeable.
+   - Each PR shows its tono verdict, or "not reviewed yet".
+   - Each full review of a PR in this list goes in the stand-up's thread, once per commit.
+
+**Layout:** the DM uses Slack blocks, with a divider between sections. Long sections are split at line breaks under Slack's 3,000-character limit per block, and a message that needs more than 50 blocks continues in a second message. Tono DMs use the same layout.
 
 Go fetches the PR lists with `gh`, so the links are exact. Claude only does the judgement: ticket coverage and follow-up steps. (In the baldrick-work test, Claude built the list and gave one PR the wrong link.)
 
@@ -55,6 +60,8 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 
 ### Tono
 
+- PRs waiting for your review (people, not bots) are reviewed too, oldest first, after your own. They get no DM of their own: the stand-up summarises them and posts each review in its thread. There is no first-run baseline for them, so the first run reviews the whole queue (about 8 minutes each).
+- The verdict comes from the draft PR comment in each verified pass: mergeable, mergeable with follow-ups, or not mergeable. "Ready to approve" means every pass says mergeable or mergeable with follow-ups, and the code review says mergeable.
 - Your own open, non-draft PRs. Each head commit gets one review, keyed `repo#number@sha`.
 - **First run:** it marks your open PRs' current commits as seen and tells you how many, so it does not review the whole backlog. After that, only new PRs and new commits get reviewed.
 - The review runs in a cache clone at the PR head, never in your working clones.
@@ -224,5 +231,11 @@ Still to do:
 2. The chat bot is out of scope for this plan.
 
 ## Out of scope (future plans)
+
+- **A strategy for Dependabot PRs.** Approve a bump when it is appropriate, and close it when it is not relevant. Needs rules first, because approving and closing act on GitHub under your account:
+  - which bumps may be approved: patch and minor, green checks, no breaking-change notes, repos with tests;
+  - which get closed: the dependency is no longer used, or a newer bump supersedes it;
+  - whether tono reviews a bump before approval;
+  - an approval limit per day, and a DM listing every action taken.
 
 - **The Slack chat bot.** It has not worked well, because its Slack and Koko connections are hard to keep alive. If a follow-up plan solves that, the bot may move into koko-worker or merge into Koko's Slack handler.

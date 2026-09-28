@@ -83,14 +83,14 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 	env := Env{
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
 		claude: claudeRunner{settingsPath: paths.Settings},
-		notify: slack.dm,
+		send:   slack.post,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
 	}
 	if test {
-		env.notify = func(_ context.Context, text string) error {
-			fmt.Println(text)
+		env.send = func(_ context.Context, msg Message) error {
+			fmt.Println(printMessage(msg))
 			return nil
 		}
 		env.persist = func(func(*State)) error { return nil }

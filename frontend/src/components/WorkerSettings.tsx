@@ -33,6 +33,7 @@ interface WorkerConfig {
   timeZone: string;
   calendarId: string;
   tonoPath: string;
+  tonoOwnPRsOnly: boolean;
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
   jobs: Record<string, JobConfig>;
@@ -65,6 +66,7 @@ const DEFAULTS: WorkerConfig = {
   timeZone: "Europe/Stockholm",
   calendarId: "primary",
   tonoPath: "",
+  tonoOwnPRsOnly: false,
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
   jobs: {
@@ -90,7 +92,8 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
   {
     key: "tono",
     name: "Tono reviews",
-    about: "Reviews each new commit on your open PRs. Posts nothing to GitHub.",
+    about:
+      "Reviews each new commit on your open PRs and on the PRs waiting for your review. Posts nothing to GitHub.",
     multi: true,
   },
 ];
@@ -391,6 +394,19 @@ export default function WorkerSettings() {
                       save({ ...cfg, focus: { ...cfg.focus, windowEnd: e.target.value } })
                     }
                     className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
+                  />
+                </div>
+              )}
+
+              {key === "tono" && (
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="tono-queue" className="text-[10px] text-tertiary">
+                    Also review PRs waiting for your review. Results go in the stand-up.
+                  </label>
+                  <Toggle
+                    id="tono-queue"
+                    on={!cfg.tonoOwnPRsOnly}
+                    onClick={() => save({ ...cfg, tonoOwnPRsOnly: !cfg.tonoOwnPRsOnly })}
                   />
                 </div>
               )}

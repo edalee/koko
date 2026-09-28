@@ -307,18 +307,6 @@ func TestExtractJSON(t *testing.T) {
 	}
 }
 
-func TestCutForSlack(t *testing.T) {
-	short := "fine"
-	if cutForSlack(short, "/log") != short {
-		t.Error("short text changed")
-	}
-	long := strings.Repeat("line of review text\n", 1000)
-	got := cutForSlack(long, "/log")
-	if len(got) > slackMaxText+100 || !strings.Contains(got, "`/log`") {
-		t.Errorf("cut to %d chars, log link present: %v", len(got), strings.Contains(got, "/log"))
-	}
-}
-
 func TestMeetings(t *testing.T) {
 	events := []GCalEvent{
 		ev("09:30", "09:45", title("Standup"), response("accepted")),
@@ -581,5 +569,78 @@ func TestReadOnlyShims(t *testing.T) {
 		if run(r[0], r[1:]...) {
 			t.Errorf("allowed, want refused: %v", r)
 		}
+	}
+}
+
+func TestBuildBlocks(t *testing.T) {
+	long := strings.Repeat("a line of text for slack\n", 300) // about 7,500 characters
+	msgs := buildBlocks([]string{"*Header*", "*Today*\n• No meetings", long})
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages", len(msgs))
+	}
+	var kinds []string
+	for _, b := range msgs[0] {
+		kinds = append(kinds, b["type"].(string))
+		if b["type"] == "section" {
+			if n := len(b["text"].(block)["text"].(string)); n > 3000 {
+				t.Errorf("section of %d characters, over Slack's limit", n)
+			}
+		}
+	}
+	// header, divider, today, divider, then the long section in three parts.
+	if got := strings.Join(kinds, ","); got != "section,divider,section,divider,section,section,section" {
+		t.Errorf("got %s", got)
+	}
+
+	var many []string
+	for i := 0; i < 40; i++ {
+		many = append(many, "section")
+	}
+	msgs = buildBlocks(many) // 40 sections and 39 dividers: over 50 blocks
+	if len(msgs) != 2 || msgs[1][0]["type"] != "section" {
+		t.Fatalf("want 2 messages, the second starting with a section: got %d", len(msgs))
+	}
+	for _, m := range msgs {
+		if len(m) > 50 {
+			t.Errorf("message with %d blocks", len(m))
+		}
+	}
+}
+
+func TestParseVerdict(t *testing.T) {
+	for text, want := range map[string]string{
+		"blah\n> **Mergeable with follow-ups.** Six findings":     verdictFollowUps,
+		"> **Not mergeable.** Seven findings":                     verdictNotMergeable,
+		"PR is mergeable\n```\n> **Mergeable.** No findings\n```": verdictReady,
+		"1. **Not mergeable** says the round":                     verdictNotMergeable,
+		"nothing here":                                            "",
+	} {
+		if got := parseVerdict(text); got != want {
+			t.Errorf("parseVerdict(%q) = %q, want %q", text, got, want)
+		}
+	}
+	for _, c := range []struct {
+		in   map[string]string
+		want string
+	}{
+		{map[string]string{"review": verdictReady, "docs": verdictFollowUps, "comments": verdictFollowUps}, verdictReady},
+		{map[string]string{"review": verdictFollowUps, "docs": verdictReady}, verdictFollowUps},
+		{map[string]string{"review": verdictReady, "comments": verdictNotMergeable}, verdictNotMergeable},
+		{nil, ""},
+	} {
+		if got := overallVerdict(c.in); got != c.want {
+			t.Errorf("overallVerdict(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestReportRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path, err := saveReport(dir, "epidemicsound/kalimba#28@abc", []string{"*Tono*", "*Code review*\nfine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loadReport(path); len(got) != 2 || got[1] != "*Code review*\nfine" {
+		t.Errorf("got %v", got)
 	}
 }

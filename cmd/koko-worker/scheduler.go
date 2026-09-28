@@ -35,9 +35,10 @@ type RunRecord struct {
 
 // State is kept on disk, because launchd restarts the worker and memory is lost.
 type State struct {
-	Runs         map[string]RunRecord `json:"runs"`         // key: slotKey
-	TonoReviewed map[string]time.Time `json:"tonoReviewed"` // key: "owner/repo#12@sha"
-	TonoBaseline time.Time            `json:"tonoBaseline,omitempty"`
+	Runs         map[string]RunRecord  `json:"runs"`         // key: slotKey
+	TonoReviewed map[string]time.Time  `json:"tonoReviewed"` // key: "owner/repo#12@sha"
+	TonoBaseline time.Time             `json:"tonoBaseline,omitempty"`
+	TonoResults  map[string]TonoResult `json:"tonoResults"` // key: "owner/repo#12@sha"
 	// TimesAdded is when each active run time first appeared, keyed "job@HH:MM".
 	// A slot counts only on days when its time was active before the slot came.
 	TimesAdded map[string]time.Time `json:"timesAdded"`
@@ -64,7 +65,25 @@ func loadState(path string) State {
 	if st.TimesAdded == nil {
 		st.TimesAdded = map[string]time.Time{}
 	}
+	if st.TonoResults == nil {
+		st.TonoResults = map[string]TonoResult{}
+	}
 	return st
+}
+
+// TonoResult is tono's outcome for one commit of one PR.
+type TonoResult struct {
+	URL      string            `json:"url"`
+	Title    string            `json:"title"`
+	Repo     string            `json:"repo"`
+	Number   int               `json:"number"`
+	SHA      string            `json:"sha"`
+	Mine     bool              `json:"mine"`
+	At       time.Time         `json:"at"`
+	Verdicts map[string]string `json:"verdicts,omitempty"` // pass -> verdictReady, verdictFollowUps or verdictNotMergeable
+	Failed   string            `json:"failed,omitempty"`
+	Report   string            `json:"report,omitempty"` // saved sections, for the stand-up thread
+	Posted   bool              `json:"posted,omitempty"` // shown in a stand-up thread
 }
 
 func timeKey(job, clock string) string { return job + "@" + clock }
@@ -161,8 +180,8 @@ func updateState(path string, change func(*State)) error {
 	return saveState(path, st)
 }
 
-// pruneState drops run records older than a week and tono review marks older
-// than 60 days, so the file stays small.
+// pruneState drops run records older than a week, and tono review marks and
+// results older than 60 days, so the file stays small.
 func pruneState(st *State, now time.Time) {
 	for k, r := range st.Runs {
 		if now.Sub(r.Slot) > 7*24*time.Hour {
@@ -172,6 +191,14 @@ func pruneState(st *State, now time.Time) {
 	for k, t := range st.TonoReviewed {
 		if now.Sub(t) > 60*24*time.Hour {
 			delete(st.TonoReviewed, k)
+		}
+	}
+	for k, r := range st.TonoResults {
+		if now.Sub(r.At) > 60*24*time.Hour {
+			if r.Report != "" {
+				_ = os.Remove(r.Report)
+			}
+			delete(st.TonoResults, k)
 		}
 	}
 }
