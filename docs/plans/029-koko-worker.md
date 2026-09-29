@@ -210,12 +210,17 @@ Built on `feat/koko-worker`, not committed:
 - **Review fixes:** plain busy focus blocks, locked state, retries, a stand-up that degrades per section, tono's first-run baseline, wake status set only on success, and a working directory for the agent.
 - **Koko app side:** `worker_service.go`, the bindings and `WorkerSettings.tsx`. `go vet`, `tsc` and `biome` are clean. Not yet visible in the app, because nothing is hooked in.
 
+Done since:
+- The Worker section shows in Settings, with fields for tono's team and window, and focus time's minimum gap.
+- `make build-worker`, `make test-worker`, and the worker in `make dev`, `make test` and `make lint`.
+- `make build` puts `koko-worker` inside `koko.app`, next to Koko's own binary.
+- The Slack bot token and user ID are copied from baldrick-work.
+- End-to-end test of the serve loop: one stand-up slot, one DM, one state record.
+
 Still to do:
-1. After the other branch merges: render `<WorkerSettings />` in `SettingsPanel.tsx`, and add `build-worker` and `test-worker` to the `Makefile`. `WorkerService` is already in `Bind`, because a Wails build deletes the bindings of any service not in it.
-2. Bundle `koko-worker` inside `Koko.app` in `make build`.
-3. You enter the Slack bot token and user ID, and add the sudoers rule.
-4. End-to-end test of the serve loop: one stand-up slot two minutes ahead, then one DM and one state record. Then a wake test: Mac asleep, wake, slot, DM.
-5. Turn off baldrick-work's launchd agent.
+1. Try the Worker section in the built app: switch on and off, "Test", "Check all".
+2. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
+3. Turn off baldrick-work's launchd agent.
 
 ## Rollout
 

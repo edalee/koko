@@ -1,22 +1,35 @@
-.PHONY: dev build build-cli test lint lint-fe typecheck check clean install-fe setup
+.PHONY: dev build build-cli build-worker test test-worker lint lint-fe typecheck check clean install-fe setup
 
 WAILS := $(HOME)/go/bin/wails
+APP := build/bin/koko.app
 
-dev:
+# Koko finds koko-worker in build/bin during `make dev`, and next to its own
+# binary inside Koko.app after `make build`.
+dev: build-worker
 	$(WAILS) dev
 
 build:
 	$(WAILS) build
+	$(MAKE) build-worker
+	cp build/bin/koko-worker $(APP)/Contents/MacOS/koko-worker
 
 build-cli:
 	cd cmd/koko-cli && go build -o ../../build/bin/koko-cli .
 
-test:
+build-worker:
+	cd cmd/koko-worker && go build -o ../../build/bin/koko-worker .
+
+# koko-worker is its own Go module, so the root `go test ./...` skips it.
+test: test-worker
 	go test ./...
 	cd frontend && npx vitest run
 
+test-worker:
+	cd cmd/koko-worker && go test ./...
+
 lint:
 	golangci-lint run
+	cd cmd/koko-worker && golangci-lint run ./...
 
 lint-fe:
 	cd frontend && npx biome check .

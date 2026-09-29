@@ -10,6 +10,7 @@ import {
 } from "../../wailsjs/go/main/ConfigService";
 import type { SafeWorkingConfig } from "../hooks/useSafeWorking";
 import { cn } from "../lib/utils";
+import WorkerSettings from "./WorkerSettings";
 
 interface SettingsPanelProps {
   safeWorkingConfig: SafeWorkingConfig;
@@ -545,6 +546,9 @@ export default function SettingsPanel({
           </button>
         </div>
       </div>
+
+      {/* Scheduled jobs: stand-up, focus time and tono reviews */}
+      <WorkerSettings />
 
       {/* Config file location */}
       <div className="pt-3 border-t border-white/[0.06]">

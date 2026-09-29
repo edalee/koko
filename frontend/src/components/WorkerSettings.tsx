@@ -34,6 +34,8 @@ interface WorkerConfig {
   calendarId: string;
   tonoPath: string;
   tonoOwnPRsOnly: boolean;
+  tonoTeam: string;
+  tonoMaxAgeDays: number;
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
   jobs: Record<string, JobConfig>;
@@ -67,6 +69,8 @@ const DEFAULTS: WorkerConfig = {
   calendarId: "primary",
   tonoPath: "",
   tonoOwnPRsOnly: false,
+  tonoTeam: "epidemicsound/content-protection",
+  tonoMaxAgeDays: 4,
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
   jobs: {
@@ -395,6 +399,52 @@ export default function WorkerSettings() {
                     }
                     className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
                   />
+                  <span>, gaps of</span>
+                  <input
+                    type="number"
+                    min={5}
+                    step={5}
+                    value={cfg.focus.minMinutes}
+                    onChange={(e) =>
+                      save({
+                        ...cfg,
+                        focus: {
+                          ...cfg.focus,
+                          minMinutes: Number.parseInt(e.target.value, 10) || 0,
+                        },
+                      })
+                    }
+                    className={cn(inputClass, "w-14 tabular-nums")}
+                  />
+                  <span>min or more</span>
+                </div>
+              )}
+
+              {key === "tono" && (
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
+                  <span>PRs opened by</span>
+                  <input
+                    type="text"
+                    value={cfg.tonoTeam}
+                    onChange={(e) => setCfg({ ...cfg, tonoTeam: e.target.value })}
+                    onBlur={() => save(cfg)}
+                    placeholder="org/team-slug"
+                    className={cn(
+                      inputClass,
+                      "flex-1 min-w-40 font-mono placeholder:text-tertiary",
+                    )}
+                  />
+                  <span>in the last</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={cfg.tonoMaxAgeDays}
+                    onChange={(e) =>
+                      save({ ...cfg, tonoMaxAgeDays: Number.parseInt(e.target.value, 10) || 0 })
+                    }
+                    className={cn(inputClass, "w-12 tabular-nums")}
+                  />
+                  <span>days, one review each</span>
                 </div>
               )}
 
