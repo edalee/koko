@@ -6,6 +6,9 @@ type SessionInfo struct {
 	Slug string `json:"slug"` // human-friendly slug e.g. "koko-1"
 	Name string `json:"name"`
 	Dir  string `json:"dir"`
+	// The Claude conversation this session holds, once captured. API and MCP
+	// callers need it to resume a conversation, since resuming takes an id.
+	ClaudeSessionID string `json:"claudeSessionId,omitempty"`
 }
 
 // SessionRecord is the unified persisted session model.

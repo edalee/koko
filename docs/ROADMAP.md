@@ -28,7 +28,7 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Delete conversations**: TODO. Per-row delete in the picker, and "clear all conversations here". Deletes Claude's session file, so it confirms first and skips any conversation a tab holds (plan 028 step 7). Until then, delete `~/.claude/projects/<folder>/<id>.jsonl` by hand
 - [ ] **Clear session history**: TODO. Drops Koko's closed-session records only, from Settings (plan 028 step 7)
 - [ ] **Remove Koko's worktrees**: TODO. From Settings, never forced, skipping any with uncommitted changes (plan 028 step 7)
-- [ ] **Drop `--continue`**: resume by explicit conversation id only, once the picker covers every entry point (plan 028 step 8)
+- [x] **Drop `--continue`**: resume by explicit conversation id only, once the picker covers every entry point (plan 028 step 8)
 - [ ] **Session context polish** — MCP servers, agents, commands panel refinements
 - [ ] **Session grouping** — group sessions by project/directory
 - [ ] **Session export** — export terminal scrollback as text/markdown/HTML

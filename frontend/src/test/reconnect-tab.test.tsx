@@ -59,7 +59,6 @@ describe("useSessionTabs reconnecting (plan 028 step 5)", () => {
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        resume: true,
         claudeSessionId: "conv-1",
         slug: "koko-1",
         replaces: tab.id,
@@ -75,14 +74,13 @@ describe("useSessionTabs reconnecting (plan 028 step 5)", () => {
       await result.current.reconnectTab(tab, { claudeSessionId: "conv-2" });
     });
 
-    expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ resume: true, claudeSessionId: "conv-2" }),
-    );
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ claudeSessionId: "conv-2" }));
     expect(result.current.tabs[0].claudeSessionId).toBe("conv-2");
   });
 
-  // A fresh reconnect must not resume with an empty id, which the backend
-  // turns into --continue: the newest conversation, often a sibling's.
+  // A fresh reconnect sends no conversation id, so the backend starts a new
+  // conversation. It must not carry the tab's old id across, or it would
+  // resume the conversation the user chose to leave.
   it("reconnects into a fresh conversation without resuming", async () => {
     const { result } = await loaded("conv-1");
     const tab = result.current.tabs[0];
@@ -92,7 +90,7 @@ describe("useSessionTabs reconnecting (plan 028 step 5)", () => {
     });
 
     expect(mockCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ resume: false, claudeSessionId: "", slug: "koko-1" }),
+      expect.objectContaining({ claudeSessionId: "", slug: "koko-1" }),
     );
     expect(result.current.tabs[0].claudeSessionId).toBeUndefined();
     expect(result.current.tabs[0].connected).toBe(true);

@@ -28,6 +28,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Recent Sessions**: Choosing a closed session now reopens its conversation. It used to start a fresh session and drop it
 - **Reconnecting a tab**: Clicking a disconnected tab opens the session dialog with its conversation preselected, so Enter restores it. It used to reconnect silently. A tab with no stored conversation preselects nothing, rather than guessing the newest
 - **Worktrees module**: Opening a worktree goes through the session dialog, so a conversation stored for it can be reopened
+- **No more `--continue`**: Resuming now needs an explicit conversation id. `--continue` resumed the newest conversation in a directory, which was often another tab's. The API and MCP take `claudeSessionId` to resume, and refuse `resume` without one. `GET /api/sessions` now lists each session's `claudeSessionId` (plan 028 step 8)
+- **Session ids are quoted for the shell**: A conversation id reached an `sh -c` script unquoted, so a crafted id could run commands. It is now always a single quoted argument
 - **Conversation id capture**: Starts when a line is submitted and is announced by event, instead of one guess five seconds after launch. Refuses rather than guesses when two sessions share a directory
 - **Slack integration** — Replaced user token awareness panel with dedicated bot token command handler. Scopes reduced from 5 to 3
 - **Approval detection** — PermissionRequest hook replaces terminal output pattern matching (no more false positive amber icons)

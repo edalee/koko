@@ -77,9 +77,13 @@ func mcpToolDefinitions() []map[string]interface{} {
 						"type":        "string",
 						"description": "Working directory for the session",
 					},
+					"claude_session_id": map[string]string{
+						"type":        "string",
+						"description": "Resume this exact Claude conversation. list_sessions shows each session's claudeSessionId. Omit to start a fresh conversation. Refused if another session already has it open",
+					},
 					"resume": map[string]string{
 						"type":        "boolean",
-						"description": "Resume previous session (--continue flag)",
+						"description": "Deprecated. Resuming now needs claude_session_id. Setting resume without it is an error, rather than silently starting fresh",
 					},
 				},
 				"required": []string{"dir"},
@@ -228,16 +232,21 @@ func callMCPTool(client *mcpClient, name string, args map[string]interface{}) (s
 		dir, _ := args["dir"].(string)
 		name, _ := args["name"].(string)
 		resume, _ := args["resume"].(bool)
+		claudeSessionID, _ := args["claude_session_id"].(string)
 		if dir == "" {
 			return "", fmt.Errorf("dir is required")
+		}
+		// Say so plainly rather than start fresh behind the caller's back.
+		if resume && claudeSessionID == "" {
+			return "", fmt.Errorf("resume needs claude_session_id: pass the conversation to resume, or omit resume to start fresh")
 		}
 		if name == "" {
 			name = "MCP Session"
 		}
 		body, err := client.post("/api/sessions", map[string]interface{}{
-			"name":   name,
-			"dir":    dir,
-			"resume": resume,
+			"name":            name,
+			"dir":             dir,
+			"claudeSessionId": claudeSessionID,
 		})
 		if err != nil {
 			return "", err

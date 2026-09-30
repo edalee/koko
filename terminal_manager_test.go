@@ -662,26 +662,6 @@ func TestDetectClaudeSessionID_StopsWhenSessionEnds(t *testing.T) {
 	}
 }
 
-func TestMostRecentJSONL(t *testing.T) {
-	dir := t.TempDir()
-	if got := mostRecentJSONL(dir); got != "" {
-		t.Fatalf("expected empty for empty dir, got %q", got)
-	}
-	if got := mostRecentJSONL(""); got != "" {
-		t.Fatalf("expected empty for empty path, got %q", got)
-	}
-
-	writeJSONL(t, dir, "older.jsonl", time.Now().Add(-time.Hour))
-	writeJSONL(t, dir, "newer.jsonl", time.Now())
-	if err := os.WriteFile(filepath.Join(dir, "ignored.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	if got := mostRecentJSONL(dir); got != "newer" {
-		t.Fatalf("expected newer, got %q", got)
-	}
-}
-
 // Claude enables focus reporting and queries DA1 and the kitty keyboard
 // protocol at startup. xterm answers those on its own, so arming on any input
 // would start the capture window at launch instead of when the user submits.

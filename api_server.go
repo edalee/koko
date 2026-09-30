@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -104,14 +105,28 @@ func (api *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, sessions)
 	case http.MethodPost:
 		var req struct {
-			Name    string `json:"name"`
-			Dir     string `json:"dir"`
-			Cols    int    `json:"cols"`
-			Rows    int    `json:"rows"`
-			Resume  bool   `json:"resume"`
+			Name string `json:"name"`
+			Dir  string `json:"dir"`
+			Cols int    `json:"cols"`
+			Rows int    `json:"rows"`
+			// Resume this exact conversation. GET /api/sessions lists each
+			// session's claudeSessionId. Empty starts a fresh conversation.
+			ClaudeSessionID string `json:"claudeSessionId"`
+			// Kept so old callers get a clear answer. Resume used to mean
+			// --continue, which is gone, so it now needs claudeSessionId.
+			Resume bool `json:"resume"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		// Refuse rather than silently start fresh. A caller that asked to
+		// resume would otherwise send prompts that assume context Claude does
+		// not have, with nothing to tell it.
+		if req.Resume && req.ClaudeSessionID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "resume needs claudeSessionId: pass the conversation to resume, or omit resume to start fresh",
+			})
 			return
 		}
 		if req.Cols == 0 {
@@ -120,7 +135,17 @@ func (api *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {
 		if req.Rows == 0 {
 			req.Rows = 40
 		}
-		id, err := api.tm.CreateSession(req.Name, req.Dir, req.Cols, req.Rows, req.Resume)
+		id, err := api.tm.CreateSessionWithOpts(CreateSessionOpts{
+			Name:            req.Name,
+			Dir:             req.Dir,
+			Cols:            req.Cols,
+			Rows:            req.Rows,
+			ClaudeSessionID: req.ClaudeSessionID,
+		})
+		if errors.Is(err, ErrConversationBusy) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

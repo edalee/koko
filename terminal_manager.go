@@ -281,8 +281,7 @@ type CreateSessionOpts struct {
 	Dir             string `json:"dir"`
 	Cols            int    `json:"cols"`
 	Rows            int    `json:"rows"`
-	Resume          bool   `json:"resume"`
-	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume (empty = --continue)
+	ClaudeSessionID string `json:"claudeSessionId"` // resume this conversation. Empty starts a fresh one
 	Slug            string `json:"slug"`            // reuse an existing slug on recovery
 	// Replaces is the session id this one takes over from, set by reconnect.
 	// It is exempt from the ownership and slug checks, and is closed before
@@ -294,16 +293,6 @@ type CreateSessionOpts struct {
 // another session already holds. Two Claude processes writing one conversation
 // file corrupt it, so this refuses rather than letting it happen.
 var ErrConversationBusy = errors.New("that conversation is already open in another session")
-
-func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
-	return tm.CreateSessionWithOpts(CreateSessionOpts{
-		Name:   name,
-		Dir:    dir,
-		Cols:   cols,
-		Rows:   rows,
-		Resume: resume,
-	})
-}
 
 // CreateSessionWithOpts creates a session with full options including Claude session ID for --resume.
 //
@@ -319,35 +308,28 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		opts.Rows = 40
 	}
 
-	// Snapshot Claude's session files before launch, so Claude cannot write its
-	// file in the gap between launch and the first look.
-	projectDir := claudeProjectDir(opts.Dir)
-	preExisting := listJSONL(projectDir)
-
-	// Work out which conversation this session will open, so every path goes
-	// through the same ownership check. --continue resumes the newest
-	// conversation in the directory as of launch, so resolve that now. It is
-	// the only path the API and the MCP server can reach, and it used to skip
-	// the check entirely.
+	// Resume by explicit conversation id only (plan 028 step 8). There is no
+	// --continue: it resumed the newest conversation in the directory, which
+	// with a sibling live was the sibling's, and nothing could tell. No id
+	// means a fresh conversation.
 	target := opts.ClaudeSessionID
-	continuing := opts.Resume && target == ""
-	if continuing {
-		target = mostRecentJSONL(projectDir)
+
+	// Snapshot Claude's session files before launch, so Claude cannot write its
+	// file in the gap between launch and the first look. Only a fresh
+	// conversation needs it: the detector is the only reader, and a resume
+	// already knows its id. The folder can hold hundreds of files.
+	projectDir := claudeProjectDir(opts.Dir)
+	var preExisting map[string]bool
+	if target == "" {
+		preExisting = listJSONL(projectDir)
 	}
 
 	tm.mu.Lock()
 	tm.nextID++
 	id := fmt.Sprintf("session-%d", tm.nextID)
 	if tm.uuidClaimedLocked(target, opts.Replaces) {
-		if !continuing {
-			tm.mu.Unlock()
-			return "", ErrConversationBusy
-		}
-		// The caller asked for "the latest", not for this conversation in
-		// particular, so start a fresh one rather than refuse.
-		log.Printf("[pty] --continue would open %s, already held, starting fresh", target)
-		target = ""
-		continuing = false
+		tm.mu.Unlock()
+		return "", ErrConversationBusy
 	}
 	// Reserve the conversation before anything starts. The new session does
 	// not reach tm.sessions until after the PTY is up, and without this two
@@ -382,12 +364,12 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	}
 
 	claudePath := resolveClaudePath()
-	claudeCmd := fmt.Sprintf("exec %s", claudePath)
-	switch {
-	case opts.ClaudeSessionID != "":
-		claudeCmd = fmt.Sprintf("exec %s --resume %s", claudePath, opts.ClaudeSessionID)
-	case continuing:
-		claudeCmd = fmt.Sprintf("exec %s --continue", claudePath)
+	// Both values are quoted for the shell. The id reaches here from the API,
+	// MCP and saved sessions, so an unquoted `x;touch pwned` would have run as
+	// a command, and an id with a space would have broken the resume.
+	claudeCmd := "exec " + shellQuote(claudePath)
+	if target != "" {
+		claudeCmd += " --resume " + shellQuote(target)
 	}
 	cmd := newShellCommand(shell, claudeCmd)
 	cmd.Dir = opts.Dir
@@ -425,10 +407,7 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	delete(tm.pendingUUIDs, target)
 	tm.mu.Unlock()
 
-	switch {
-	case continuing:
-		tm.announceClaudeSessionID(s, target, "continue")
-	case target == "":
+	if target == "" {
 		// A fresh conversation. Claude writes its file on the first message.
 		go tm.detectClaudeSessionID(s, projectDir, preExisting)
 	}
@@ -447,22 +426,16 @@ func (tm *TerminalManager) emit(name string, data ...interface{}) {
 	runtime.EventsEmit(tm.ctx, name, data...)
 }
 
+// shellQuote wraps s in single quotes for sh, so it is always one argument
+// and never code. A single quote inside is closed, escaped and reopened.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // newShellCommand builds the process a session runs. A variable so tests can
 // run something other than Claude.
 var newShellCommand = func(shell, script string) *exec.Cmd {
 	return exec.Command(shell, "-l", "-c", script)
-}
-
-// announceClaudeSessionID logs a conversation id resolved at create time and
-// tells the frontend, the same way a detected one is announced.
-func (tm *TerminalManager) announceClaudeSessionID(s *session, uuid, reason string) {
-	log.Printf("[pty] captured Claude session UUID (%s): %s for %s", reason, uuid, s.slug)
-	if tm.ctx != nil {
-		runtime.EventsEmit(tm.ctx, "session:claude-id", map[string]string{
-			"sessionId":       s.id,
-			"claudeSessionId": uuid,
-		})
-	}
 }
 
 // claudeKeyMaxLen is where Claude Code truncates a project key and appends a
@@ -791,7 +764,7 @@ func (tm *TerminalManager) uuidClaimedLocked(uuid, exceptID string) bool {
 	}
 	// A create that has reserved the conversation but not yet registered
 	// holds it too. Every path consults this one function, so the detector
-	// and the --continue claim respect a reservation as well as a session.
+	// respects a reservation as well as a session.
 	if owner, ok := tm.pendingUUIDs[uuid]; ok && owner != exceptID {
 		return true
 	}
@@ -831,35 +804,6 @@ func (tm *TerminalManager) claimUUID(s *session, uuid, reason string) bool {
 		})
 	}
 	return true
-}
-
-// mostRecentJSONL returns the UUID of the most recently modified .jsonl file
-// in the given directory, or "" if none found.
-func mostRecentJSONL(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-
-	var newest string
-	var newestTime time.Time
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(newestTime) {
-			newestTime = info.ModTime()
-			newest = strings.TrimSuffix(e.Name(), ".jsonl")
-		}
-	}
-	return newest
 }
 
 func (tm *TerminalManager) CreateShellSession(dir string, cols, rows int) (string, error) {
@@ -1063,11 +1007,15 @@ func (tm *TerminalManager) GetSessions() []SessionInfo {
 	defer tm.mu.Unlock()
 	sessions := make([]SessionInfo, 0, len(tm.sessions))
 	for _, s := range tm.sessions {
+		s.mu.Lock()
+		claudeSessionID := s.claudeSessionID
+		s.mu.Unlock()
 		sessions = append(sessions, SessionInfo{
-			ID:   s.id,
-			Slug: s.slug,
-			Name: s.name,
-			Dir:  s.dir,
+			ID:              s.id,
+			Slug:            s.slug,
+			Name:            s.name,
+			Dir:             s.dir,
+			ClaudeSessionID: claudeSessionID,
 		})
 	}
 	return sessions
