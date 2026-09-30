@@ -11,7 +11,7 @@
 | 5. Route the other entry points | Done | #21 |
 | 6. Reload session | Done | #22 |
 | 7. Deletion | TODO, deferred | |
-| 8. Drop `--continue` | Planned, must be last | |
+| 8. Drop `--continue` | Done | #24 |
 
 Step 7 is recorded as a TODO in `docs/ROADMAP.md`. Until it lands, delete a
 conversation by removing `~/.claude/projects/<folder>/<id>.jsonl`. The
