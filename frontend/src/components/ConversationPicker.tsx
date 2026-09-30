@@ -11,10 +11,13 @@ export interface ConversationHolder {
 interface ConversationPickerProps {
   // null while loading. An empty list renders nothing at all.
   conversations: main.Conversation[] | null;
-  // "" means start a new conversation.
-  selected: string;
+  // "" means start a new conversation. null means nothing is chosen yet.
+  selected: string | null;
   onSelect: (uuid: string) => void;
   holders: Map<string, ConversationHolder>;
+  // Show the new-conversation row even when nothing is stored. Needed when
+  // nothing is preselected, as for a D1 reconnect.
+  showWhenEmpty?: boolean;
 }
 
 function timeAgo(ts: number): string {
@@ -53,8 +56,9 @@ export default function ConversationPicker({
   selected,
   onSelect,
   holders,
+  showWhenEmpty = false,
 }: ConversationPickerProps) {
-  if (conversations !== null && conversations.length === 0) return null;
+  if (conversations !== null && conversations.length === 0 && !showWhenEmpty) return null;
 
   // Native radios inside labels: arrow keys move through the group, and the
   // row shows a focus ring when its hidden input has keyboard focus.
@@ -114,9 +118,12 @@ export default function ConversationPicker({
                     <span className="text-[13px] text-white/90 truncate">
                       {c.title || "Untitled conversation"}
                     </span>
-                    <span className="ml-auto text-[10px] text-tertiary shrink-0">
-                      {timeAgo(c.modifiedAt)}
-                    </span>
+                    {/* 0 means the date is not known, so show no age. */}
+                    {c.modifiedAt > 0 && (
+                      <span className="ml-auto text-[10px] text-tertiary shrink-0">
+                        {timeAgo(c.modifiedAt)}
+                      </span>
+                    )}
                     {holder && <Ban className="size-3 shrink-0 text-warning" aria-hidden />}
                   </span>
                   {holder ? (

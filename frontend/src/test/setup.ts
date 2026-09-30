@@ -40,6 +40,9 @@ vi.mock("../../wailsjs/go/main/TerminalManager", () => ({
   GetSessions: vi.fn().mockResolvedValue([]),
   GetSessionState: vi.fn().mockResolvedValue("idle"),
   GetSessionPID: vi.fn().mockResolvedValue(0),
+  CreateSessionWithOpts: vi.fn().mockResolvedValue("session-new"),
+  GetSessionSlug: vi.fn().mockResolvedValue(""),
+  GetClaudeSessionID: vi.fn().mockResolvedValue(""),
 }));
 
 vi.mock("../../wailsjs/go/main/ClaudeService", () => ({

@@ -29,12 +29,15 @@ interface TerminalPaneProps {
   sessionId: string;
   active: boolean;
   onExit?: () => void;
+  // Restart this session in place. Absent for Quick Terminal shells, which
+  // have no conversation to keep, so the menu item is hidden there.
+  onReload?: () => void;
 }
 
 /** Terminal selections can span thousands of lines — cap what we put in a URL. */
 const MAX_SEARCH_QUERY_LEN = 400;
 
-export default function TerminalPane({ sessionId, active, onExit }: TerminalPaneProps) {
+export default function TerminalPane({ sessionId, active, onExit, onReload }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -493,6 +496,14 @@ export default function TerminalPane({ sessionId, active, onExit }: TerminalPane
             termRef.current?.clear();
             setCtxMenu(null);
           }}
+          onReload={
+            onReload
+              ? () => {
+                  setCtxMenu(null);
+                  onReload();
+                }
+              : undefined
+          }
           onRedraw={() => {
             // Fixes WebGL texture atlas corruption (overlapping/melted glyphs)
             // without clearing scrollback.
@@ -520,6 +531,7 @@ interface CtxMenuProps {
   onSelectAll: () => void;
   onClear: () => void;
   onRedraw: () => void;
+  onReload?: () => void;
 }
 
 function ContextMenu({
@@ -533,6 +545,7 @@ function ContextMenu({
   onSelectAll,
   onClear,
   onRedraw,
+  onReload,
 }: CtxMenuProps) {
   const items: {
     label: string;
@@ -551,6 +564,13 @@ function ContextMenu({
     { label: "Select All", shortcut: "⌘A", action: onSelectAll },
     { label: "Redraw Terminal", action: onRedraw },
     { label: "Clear Terminal", action: onClear },
+    // Restarts Claude, so it sits apart from the terminal-only actions.
+    ...(onReload
+      ? [
+          { label: "sep-session", action: () => {}, separator: true },
+          { label: "Reload Session", action: onReload },
+        ]
+      : []),
   ];
 
   return (

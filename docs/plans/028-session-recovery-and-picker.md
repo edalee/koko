@@ -8,8 +8,8 @@
 | 2. Stable slugs | Done | #17 |
 | 3. Ownership guard | Done | #18 |
 | 4. Picker in the session dialog | Done | #19 |
-| 5. Route the other entry points | Next | |
-| 6. Reload session | Planned | |
+| 5. Route the other entry points | Done | #21 |
+| 6. Reload session | Done | #22 |
 | 7. Deletion | TODO, deferred | |
 | 8. Drop `--continue` | Planned, must be last | |
 

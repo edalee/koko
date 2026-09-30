@@ -21,6 +21,9 @@ export function reconnectMessage(err: unknown): string {
   if (text.includes("already open in another session")) {
     return "This conversation is already open in another tab.";
   }
+  if (text.includes("already reconnecting")) {
+    return "This tab is already reconnecting. Try again in a moment.";
+  }
   return `Could not reconnect: ${text}`;
 }
 
@@ -29,6 +32,32 @@ export interface ResumeTarget {
   claudeSessionId: string;
   // The slug the conversation had when its tab was closed, if known.
   slug?: string;
+}
+
+/** What reloading a tab should do (plan 028 step 6). */
+export type ReloadAction = "pick" | "confirm" | "reload";
+
+/**
+ * Decide how to reload a tab, given its activity state: "active", "idle" or
+ * "approval", as tracked from terminal output.
+ *
+ * A live tab whose Claude is not idle asks first, because reload stops it
+ * mid-task and loses anything typed but not sent. That comes before anything
+ * else: a busy tab with no stored conversation must be confirmed too, or
+ * picking a row would kill it unasked. After that, a tab with no stored
+ * conversation opens the picker, because reloading would otherwise have to
+ * guess (D1). Otherwise reload goes straight ahead.
+ */
+export function reloadAction(tab: SessionTab, sessionState: string): ReloadAction {
+  if (tab.connected && sessionState !== "idle") return "confirm";
+  if (!tab.claudeSessionId) return "pick";
+  return "reload";
+}
+
+/** How to reconnect a tab: into a given conversation, or a fresh one. */
+export interface ReconnectChoice {
+  claudeSessionId?: string;
+  fresh?: boolean;
 }
 
 /** Payload of the session:claude-id event emitted by TerminalManager. */
@@ -250,18 +279,33 @@ export function useSessionTabs() {
   }, []);
 
   const reconnectingRef = useRef<Set<string>>(new Set());
+  /**
+   * Restart a tab's Claude process in the same tab, keeping its slug.
+   *
+   * With no choice it resumes the tab's own conversation. The picker passes a
+   * choice: a specific conversation, or a fresh one. Rejects on failure, after
+   * recording the reason on the tab's reconnect card, so the picker can show
+   * it too.
+   */
   const reconnectTab = useCallback(
-    async (tab: SessionTab) => {
-      if (reconnectingRef.current.has(tab.id)) return "";
+    async (tab: SessionTab, choice?: ReconnectChoice) => {
+      // Reject rather than return quietly. The picker treated a quiet return
+      // as success and closed, so the choice the user made was dropped and
+      // the in-flight reconnect won instead.
+      if (reconnectingRef.current.has(tab.id)) {
+        throw new Error("This tab is already reconnecting.");
+      }
       reconnectingRef.current.add(tab.id);
+      const fresh = choice?.fresh === true;
+      const claudeSessionId = fresh ? "" : choice?.claudeSessionId || tab.claudeSessionId || "";
       try {
         const sessionId = await CreateSessionWithOpts({
           name: tab.name,
           dir: tab.directory,
           cols: 80,
           rows: 24,
-          resume: true,
-          claudeSessionId: tab.claudeSessionId || "",
+          resume: !fresh,
+          claudeSessionId,
           // Keep the slug, so koko-1 still names this session after a restart.
           slug: tab.slug || "",
           // Name the session being taken over. Its entry lingers in the
@@ -272,7 +316,14 @@ export function useSessionTabs() {
         setTabs((prev) =>
           prev.map((t) =>
             t.id === tab.id
-              ? { ...t, id: sessionId, connected: true, reconnectError: undefined }
+              ? {
+                  ...t,
+                  id: sessionId,
+                  connected: true,
+                  reconnectError: undefined,
+                  // A fresh conversation's id arrives later, on the event.
+                  claudeSessionId: claudeSessionId || undefined,
+                }
               : t,
           ),
         );
@@ -284,10 +335,27 @@ export function useSessionTabs() {
         // Show why on the tab's reconnect card. Logging alone left the tab
         // looking broken, and every later click failed the same silent way.
         console.error("reconnectTab failed:", err);
-        setTabs((prev) =>
-          prev.map((t) => (t.id === tab.id ? { ...t, reconnectError: reconnectMessage(err) } : t)),
+        // Ask the backend whether the replaced session still exists, rather
+        // than guess from the error text. It is gone only if the backend got
+        // as far as closing it, and then the tab is disconnected. A refusal,
+        // or a failure before that point, leaves the tab as it was. Its exit
+        // event was ignored above, so the state has to be set here.
+        const stillThere = await GetSessionSlug(tab.id).then(
+          () => true,
+          () => false,
         );
-        return "";
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === tab.id
+              ? {
+                  ...t,
+                  reconnectError: reconnectMessage(err),
+                  connected: stillThere ? t.connected : false,
+                }
+              : t,
+          ),
+        );
+        throw err;
       } finally {
         reconnectingRef.current.delete(tab.id);
       }
@@ -350,18 +418,14 @@ export function useSessionTabs() {
     [activeTabId, tabs, saveCurrentState],
   );
 
+  // Only selects the tab. It used to reconnect a disconnected tab on the
+  // spot, silently, into whatever conversation it had or none. Reconnecting
+  // is now a choice made in the session dialog (plan 028, step 5).
   const switchTab = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((t) => t.id === tabId);
-      if (!tab) return;
-
-      setActiveTabId(tabId);
-
-      if (!tab.connected) {
-        reconnectTab(tab);
-      }
+      if (tabs.some((t) => t.id === tabId)) setActiveTabId(tabId);
     },
-    [tabs, reconnectTab],
+    [tabs],
   );
 
   const renameTab = useCallback((tabId: string, newName: string) => {
@@ -370,6 +434,11 @@ export function useSessionTabs() {
 
   const handleSessionExit = useCallback(
     (tabId: string) => {
+      // A reconnect closes the session it replaces, which fires this exit.
+      // Treating it as a real exit would flash the reconnect card during a
+      // reload, and could mark the new session dead if the event arrived
+      // after the id swap.
+      if (reconnectingRef.current.has(tabId)) return;
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, connected: false } : t)));
       // Capture last message for the context card on reconnect
       const tab = tabs.find((t) => t.id === tabId);
@@ -402,6 +471,7 @@ export function useSessionTabs() {
     createTab,
     closeTab,
     switchTab,
+    reconnectTab,
     renameTab,
     handleSessionExit,
     history,
