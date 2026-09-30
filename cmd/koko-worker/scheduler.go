@@ -82,8 +82,11 @@ type TonoResult struct {
 	Verdicts map[string]string `json:"verdicts,omitempty"` // pass -> verdictReady, verdictFollowUps or verdictNotMergeable
 	Failed   string            `json:"failed,omitempty"`
 	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
-	// Unposted are comments that failed to post. The next tono run posts them.
+	// Unposted are comments not yet posted. The next tono run posts them.
 	Unposted []string `json:"unposted,omitempty"`
+	// PostTries counts failed attempts to post. At maxPostTries the review
+	// counts as failed, and its unposted comments are dropped.
+	PostTries int `json:"postTries,omitempty"`
 	// Report and Posted belong to the old stand-up thread. Pruning still
 	// removes report files that old results point to.
 	Report string `json:"report,omitempty"`

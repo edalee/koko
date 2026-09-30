@@ -21,15 +21,15 @@ Koko already has a Slack connection, a settings panel and a Claude session model
 
 - No new jobs beyond the three below.
 - No cloud hosting. Everything runs on the Mac.
-- No posting to GitHub or Jira. Jobs only read, except for booking focus blocks.
+- No changes to Jira. On GitHub, the only write is tono's review comments on the PRs it reviews, posted as you. Otherwise jobs only read, except for booking focus blocks.
 
 ## Jobs
 
 | Job | Time (Mon to Fri) | What it does |
 |---|---|---|
-| Stand-up | 07:00 | DMs today's meetings, your approved PRs ready to merge with a Jira check, follow-up steps, and PRs waiting for your review. |
+| Stand-up | 07:00 | DMs today's meetings, your approved PRs ready to merge with a Jira check, follow-up steps, PRs waiting for your review, and team PRs. |
 | Focus | 09:15 | Books "Focus" blocks in free gaps of 30 minutes or more, 09:15 to 17:00. |
-| Tono | 09:30, 12:00, 14:00 | Reviews each new commit on your open PRs and DMs the report. |
+| Tono | 09:30, 12:00, 14:00 | Reviews each PR once: your own, and the team's (see "Tono"). It posts the review on the PR, or "LGTM 😃⭐😸" when there is nothing to report. |
 
 The times are defaults. The UI can change them.
 
@@ -71,8 +71,8 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 - The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its `TONO_CLAUDE` wrapper denies the posting commands as a second guard.
 - **Posting:** the worker's Go code posts the review, not tono's Claude. It takes the draft PR comment from each pass's verified output (tono's `*-merged.log` files), found by its `<!-- tono:` marker, and posts each draft as its own comment with `gh pr comment`.
   - If all three passes ran and none wrote a draft, it posts "LGTM 😃⭐😸" behind `<!-- tono:lgtm sha=… -->`.
-  - It posts no LGTM for a review that did not finish, or that has a bad verdict and no draft. That counts as a failed review.
-  - A comment that fails to post is kept in the state, and the next tono run posts it.
+  - It posts nothing, not even the drafts, if a pass did not finish. It also posts nothing if a draft has no footer, if a marker line has no draft it can read, or if the verdict is bad and no draft exists. Each of these counts as a failed review.
+  - Comments are saved as unposted before the first post, and each post is saved as it lands, so a kill between posts loses nothing. The next tono run posts what is left. It first checks the PR for each comment's marker line, so a post that timed out after it went through is not posted twice. After 3 failed tries the review counts as failed, and the stand-up shows it.
   - The comments post as you. Each one says in its footer that tono and Claude wrote it.
 - A review of your own PR that fails for a reason other than the network sends one DM warning. It is not retried for the same commit.
 - A network failure marks nothing, so the scheduler's retry reviews that commit once the internet is back.
@@ -234,7 +234,7 @@ Done on 30 Sep:
 - Tono's reviews go on the PR, not to Slack:
   - The worker posts each pass's draft comment on the PR, through your `gh` auth. Tono's own Claude stays read-only.
   - If every pass ran and none wrote a draft, the worker posts "LGTM 😃⭐😸" behind a `<!-- tono:lgtm -->` marker. Every posted comment carries a `<!-- tono:` marker, so later runs skip the PR.
-  - A comment that fails to post is kept, and the next tono run posts it.
+  - Comments that fail to post are retried at the next tono run, up to 3 tries. Then the review counts as failed.
   - The stand-up lists each reviewed PR with its verdict and a link to the review. The stand-up thread and the review DMs are gone. A failed review of your own PR still comes by DM.
   - "Test" prints the comments instead of posting them.
 

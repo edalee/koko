@@ -46,11 +46,9 @@ func (s slackClient) call(ctx context.Context, method string, form url.Values) (
 	return body, nil
 }
 
-// Message is one DM: sections with a divider between each, and replies to
-// post in its thread. Each reply is a list of sections too.
+// Message is one DM: sections with a divider between each.
 type Message struct {
 	Sections []string
-	Thread   [][]string
 }
 
 const (
@@ -58,49 +56,25 @@ const (
 	slackMaxBlocks = 50   // Slack's limit for blocks in one message
 )
 
-// post sends msg to the configured user. A bot token and a user ID open a DM
-// with the bot, so it notifies like any message. Thread replies go under the
-// first message.
+// post sends msg to the configured user as block messages. A bot token and a
+// user ID open a DM with the bot, so it notifies like any message.
 func (s slackClient) post(ctx context.Context, msg Message) error {
 	if s.userID == "" {
 		return fmt.Errorf("slack: no user ID set")
 	}
-	ts, err := s.postSections(ctx, msg.Sections, "")
-	if err != nil {
-		return err
-	}
-	for _, reply := range msg.Thread {
-		if _, err := s.postSections(ctx, reply, ts); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// postSections posts sections as block messages and returns the first
-// message's timestamp, which identifies it for thread replies.
-func (s slackClient) postSections(ctx context.Context, sections []string, threadTS string) (string, error) {
-	var first string
-	for _, blocks := range buildBlocks(sections) {
+	for _, blocks := range buildBlocks(msg.Sections) {
 		data, _ := json.Marshal(blocks)
 		form := url.Values{
 			"channel":      {s.userID},
 			"blocks":       {string(data)},
-			"text":         {fallbackText(sections)},
+			"text":         {fallbackText(msg.Sections)},
 			"unfurl_links": {"false"},
 		}
-		if threadTS != "" {
-			form.Set("thread_ts", threadTS)
-		}
-		body, err := s.call(ctx, "chat.postMessage", form)
-		if err != nil {
-			return first, err
-		}
-		if first == "" {
-			first, _ = body["ts"].(string)
+		if _, err := s.call(ctx, "chat.postMessage", form); err != nil {
+			return err
 		}
 	}
-	return first, nil
+	return nil
 }
 
 type block map[string]any

@@ -650,6 +650,7 @@ func TestCommentsFor(t *testing.T) {
 		{"clean, no verdicts", tonoOutcome{passes: 3, verdicts: map[string]string{}}, "lgtm"},
 		{"clean, ready", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
 		{"a pass did not finish", tonoOutcome{passes: 2, verdicts: map[string]string{}}, "failed"},
+		{"drafts, but a pass did not finish", tonoOutcome{drafts: []string{draft}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
 		{"follow-ups but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
 		{"not mergeable but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
 		// overallVerdict needs a clean code review for "ready", so a lone docs
@@ -675,19 +676,83 @@ func TestCommentsFor(t *testing.T) {
 	}
 }
 
-func TestPostComments(t *testing.T) {
-	var got []string
-	env := Env{post: func(_ context.Context, _, body string) (string, error) {
-		if body == "fails" {
-			return "", fmt.Errorf("network")
+func TestPostPending(t *testing.T) {
+	const key = "o/r#1@abc"
+	// fakeEnv posts every body but "fails", and saves results in st.
+	fakeEnv := func(st *State, posted *[]string, onGitHub map[string]string) Env {
+		return Env{
+			post: func(_ context.Context, _, body string) (string, error) {
+				if body == "fails" {
+					return "", fmt.Errorf("network")
+				}
+				*posted = append(*posted, body)
+				return "https://github.com/o/r/pull/1#" + body, nil
+			},
+			findComment: func(_ context.Context, _ string, _ int, line string) (string, bool, error) {
+				url, ok := onGitHub[line]
+				return url, ok, nil
+			},
+			persist: func(change func(*State)) error { change(st); return nil },
 		}
-		got = append(got, body)
-		return "https://github.com/o/r/pull/1#issuecomment-" + body, nil
-	}}
-	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
-	posted, unposted := postComments(context.Background(), env, p, []string{"a", "fails", "b"})
-	if strings.Join(got, ",") != "a,b" || len(posted) != 2 || len(unposted) != 1 || unposted[0] != "fails" {
-		t.Errorf("posted %v, unposted %v", posted, unposted)
+	}
+	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1}
+
+	// A failed post stops the loop, keeps the rest and counts one try.
+	st := &State{TonoResults: map[string]TonoResult{}}
+	var posted []string
+	r.Unposted = []string{"a", "fails", "b"}
+	if err := postPending(context.Background(), fakeEnv(st, &posted, nil), key, r, false); err != nil {
+		t.Fatal(err)
+	}
+	got := st.TonoResults[key]
+	if strings.Join(posted, ",") != "a" || strings.Join(got.Unposted, ",") != "fails,b" || got.PostTries != 1 || len(got.Comments) != 1 {
+		t.Errorf("after one failure: posted %v, result %+v", posted, got)
+	}
+
+	// The third failed try fails the review and drops what is left.
+	got.PostTries = maxPostTries - 1
+	posted = nil
+	if err := postPending(context.Background(), fakeEnv(st, &posted, nil), key, got, true); err != nil {
+		t.Fatal(err)
+	}
+	if got = st.TonoResults[key]; got.Failed == "" || len(got.Unposted) != 0 {
+		t.Errorf("after the last try: %+v", got)
+	}
+
+	// A retry finds a comment that went through and does not post it twice.
+	st = &State{TonoResults: map[string]TonoResult{}}
+	posted = nil
+	r.Unposted = []string{"<!-- tono:review n=1 sha=abc -->\nbody", "b"}
+	onGitHub := map[string]string{"<!-- tono:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
+	if err := postPending(context.Background(), fakeEnv(st, &posted, onGitHub), key, r, true); err != nil {
+		t.Fatal(err)
+	}
+	got = st.TonoResults[key]
+	if strings.Join(posted, ",") != "b" || strings.Join(got.Comments, ",") != "https://github.com/o/r/pull/1#old,https://github.com/o/r/pull/1#b" {
+		t.Errorf("retry: posted %v, comments %v", posted, got.Comments)
+	}
+}
+
+func TestDraftCommentFences(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"tildes", "## Draft\n\n~~~\n<!-- tono:docs-check n=1 -->\nBody\n<sub>f</sub>\n~~~\n", "<!-- tono:docs-check n=1 -->\nBody\n<sub>f</sub>"},
+		{"indented", "1. Draft:\n\n   ```\n   <!-- tono:review n=1 -->\n   Body\n   <sub>f</sub>\n   ```\n", "<!-- tono:review n=1 -->\nBody\n<sub>f</sub>"},
+		{"inner code block", "```\n<!-- tono:review n=1 -->\nFix:\n```go\nx := 1\n```\n<sub>f</sub>\n```\n", "<!-- tono:review n=1 -->\nFix:\n```go\nx := 1\n```\n<sub>f</sub>"},
+		{"longer outer fence", "````\n<!-- tono:review n=1 -->\n```\ncode\n```\n<sub>f</sub>\n````\n", "<!-- tono:review n=1 -->\n```\ncode\n```\n<sub>f</sub>"},
+		{"marker only quoted in prose", "- The docs quote `<!-- tono:... -->` as an example.\n", ""},
+	}
+	for _, c := range cases {
+		if got := draftComment(c.in); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+	// A marker line outside any fence the finder can read is not clean.
+	if !hasMarkerLine("## Draft\n\n<!-- tono:review n=1 -->\nBody\n") || hasMarkerLine("- quoted `<!-- tono:x -->`") {
+		t.Error("hasMarkerLine")
+	}
+	out := tonoOutcome{passes: 3, unreadable: 1, verdicts: map[string]string{}}
+	if c, failed := commentsFor(out, "abc"); failed == "" || c != nil {
+		t.Error("an unreadable draft must fail, not post LGTM")
 	}
 }
 

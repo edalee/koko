@@ -23,10 +23,12 @@ type Env struct {
 	claude claudeRunner
 	send   func(ctx context.Context, msg Message) error
 	// post adds a comment to a PR and returns the comment's URL.
-	post  func(ctx context.Context, prURL, body string) (string, error)
-	test  bool   // print instead of DM or comment, book nothing
-	state *State // read-only snapshot taken when the run started
-	now   time.Time
+	post func(ctx context.Context, prURL, body string) (string, error)
+	// findComment looks on a PR for a comment whose first line is line.
+	findComment func(ctx context.Context, repo string, number int, line string) (url string, found bool, err error)
+	test        bool   // print instead of DM or comment, book nothing
+	state       *State // read-only snapshot taken when the run started
+	now         time.Time
 	// persist changes the state on disk under a lock. It does nothing in test mode.
 	persist func(change func(*State)) error
 }
@@ -39,11 +41,7 @@ func (e Env) notify(ctx context.Context, text string) error {
 // printMessage is how test mode shows a DM: a line where Slack draws a divider.
 func printMessage(msg Message) string {
 	const divider = "\n────────────────────\n"
-	out := strings.Join(msg.Sections, divider)
-	for _, reply := range msg.Thread {
-		out += "\n\n    ↳ in the thread:\n" + strings.Join(reply, divider)
-	}
-	return out
+	return strings.Join(msg.Sections, divider)
 }
 
 // ---- Stand-up ----
@@ -710,14 +708,18 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 				}
 			}
 		}
-		result.Comments, result.Unposted = postComments(ctx, env, p, comments)
 		// Each PR gets one review. A review that failed for a reason other
 		// than the network is marked too, so it is not re-reported at every
-		// tono slot.
+		// tono slot. The comments are saved as unposted first, so a kill
+		// during posting leaves them for the next run.
+		result.Unposted = comments
 		if err := env.persist(func(st *State) {
 			st.TonoReviewed[key] = time.Now()
 			st.TonoResults[key] = result
 		}); err != nil {
+			return err
+		}
+		if err := postPending(ctx, env, key, result, false); err != nil {
 			return err
 		}
 	}
@@ -730,11 +732,18 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	return nil
 }
 
-// commentsFor picks what to post for a finished review: each pass's draft,
-// or an LGTM when every pass ran and none had anything to say. It returns a
-// failure instead when a draft looks cut short, when a pass did not finish,
-// or when the verdict is bad but no pass wrote it up. A failure posts nothing.
+// commentsFor picks what to post for a review: each pass's draft, or an LGTM
+// when no pass had anything to say. It returns a failure instead, and posts
+// nothing, when a pass did not finish, when a draft looks cut short, or when
+// the verdict is bad but no pass wrote it up. A posted comment makes later
+// runs skip the PR, so a review with a pass missing must post nothing.
 func commentsFor(out tonoOutcome, sha string) (comments []string, failed string) {
+	if out.passes < len(tonoPasses) {
+		return nil, fmt.Sprintf("only %d of %d passes finished, see %s", out.passes, len(tonoPasses), out.log)
+	}
+	if out.unreadable > 0 {
+		return nil, "a pass wrote a PR comment the worker could not read, see " + out.log
+	}
 	for _, d := range out.drafts {
 		if !strings.HasSuffix(d, "</sub>") {
 			return nil, "a draft PR comment has no footer, so it may be cut short, see " + out.log
@@ -743,50 +752,71 @@ func commentsFor(out tonoOutcome, sha string) (comments []string, failed string)
 	if len(out.drafts) > 0 {
 		return out.drafts, ""
 	}
-	if v := overallVerdict(out.verdicts); out.passes == len(tonoPasses) && (v == "" || v == verdictReady) {
+	if v := overallVerdict(out.verdicts); v == "" || v == verdictReady {
 		return []string{lgtmComment(sha)}, ""
 	}
-	return nil, fmt.Sprintf("tono wrote no PR comment (%d of %d passes finished, verdict %q), see %s",
-		out.passes, len(tonoPasses), overallVerdict(out.verdicts), out.log)
+	return nil, fmt.Sprintf("tono wrote no PR comment (verdict %q), see %s", overallVerdict(out.verdicts), out.log)
 }
 
-// postComments posts each comment on the PR, in order. It returns the URLs of
-// the posted ones, and the ones that failed, for the next run to post.
-func postComments(ctx context.Context, env Env, p SearchPR, comments []string) (posted, unposted []string) {
-	for _, body := range comments {
-		url, err := env.post(ctx, p.URL, body)
+// maxPostTries is how many failed attempts to post a review's comments are
+// allowed before the review counts as failed.
+const maxPostTries = 3
+
+// postPending posts r's unposted comments on the PR, in order, and saves the
+// state after each one, so a kill between posts loses nothing. On a retry it
+// first looks on the PR for the comment's marker line, because a post that
+// timed out may have gone through. A failed post stops the loop and counts
+// one try. At maxPostTries the review counts as failed and the rest are
+// dropped, so the stand-up shows it.
+func postPending(ctx context.Context, env Env, key string, r TonoResult, retry bool) error {
+	save := func() error {
+		return env.persist(func(st *State) { st.TonoResults[key] = r })
+	}
+	for len(r.Unposted) > 0 {
+		body := r.Unposted[0]
+		url, found := "", false
+		var err error
+		if retry {
+			url, found, err = env.findComment(ctx, r.Repo, r.Number, firstLine(body))
+		}
+		if err == nil && !found {
+			url, err = env.post(ctx, r.URL, body)
+		}
 		if err != nil {
-			log.Printf("tono: posting on %s: %v", p.short(), err)
-			unposted = append(unposted, body)
-			continue
+			r.PostTries++
+			log.Printf("tono: posting on %s#%d (try %d): %v", r.Repo, r.Number, r.PostTries, err)
+			if r.PostTries >= maxPostTries {
+				r.Failed = truncate("could not post the review: "+err.Error(), 400)
+				r.Unposted = nil
+			}
+			return save()
 		}
 		if url != "" {
-			posted = append(posted, url)
+			r.Comments = append(r.Comments, url)
 		}
-	}
-	return posted, unposted
-}
-
-// postUnposted retries the comments an earlier run failed to post.
-func postUnposted(ctx context.Context, env Env) error {
-	for key, r := range env.state.TonoResults {
-		if len(r.Unposted) == 0 {
-			continue
-		}
-		p := SearchPR{URL: r.URL, Number: r.Number}
-		p.Repository.NameWithOwner = r.Repo
-		posted, unposted := postComments(ctx, env, p, r.Unposted)
-		if err := env.persist(func(st *State) {
-			if cur, ok := st.TonoResults[key]; ok {
-				cur.Comments = append(cur.Comments, posted...)
-				cur.Unposted = unposted
-				st.TonoResults[key] = cur
-			}
-		}); err != nil {
+		r.Unposted = r.Unposted[1:]
+		if err := save(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// postUnposted posts the comments an earlier run left unposted.
+func postUnposted(ctx context.Context, env Env) error {
+	for key, r := range env.state.TonoResults {
+		if len(r.Unposted) > 0 {
+			if err := postPending(ctx, env, key, r, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 // Tono verdicts, from the verdict line of each pass's draft PR comment.
@@ -951,8 +981,11 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (tonoO
 type tonoOutcome struct {
 	drafts   []string
 	verdicts map[string]string
-	passes   int    // passes that left a verified output
-	log      string // the worker's log of the run
+	passes   int // passes that left a verified output
+	// unreadable counts passes with a tono marker line but no draft that
+	// draftComment could read.
+	unreadable int
+	log        string // the worker's log of the run
 }
 
 var tonoPasses = []struct{ name, title string }{
@@ -996,27 +1029,92 @@ func tonoVerified(since time.Time, repo string, number int) tonoOutcome {
 		}
 		if d := draftComment(string(data)); d != "" {
 			out.drafts = append(out.drafts, d)
+		} else if hasMarkerLine(string(data)) {
+			out.unreadable++
 		}
 	}
 	return out
 }
 
-var fencedBlock = regexp.MustCompile("(?s)```[A-Za-z]*\\n(.*?)\\n```")
+// codeFence reads a Markdown fence line: ``` or ~~~, three or more, with any
+// indent. info is true when a language or other text follows the fence.
+func codeFence(line string) (indent int, fence string, info, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	indent = len(line) - len(trimmed)
+	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return 0, "", false, false
+	}
+	n := 0
+	for n < len(trimmed) && trimmed[n] == trimmed[0] {
+		n++
+	}
+	if n < 3 {
+		return 0, "", false, false
+	}
+	return indent, trimmed[:n], strings.TrimSpace(trimmed[n:]) != "", true
+}
 
-// draftComment is the pass's draft PR comment: the fenced block that carries
-// a tono marker. The heading above the block varies from run to run, so the
-// marker is what finds it. "" means the pass wrote no comment.
+// draftComment is the pass's draft PR comment: the fenced block that starts
+// with a tono marker. The heading above the block varies from run to run, so
+// the marker is what finds it. "" means the pass wrote no comment.
+//
+// A fence inside the draft that names a language (```go) opens an inner
+// block, and the next bare fence closes it. A bare inner opener closes the
+// draft early, and the missing footer then fails the review in commentsFor.
 func draftComment(verified string) string {
-	for _, m := range fencedBlock.FindAllStringSubmatch(verified, -1) {
-		if body := strings.TrimSpace(m[1]); strings.HasPrefix(body, "<!-- tono:") {
-			return body
+	lines := strings.Split(verified, "\n")
+	for i := 0; i < len(lines); i++ {
+		indent, fence, _, ok := codeFence(lines[i])
+		if !ok {
+			continue
 		}
+		var body []string
+		depth, closed := 0, false
+		j := i + 1
+		for ; j < len(lines); j++ {
+			if _, f, info, ok := codeFence(lines[j]); ok && f[0] == fence[0] {
+				switch {
+				case info:
+					depth++
+				case depth > 0:
+					depth--
+				case len(f) >= len(fence):
+					closed = true
+				}
+				if closed {
+					break
+				}
+			}
+			line := lines[j]
+			if cut := min(indent, len(line)-len(strings.TrimLeft(line, " \t"))); cut > 0 {
+				line = line[cut:]
+			}
+			body = append(body, line)
+		}
+		if !closed {
+			return ""
+		}
+		if text := strings.TrimSpace(strings.Join(body, "\n")); strings.HasPrefix(text, "<!-- tono:") {
+			return text
+		}
+		i = j
 	}
 	return ""
 }
 
+// hasMarkerLine is true when a line starts with a tono marker. A pass with
+// one but no draft that draftComment can read must not count as clean.
+func hasMarkerLine(verified string) bool {
+	for _, line := range strings.Split(verified, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "<!-- tono:") {
+			return true
+		}
+	}
+	return false
+}
+
 // lgtmComment is the comment for a PR where no pass had anything to say. Its
-// marker makes later runs, and hasTonoComment, skip the PR.
+// tono marker makes hasTonoComment true, so later runs skip the PR.
 func lgtmComment(sha string) string {
 	short := sha[:min(7, len(sha))]
 	return fmt.Sprintf("<!-- tono:lgtm sha=%s -->\nLGTM 😃⭐😸\n\n<sub>tono review of the code, docs and code comments at `%s`, run with Claude</sub>", short, short)

@@ -82,9 +82,10 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 	slack := newSlack(cfg.Slack)
 	env := Env{
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
-		claude: claudeRunner{settingsPath: paths.Settings},
-		send:   slack.post,
-		post:   postComment,
+		claude:      claudeRunner{settingsPath: paths.Settings},
+		send:        slack.post,
+		post:        postComment,
+		findComment: findComment,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
@@ -135,23 +136,25 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	if err != nil {
 		return err
 	}
-	env := newEnv(cfg, paths, *test)
-	if *date != "" {
-		if !*test {
-			return fmt.Errorf("--date only works with --test")
-		}
-		day, err := time.ParseInLocation("2006-01-02", *date, cfg.location())
-		if err != nil {
-			return fmt.Errorf("bad --date %q, want YYYY-MM-DD", *date)
-		}
-		env.now = day.Add(7 * time.Hour)
+	if *date != "" && !*test {
+		return fmt.Errorf("--date only works with --test")
 	}
+	// The lock comes before newEnv reads the state, so a run that waited
+	// for a scheduled one sees what that run reviewed and posted.
 	if !*test {
 		unlock, err := lockFile(jobLockPath(paths, job))
 		if err != nil {
 			return err
 		}
 		defer unlock()
+	}
+	env := newEnv(cfg, paths, *test)
+	if *date != "" {
+		day, err := time.ParseInLocation("2006-01-02", *date, cfg.location())
+		if err != nil {
+			return fmt.Errorf("bad --date %q, want YYYY-MM-DD", *date)
+		}
+		env.now = day.Add(7 * time.Hour)
 	}
 	runErr := runJob(ctx, env, job, *pr)
 	if !*test && runErr == nil && *pr == "" {

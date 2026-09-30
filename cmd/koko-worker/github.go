@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -181,6 +182,27 @@ func postComment(ctx context.Context, prURL, body string) (string, error) {
 		return "", fmt.Errorf("gh: %w", err)
 	}
 	return lastLines(strings.TrimSpace(string(out)), 1), nil
+}
+
+// findComment looks on the PR for a comment whose first line is line, and
+// returns its URL.
+func findComment(ctx context.Context, repo string, number int, line string) (string, bool, error) {
+	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
+		"--jq", `.[] | {url: .html_url, first: (.body | split("\n") | .[0])}`)
+	if err != nil {
+		return "", false, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var c struct{ URL, First string }
+		if err := dec.Decode(&c); err != nil {
+			break
+		}
+		if c.First == line {
+			return c.URL, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // repoPRs is every open, non-draft PR in the repos, by anyone.
