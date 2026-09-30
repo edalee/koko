@@ -166,6 +166,23 @@ func reviewRequests(ctx context.Context) ([]SearchPR, error) {
 	return prs, err
 }
 
+// postComment adds body as a comment on the PR, through your gh auth, and
+// returns the comment's URL. It runs the real gh, not tono's read-only one.
+func postComment(ctx context.Context, prURL, body string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "comment", prURL, "--body-file", "-")
+	cmd.Stdin = strings.NewReader(body)
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("gh pr comment: %s", truncate(strings.TrimSpace(string(ee.Stderr)), 300))
+		}
+		return "", fmt.Errorf("gh: %w", err)
+	}
+	return lastLines(strings.TrimSpace(string(out)), 1), nil
+}
+
 // repoPRs is every open, non-draft PR in the repos, by anyone.
 func repoPRs(ctx context.Context, repos []string) ([]SearchPR, error) {
 	if len(repos) == 0 {

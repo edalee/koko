@@ -81,8 +81,13 @@ type TonoResult struct {
 	At       time.Time         `json:"at"`
 	Verdicts map[string]string `json:"verdicts,omitempty"` // pass -> verdictReady, verdictFollowUps or verdictNotMergeable
 	Failed   string            `json:"failed,omitempty"`
-	Report   string            `json:"report,omitempty"` // saved sections, for the stand-up thread
-	Posted   bool              `json:"posted,omitempty"` // shown in a stand-up thread
+	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
+	// Unposted are comments that failed to post. The next tono run posts them.
+	Unposted []string `json:"unposted,omitempty"`
+	// Report and Posted belong to the old stand-up thread. Pruning still
+	// removes report files that old results point to.
+	Report string `json:"report,omitempty"`
+	Posted bool   `json:"posted,omitempty"`
 }
 
 func timeKey(job, clock string) string { return job + "@" + clock }

@@ -349,27 +349,6 @@ func TestSudoersRuleIsNarrow(t *testing.T) {
 	}
 }
 
-func TestFormatTonoReport(t *testing.T) {
-	report := "Six findings.\n\n```json\n[\n  {\"file\": \"requirements.txt\", \"line\": 7, \"summary\": \"The ceiling lands in prod.\", \"failure_scenario\": \"long\"},\n  {\"file\": \"ci.yaml\", \"summary\": \"No pin.\"}\n]\n```\n\nDone."
-	got := formatTonoReport(report)
-	want := "Six findings.\n\n• `requirements.txt:7` The ceiling lands in prod.\n• `ci.yaml` No pin.\n\nDone."
-	if got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
-	}
-	odd := "```json\n{\"not\": \"a list\"}\n```"
-	if formatTonoReport(odd) != odd {
-		t.Error("a block that is not a findings list must stay as it is")
-	}
-}
-
-func TestToSlackMarkdown(t *testing.T) {
-	in := "## Surviving findings\n\n1. **MED, confirmed:** the reason is void."
-	want := "*Surviving findings*\n\n1. *MED, confirmed:* the reason is void."
-	if got := toSlackMarkdown(in); got != want {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestTonoLockKey(t *testing.T) {
 	if got := tonoLockKey("epidemicsound/kalimba", 28); got != "epidemicsound_kalimba_28" {
 		t.Errorf("got %q", got)
@@ -643,14 +622,72 @@ func TestParseVerdict(t *testing.T) {
 	}
 }
 
-func TestReportRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path, err := saveReport(dir, "epidemicsound/kalimba#28@abc", []string{"*Tono*", "*Code review*\nfine"})
-	if err != nil {
-		t.Fatal(err)
+func TestDraftComment(t *testing.T) {
+	// The shape of a real verified log: the heading above the block varies.
+	verified := "## Findings\n\n- one\n\n## Draft comment (not posted)\n\n```\n<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>\n```\n\nTwo MCP servers failed.\n"
+	want := "<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>"
+	if got := draftComment(verified); got != want {
+		t.Errorf("got %q", got)
 	}
-	if got := loadReport(path); len(got) != 2 || got[1] != "*Code review*\nfine" {
-		t.Errorf("got %v", got)
+	// A fenced block without a marker is not a draft.
+	if got := draftComment("## Checked\n\n```json\n[]\n```\n"); got != "" {
+		t.Errorf("want no draft, got %q", got)
+	}
+	lgtm := lgtmComment("55d37455abcdef")
+	if !strings.HasPrefix(lgtm, "<!-- tono:lgtm sha=55d3745 -->\nLGTM 😃⭐😸") {
+		t.Errorf("lgtm = %q", lgtm)
+	}
+}
+
+func TestCommentsFor(t *testing.T) {
+	draft := "<!-- tono:review n=1 sha=abc1234 -->\n## Code Review #1\n\n<sub>tono code review</sub>"
+	cases := []struct {
+		name string
+		out  tonoOutcome
+		want string // "draft", "lgtm" or "failed"
+	}{
+		{"drafts are posted", tonoOutcome{drafts: []string{draft}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
+		{"clean, no verdicts", tonoOutcome{passes: 3, verdicts: map[string]string{}}, "lgtm"},
+		{"clean, ready", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
+		{"a pass did not finish", tonoOutcome{passes: 2, verdicts: map[string]string{}}, "failed"},
+		{"follow-ups but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"not mergeable but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
+		// overallVerdict needs a clean code review for "ready", so a lone docs
+		// "mergeable" reads as follow-ups: no LGTM without a code verdict.
+		{"docs mergeable, no code verdict", tonoOutcome{passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
+		{"cut-short draft", tonoOutcome{drafts: []string{"<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}, passes: 3}, "failed"},
+	}
+	for _, c := range cases {
+		comments, failed := commentsFor(c.out, "abc1234def")
+		got := "failed"
+		switch {
+		case failed != "" && len(comments) > 0:
+			t.Errorf("%s: both comments and a failure", c.name)
+		case failed != "":
+		case len(comments) == 1 && strings.HasPrefix(comments[0], "<!-- tono:lgtm"):
+			got = "lgtm"
+		case len(comments) > 0:
+			got = "draft"
+		}
+		if got != c.want {
+			t.Errorf("%s: got %s, want %s (failed %q)", c.name, got, c.want, failed)
+		}
+	}
+}
+
+func TestPostComments(t *testing.T) {
+	var got []string
+	env := Env{post: func(_ context.Context, _, body string) (string, error) {
+		if body == "fails" {
+			return "", fmt.Errorf("network")
+		}
+		got = append(got, body)
+		return "https://github.com/o/r/pull/1#issuecomment-" + body, nil
+	}}
+	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
+	posted, unposted := postComments(context.Background(), env, p, []string{"a", "fails", "b"})
+	if strings.Join(got, ",") != "a,b" || len(posted) != 2 || len(unposted) != 1 || unposted[0] != "fails" {
+		t.Errorf("posted %v, unposted %v", posted, unposted)
 	}
 }
 

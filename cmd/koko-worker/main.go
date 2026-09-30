@@ -84,6 +84,7 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
 		claude: claudeRunner{settingsPath: paths.Settings},
 		send:   slack.post,
+		post:   postComment,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
@@ -92,6 +93,10 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 		env.send = func(_ context.Context, msg Message) error {
 			fmt.Println(printMessage(msg))
 			return nil
+		}
+		env.post = func(_ context.Context, prURL, body string) (string, error) {
+			fmt.Printf("── Comment for %s (not posted) ──\n%s\n\n", prURL, body)
+			return "", nil
 		}
 		env.persist = func(func(*State)) error { return nil }
 	}
