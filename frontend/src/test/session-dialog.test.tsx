@@ -31,29 +31,38 @@ function tab(over: Partial<SessionTab>): SessionTab {
 
 type OnCreate = ComponentProps<typeof SessionDialog>["onCreate"];
 type OnOpenHeld = ComponentProps<typeof SessionDialog>["onOpenHeld"];
+type OnReconnect = ComponentProps<typeof SessionDialog>["onReconnect"];
 
 interface Opts {
   tabs?: SessionTab[];
   history?: SessionHistoryEntry[];
   onCreate?: Mock<OnCreate>;
   onOpenHeld?: Mock<OnOpenHeld>;
+  onReconnect?: Mock<OnReconnect>;
+  reconnect?: SessionTab;
+  worktree?: string;
+  activeDirs?: string[];
 }
 
 function renderDialog(o: Opts = {}) {
   const onCreate = o.onCreate ?? vi.fn<OnCreate>().mockResolvedValue(undefined);
   const onOpenHeld = o.onOpenHeld ?? vi.fn<OnOpenHeld>();
+  const onReconnect = o.onReconnect ?? vi.fn<OnReconnect>().mockResolvedValue(undefined);
   render(
     <SessionDialog
       open
       onClose={vi.fn()}
       onCreate={onCreate}
       onOpenHeld={onOpenHeld}
+      onReconnect={onReconnect}
+      reconnect={o.reconnect}
+      worktree={o.worktree}
       history={o.history ?? []}
-      activeDirs={[]}
+      activeDirs={o.activeDirs ?? []}
       tabs={o.tabs ?? []}
     />,
   );
-  return { onCreate, onOpenHeld };
+  return { onCreate, onOpenHeld, onReconnect };
 }
 
 async function chooseDirectory(dir: string) {
@@ -229,6 +238,189 @@ describe("SessionDialog conversation picker", () => {
   });
 });
 
+describe("SessionDialog routing from other entry points (step 5)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockList.mockResolvedValue([]);
+  });
+
+  // The worktrees module used to start a fresh session straight away. It now
+  // opens the dialog on that worktree, with a new conversation selected.
+  it("opens on a worktree with a new conversation selected", async () => {
+    mockList.mockResolvedValue([conv("w", "Worktree conversation")]);
+    const { onCreate } = renderDialog({ worktree: "/repo-wt" });
+
+    expect(await screen.findByText("Worktree conversation")).toBeInTheDocument();
+    expect(mockList).toHaveBeenCalledWith("/repo-wt");
+    fireEvent.click(screen.getByRole("button", { name: "Create Session" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0][1]).toBe("/repo-wt");
+    // The dialog reports the existing worktree, so close-time cleanup is
+    // still offered. App used to guess this by comparing directories.
+    expect(onCreate.mock.calls[0][2]).toBe("/repo-wt");
+    expect(onCreate.mock.calls[0][3]).toBeUndefined();
+  });
+
+  // Opening a worktree another tab already uses must not tick "Create as a
+  // git worktree", or Enter would create a worktree inside the worktree.
+  it("does not offer a new worktree when opening an existing one", async () => {
+    const { onCreate } = renderDialog({ worktree: "/repo-wt", activeDirs: ["/repo-wt"] });
+
+    const create = await screen.findByRole("button", { name: "Create Session" });
+    expect(screen.queryByLabelText(/Create as a git worktree/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Browse...")).not.toBeInTheDocument();
+    fireEvent.click(create);
+    await waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0][1]).toBe("/repo-wt");
+  });
+
+  // D1 in a directory with no stored conversations. The picker used to render
+  // nothing, so there was no row to choose and the tab could never reconnect.
+  it("offers a new conversation to a D1 tab in an empty directory", async () => {
+    mockList.mockResolvedValue([]);
+    const t = tab({ connected: false, claudeSessionId: undefined });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByRole("button", { name: "Choose a conversation" })).toBeDisabled();
+    fireEvent.click(await screen.findByText("Start a new conversation"));
+    fireEvent.click(screen.getByRole("button", { name: "Start New Conversation" }));
+    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    expect(onReconnect.mock.calls[0][1]).toEqual({ fresh: true });
+  });
+
+  // An Enter pressed before anything is chosen must not start a fresh
+  // session for a D1 tab.
+  it("ignores Enter for a D1 tab until a row is chosen", async () => {
+    mockList.mockImplementation(() => new Promise(() => {}));
+    const t = tab({ connected: false, claudeSessionId: undefined });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    await screen.findByText(/Reconnect koko-2/);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
+  // The fallback row's real date is unknown, so it shows no age rather than
+  // the tab's creation date.
+  it("shows no age on a tab's own conversation when its date is unknown", async () => {
+    mockList.mockResolvedValue([]);
+    // Created three weeks ago, so showing its creation date would read 21d.
+    const t = tab({
+      name: "Old work",
+      connected: false,
+      claudeSessionId: "ancient",
+      createdAt: Date.now() - 21 * 86_400_000,
+    });
+    renderDialog({ reconnect: t, tabs: [t] });
+
+    const row = (await screen.findByText("Old work")).closest("label");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).not.toMatch(/ago/);
+  });
+
+  // UX rule 2: a disconnected tab with a stored conversation is restored in
+  // one keystroke. Its own conversation is preselected, not shown as held.
+  it("preselects a disconnected tab's own conversation", async () => {
+    mockList.mockResolvedValue([conv("mine", "My conversation")]);
+    const t = tab({ id: "session-3", connected: false, claudeSessionId: "mine" });
+    const { onReconnect, onOpenHeld } = renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByText("My conversation")).toBeInTheDocument();
+    expect(screen.queryByText(/reconnect koko-2/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume Conversation" }));
+
+    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    expect(onReconnect.mock.calls[0][0].id).toBe("session-3");
+    expect(onReconnect.mock.calls[0][1]).toEqual({ claudeSessionId: "mine" });
+    expect(onOpenHeld).not.toHaveBeenCalled();
+  });
+
+  // D1: a tab saved before conversation ids were captured preselects nothing.
+  // Guessing the newest is what --continue did, and it is often a sibling's.
+  it("preselects nothing for a tab with no stored conversation", async () => {
+    mockList.mockResolvedValue([conv("a", "Some conversation")]);
+    const t = tab({ connected: false, claudeSessionId: undefined });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    const open = await screen.findByRole("button", { name: "Choose a conversation" });
+    expect(open).toBeDisabled();
+    expect(screen.getByText(/This tab has no stored conversation/)).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByText("Some conversation"));
+    fireEvent.click(screen.getByRole("button", { name: "Resume Conversation" }));
+    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    expect(onReconnect.mock.calls[0][1]).toEqual({ claudeSessionId: "a" });
+  });
+
+  it("keeps Open disabled for D1 while the list is still loading", async () => {
+    mockList.mockImplementation(() => new Promise(() => {})); // never resolves
+    const t = tab({ connected: false, claudeSessionId: undefined });
+    renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByRole("button", { name: "Choose a conversation" })).toBeDisabled();
+  });
+
+  it("reconnects the same tab into a fresh conversation", async () => {
+    mockList.mockResolvedValue([conv("mine", "My conversation")]);
+    const t = tab({ connected: false, claudeSessionId: "mine" });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    fireEvent.click(await screen.findByText("Start a new conversation"));
+    fireEvent.click(screen.getByRole("button", { name: "Start New Conversation" }));
+    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    expect(onReconnect.mock.calls[0][1]).toEqual({ fresh: true });
+  });
+
+  it("keeps a tab's own conversation reachable when it is older than the listed ones", async () => {
+    mockList.mockResolvedValue([conv("x", "Newer conversation")]);
+    const t = tab({ name: "Old work", connected: false, claudeSessionId: "ancient" });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByText("Old work")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume Conversation" }));
+    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    expect(onReconnect.mock.calls[0][1]).toEqual({ claudeSessionId: "ancient" });
+  });
+
+  // D2 still applies while reconnecting: a conversation another tab holds
+  // switches to that tab rather than being opened twice.
+  it("switches to another tab holding the chosen conversation", async () => {
+    mockList.mockResolvedValue([conv("theirs", "Their conversation")]);
+    const me = tab({ id: "session-me", slug: "koko-1", connected: false });
+    const other = tab({ id: "session-other", slug: "koko-2", claudeSessionId: "theirs" });
+    const { onReconnect, onOpenHeld } = renderDialog({ reconnect: me, tabs: [me, other] });
+
+    fireEvent.click(await screen.findByText("Their conversation"));
+    fireEvent.click(screen.getByRole("button", { name: "Open in koko-2" }));
+    expect(onOpenHeld).toHaveBeenCalledWith("session-other");
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
+  it("shows why a reconnect failed and stays open", async () => {
+    mockList.mockResolvedValue([conv("mine", "My conversation")]);
+    const t = tab({ connected: false, claudeSessionId: "mine" });
+    const onReconnect = vi
+      .fn<OnReconnect>()
+      .mockRejectedValue("that conversation is already open in another session");
+    renderDialog({ reconnect: t, tabs: [t], onReconnect });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Resume Conversation" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This conversation is already open in another tab.",
+    );
+  });
+
+  it("titles the dialog after the tab and hides new-session fields", async () => {
+    const t = tab({ slug: "koko-7", connected: false, claudeSessionId: "mine" });
+    renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByText("Reconnect koko-7")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session Name")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Create as a git worktree/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Browse...")).not.toBeInTheDocument();
+  });
+});
+
 describe("submitLabel", () => {
   const holder = { tabId: "t", label: "koko-2", connected: true };
   it("says what the button will do", () => {
@@ -249,5 +441,16 @@ describe("submitLabel", () => {
         useWorktree: false,
       }),
     ).toBe("Reconnect koko-2");
+    expect(submitLabel({ creatingWorktree: false, selected: null, useWorktree: false })).toBe(
+      "Choose a conversation",
+    );
+    expect(
+      submitLabel({
+        creatingWorktree: false,
+        selected: "",
+        useWorktree: false,
+        reconnecting: true,
+      }),
+    ).toBe("Start New Conversation");
   });
 });

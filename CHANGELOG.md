@@ -5,10 +5,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ## [Unreleased]
 
 ### Added
-- **Conversation picker** — The session dialog lists the conversations Claude has stored for the chosen directory, newest first, with title and last reply. Pick one to reopen it, or start fresh. A conversation open in another tab switches to that tab instead (plan 028)
-- **Search Web** — Right-click selected terminal text to search it in the default browser
-- **Conversation ownership guard** — A conversation can be open in only one session. Resuming one another session holds is refused, including through the API and MCP (ADR-028)
-- **Stable slugs** — A session keeps its slug across restarts, so `koko-1` in the CLI, MCP and Slack always names the same session
+- **Conversation picker**: The session dialog lists the conversations Claude has stored for the chosen directory, newest first, with title and last reply. Pick one to reopen it, or start fresh. A conversation open in another tab switches to that tab instead (plan 028)
+- **Search Web**: Right-click selected terminal text to search it in the default browser
+- **Conversation ownership guard**: A conversation can be open in only one session. Resuming one another session holds is refused, including through the API and MCP (ADR-028)
+- **Stable slugs**: A session keeps its slug across restarts, so `koko-1` in the CLI, MCP and Slack always names the same session
+- **Reload session**: Restart a session's Claude process in the same tab, keeping its slug and conversation. On the sidebar row and in the terminal's right-click menu. Asks first if Claude is still working (plan 028)
 - **Remote API** — HTTP/WebSocket API server on localhost:19876 with Bearer token auth
 - **MCP Server** — `koko mcp` subcommand, 8 tools including `interact` (send+receive in one call with output settle detection)
 - **Slack Bot** — DM the bot to control sessions. Owner-only access via Slack member ID
@@ -24,8 +25,10 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **CHANGELOG.md** — Version history
 
 ### Changed
-- **Recent Sessions** — Choosing a closed session now reopens its conversation. It used to start a fresh session and drop it
-- **Conversation id capture** — Starts when a line is submitted and is announced by event, instead of one guess five seconds after launch. Refuses rather than guesses when two sessions share a directory
+- **Recent Sessions**: Choosing a closed session now reopens its conversation. It used to start a fresh session and drop it
+- **Reconnecting a tab**: Clicking a disconnected tab opens the session dialog with its conversation preselected, so Enter restores it. It used to reconnect silently. A tab with no stored conversation preselects nothing, rather than guessing the newest
+- **Worktrees module**: Opening a worktree goes through the session dialog, so a conversation stored for it can be reopened
+- **Conversation id capture**: Starts when a line is submitted and is announced by event, instead of one guess five seconds after launch. Refuses rather than guesses when two sessions share a directory
 - **Slack integration** — Replaced user token awareness panel with dedicated bot token command handler. Scopes reduced from 5 to 3
 - **Approval detection** — PermissionRequest hook replaces terminal output pattern matching (no more false positive amber icons)
 - **Session history** — Expanded to 50 entries, not deduplicated by directory. Multiple sessions per directory preserved
@@ -33,11 +36,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **lastMsg extraction** — Handles current Claude Code JSONL format (type:"assistant") in addition to legacy (type:"progress")
 
 ### Fixed
-- **Cropped terminals** — A tab that was in the background during a resize kept its old width for good
-- **Empty last-message previews** — Previews read a fixed 64KB from the end of the file, which often began inside one large record and missed the message before it
-- **Wrong project folder** — Paths containing any non-alphanumeric character mapped to a Claude project folder that did not exist, so no conversation id was ever captured
-- **Worktree fields reset** — The new session dialog regenerated its worktree branch name about once a second, overwriting anything typed
-- **Close raced the reader** — Closing a live session could call `cmd.Wait` twice at once
+- **Cropped terminals**: A tab that was in the background during a resize kept its old width for good
+- **Empty last-message previews**: Previews read a fixed 64KB from the end of the file, which often began inside one large record and missed the message before it
+- **Wrong project folder**: Paths containing any non-alphanumeric character mapped to a Claude project folder that did not exist, so no conversation id was ever captured
+- **Worktree fields reset**: The new session dialog regenerated its worktree branch name about once a second, overwriting anything typed
+- **Close raced the reader**: Closing a live session could call `cmd.Wait` twice at once
 - **Unicode paste** — `btoa()` crashes on chars > U+00FF (em dashes, smart quotes). Now uses TextEncoder for UTF-8 safe base64
 - **Ghost amber icons** — False positive approval detection from broad pattern matching against 32KB buffer
 - **Slug URL collision** — Changed separator from `/` to `-` (koko/1 → koko-1) to avoid API route conflicts

@@ -6,6 +6,7 @@ import {
   Folder,
   GitBranch,
   Plus,
+  RotateCw,
   Search,
   SquareTerminal,
   X,
@@ -28,6 +29,8 @@ interface SessionSidebarProps {
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
   onRenameSession: (sessionId: string, newName: string) => void;
+  // Restart a live session in place, keeping its tab, slug and conversation.
+  onReloadSession?: (sessionId: string) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -47,6 +50,7 @@ export default function SessionSidebar({
   onNewSession,
   onDeleteSession,
   onRenameSession,
+  onReloadSession,
   isCollapsed,
   onToggleCollapse,
 }: SessionSidebarProps) {
@@ -297,6 +301,22 @@ export default function SessionSidebar({
                                 <kbd className="text-[10px] text-tertiary font-mono px-1 rounded bg-white/[0.04] border border-white/[0.06] leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity">
                                   ⌘{shortcutKey}
                                 </kbd>
+                              )}
+                              {/* Live sessions only: a disconnected tab is
+                                  reconnected by clicking it. */}
+                              {onReloadSession && session.connected && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onReloadSession(session.id);
+                                  }}
+                                  className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Reload session"
+                                  aria-label={`Reload ${session.slug || session.name}`}
+                                >
+                                  <RotateCw className="size-3.5 text-muted-foreground hover:text-accent" />
+                                </button>
                               )}
                               <button
                                 type="button"

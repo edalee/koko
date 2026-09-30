@@ -1,10 +1,11 @@
 import { Settings } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GetHiddenPRs } from "../wailsjs/go/main/ConfigService";
-import { Write } from "../wailsjs/go/main/TerminalManager";
+import { GetSessionState, Write } from "../wailsjs/go/main/TerminalManager";
 import kokoBird from "./assets/koko_bird.svg";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
+import ConfirmDialog from "./components/ConfirmDialog";
 import OverlayPage from "./components/OverlayPage";
 import PRDetailOverlay from "./components/PRDetailOverlay";
 import QuickTerminal from "./components/QuickTerminal";
@@ -28,7 +29,7 @@ import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionActivity } from "./hooks/useSessionActivity";
 import { useSessionBranches } from "./hooks/useSessionBranches";
 import { useSessionContext } from "./hooks/useSessionContext";
-import { useSessionTabs } from "./hooks/useSessionTabs";
+import { reloadAction, useSessionTabs } from "./hooks/useSessionTabs";
 import { useSubagents } from "./hooks/useSubagents";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
@@ -39,10 +40,18 @@ export default function App() {
     createTab,
     closeTab,
     switchTab,
+    reconnectTab,
     renameTab,
     handleSessionExit,
     history,
   } = useSessionTabs();
+  // Plan 028 step 5: reconnecting a tab and opening a worktree both go
+  // through the session dialog, instead of acting silently.
+  const [reconnectFor, setReconnectFor] = useState<string | null>(null);
+  const [dialogWorktree, setDialogWorktree] = useState<string | undefined>(undefined);
+  // Remounts the dialog on each open, so it starts from that open's props.
+  const [dialogKey, setDialogKey] = useState(0);
+  const reconnectTarget = reconnectFor ? tabs.find((t) => t.id === reconnectFor) : undefined;
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [pendingWorktreeClose, setPendingWorktreeClose] = useState<{
@@ -109,13 +118,82 @@ export default function App() {
   } = useSafeWorking(!!activeTabId);
   const { update, dismiss: dismissUpdate } = useUpdateCheck();
 
-  const handleSwitchByIndex = useCallback(
-    (index: number) => {
-      if (index < tabs.length) {
-        switchTab(tabs[index].id);
+  const dialogOpen = showNewSession || reconnectTarget !== undefined;
+
+  // Every way into the session dialog goes through here: new, reconnect, or
+  // an existing worktree.
+  const openSessionDialog = useCallback((opts?: { reconnect?: string; worktree?: string }) => {
+    setDialogKey((k) => k + 1);
+    setReconnectFor(opts?.reconnect ?? null);
+    setDialogWorktree(opts?.worktree);
+    setShowNewSession(!opts?.reconnect);
+  }, []);
+
+  const closeSessionDialog = useCallback(() => {
+    setShowNewSession(false);
+    setReconnectFor(null);
+    setDialogWorktree(undefined);
+  }, []);
+
+  // Select a tab. A disconnected one opens the session dialog to choose what
+  // to reconnect into, rather than reconnecting silently (plan 028 step 5).
+  const selectTab = useCallback(
+    (tabId: string) => {
+      switchTab(tabId);
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab && !tab.connected) openSessionDialog({ reconnect: tabId });
+    },
+    [tabs, switchTab, openSessionDialog],
+  );
+
+  // Plan 028 step 6: restart a live session in place, keeping its tab, slug
+  // and conversation. Set while the "Claude isn't idle" confirmation is up.
+  const [pendingReload, setPendingReload] = useState<{ id: string; label: string } | null>(null);
+  // Kept after the confirmation closes, so its title does not change during
+  // the closing animation.
+  const reloadLabel = useRef("session");
+  if (pendingReload) reloadLabel.current = pendingReload.label;
+
+  const doReload = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      // A failure shows on the tab's reconnect card.
+      if (tab) reconnectTab(tab).catch(() => {});
+    },
+    [tabs, reconnectTab],
+  );
+
+  const requestReload = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      // If the state cannot be read, ask rather than kill a busy Claude.
+      const state = tab.connected ? await GetSessionState(tabId).catch(() => "unknown") : "idle";
+      switch (reloadAction(tab, state)) {
+        case "pick":
+          openSessionDialog({ reconnect: tabId });
+          break;
+        case "confirm":
+          setPendingReload({ id: tabId, label: tab.slug || tab.name });
+          break;
+        case "reload":
+          doReload(tabId);
+          break;
       }
     },
-    [tabs, switchTab],
+    [tabs, openSessionDialog, doReload],
+  );
+
+  // The dialog is modal, so the tab shortcuts wait while it is open. Cmd+2
+  // behind a reconnect dialog used to change its target mid-way.
+  const handleSwitchByIndex = useCallback(
+    (index: number) => {
+      if (dialogOpen) return;
+      if (index < tabs.length) {
+        selectTab(tabs[index].id);
+      }
+    },
+    [tabs, selectTab, dialogOpen],
   );
 
   // When closing a session, intercept if Koko created a worktree for it
@@ -170,7 +248,10 @@ export default function App() {
   );
 
   useKeyboardShortcuts({
-    onNewSession: () => setShowNewSession(true),
+    // Cmd+N inside an open dialog would remount it and lose what was typed.
+    onNewSession: () => {
+      if (!dialogOpen) openSessionDialog();
+    },
     onSwitchSession: handleSwitchByIndex,
     onCloseSession: handleCloseActive,
     onToggleTerminal: handleToggleTerminal,
@@ -197,10 +278,11 @@ export default function App() {
               activeSessionId={activeTabId}
               sessionStates={sessionStates}
               sessionBranches={sessionBranches}
-              onSessionSelect={switchTab}
-              onNewSession={() => setShowNewSession(true)}
+              onSessionSelect={selectTab}
+              onNewSession={() => openSessionDialog()}
               onDeleteSession={requestCloseTab}
               onRenameSession={renameTab}
+              onReloadSession={requestReload}
               isCollapsed={isLeftSidebarCollapsed}
               onToggleCollapse={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
             />
@@ -224,12 +306,13 @@ export default function App() {
                         sessionId={tab.id}
                         active={tab.id === activeTabId}
                         onExit={() => handleSessionExit(tab.id)}
+                        onReload={() => requestReload(tab.id)}
                       />
                       {!tab.connected && (
                         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
                         <div
                           className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-base/60 backdrop-blur-sm cursor-pointer"
-                          onClick={() => switchTab(tab.id)}
+                          onClick={() => openSessionDialog({ reconnect: tab.id })}
                         >
                           <img
                             src={kokoBird}
@@ -325,10 +408,10 @@ export default function App() {
               onInjectCommand={handleInjectCommand}
               hasActiveSession={!!activeTabId}
               activeDirectory={activeTab?.directory ?? null}
-              onOpenWorktreeSession={(name, directory) => {
-                // The Worktrees module only opens sessions in worktrees that
-                // already exist; mark them so close-time cleanup is offered.
-                createTab(name, directory, directory);
+              onOpenWorktreeSession={(_name, directory) => {
+                // Open the dialog on this worktree, so the user can pick a
+                // conversation stored for it or start a new one.
+                openSessionDialog({ worktree: directory });
               }}
               onFileClick={(path, staged) => {
                 if (activeTab?.directory) {
@@ -400,20 +483,48 @@ export default function App() {
         />
 
         <SessionDialog
-          open={showNewSession}
-          onClose={() => setShowNewSession(false)}
+          key={dialogKey}
+          open={dialogOpen}
+          onClose={closeSessionDialog}
           onCreate={async (name, directory, worktreePath, resume) => {
             // Let a failure reach the dialog, which shows it and stays open.
+            // The dialog reports the worktree itself, including an existing
+            // one opened from the worktrees module.
             await createTab(name, directory, worktreePath, resume);
-            setShowNewSession(false);
+            closeSessionDialog();
           }}
+          reconnect={reconnectTarget}
+          onReconnect={async (tab, choice) => {
+            await reconnectTab(tab, choice);
+            closeSessionDialog();
+          }}
+          worktree={dialogWorktree}
           onOpenHeld={(tabId) => {
+            closeSessionDialog();
             switchTab(tabId);
-            setShowNewSession(false);
+            // D2: the user chose this conversation, so a disconnected holder
+            // reconnects straight into it. A failure shows on its card.
+            const holder = tabs.find((t) => t.id === tabId);
+            if (holder && !holder.connected) reconnectTab(holder).catch(() => {});
           }}
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
           tabs={tabs}
+        />
+
+        {/* UX rule 6: reload never silently discards work in progress. */}
+        <ConfirmDialog
+          open={pendingReload !== null}
+          title={`Reload ${reloadLabel.current}?`}
+          message="Claude isn't idle. Reloading stops what it is doing, and anything typed but not sent is lost. The conversation itself is kept."
+          confirmLabel="Reload"
+          destructive
+          onConfirm={() => {
+            const id = pendingReload?.id;
+            setPendingReload(null);
+            if (id) doReload(id);
+          }}
+          onCancel={() => setPendingReload(null)}
         />
 
         <WorktreeRemovalDialog
