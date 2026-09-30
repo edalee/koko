@@ -21,6 +21,9 @@ export function reconnectMessage(err: unknown): string {
   if (text.includes("already open in another session")) {
     return "This conversation is already open in another tab.";
   }
+  if (text.includes("already reconnecting")) {
+    return "This tab is already reconnecting. Try again in a moment.";
+  }
   return `Could not reconnect: ${text}`;
 }
 
@@ -266,7 +269,12 @@ export function useSessionTabs() {
    */
   const reconnectTab = useCallback(
     async (tab: SessionTab, choice?: ReconnectChoice) => {
-      if (reconnectingRef.current.has(tab.id)) return "";
+      // Reject rather than return quietly. The picker treated a quiet return
+      // as success and closed, so the choice the user made was dropped and
+      // the in-flight reconnect won instead.
+      if (reconnectingRef.current.has(tab.id)) {
+        throw new Error("This tab is already reconnecting.");
+      }
       reconnectingRef.current.add(tab.id);
       const fresh = choice?.fresh === true;
       const claudeSessionId = fresh ? "" : choice?.claudeSessionId || tab.claudeSessionId || "";

@@ -52,8 +52,9 @@ interface SessionDialogProps {
   // Reconnect mode: the dialog reconnects this tab rather than creating one.
   reconnect?: SessionTab;
   onReconnect: (tab: SessionTab, choice: ReconnectChoice) => Promise<void>;
-  // Open with this directory already chosen, as the worktrees module does.
-  initialDirectory?: string;
+  // Opened from the worktrees module on this existing worktree. The directory
+  // is fixed, and the new tab is marked so close-time cleanup is offered.
+  worktree?: string;
   history: SessionHistoryEntry[];
   activeDirs: string[];
   tabs: SessionTab[];
@@ -81,13 +82,17 @@ function historyConversation(entry: SessionHistoryEntry): main.Conversation {
   };
 }
 
-/** A tab's own conversation, shaped like a listed one. */
+/**
+ * A tab's own conversation, shaped like a listed one. Its real date is not
+ * known here, so modifiedAt is 0 and the picker shows no age rather than the
+ * tab's creation date, which could be weeks before its last use.
+ */
 function tabConversation(tab: SessionTab): main.Conversation {
   return {
     uuid: tab.claudeSessionId ?? "",
     title: tab.name,
     preview: tab.lastMsg ?? "",
-    modifiedAt: tab.createdAt,
+    modifiedAt: 0,
     sizeBytes: 0,
   };
 }
@@ -137,26 +142,44 @@ export default function SessionDialog({
   onClose,
   onCreate,
   onOpenHeld,
-  reconnect,
+  reconnect: reconnectProp,
   onReconnect,
-  initialDirectory,
+  worktree: worktreeProp,
   history,
   activeDirs,
   tabs,
 }: SessionDialogProps) {
+  // App remounts the dialog on every open (key), so everything below starts
+  // from the props at that moment. Mode is frozen for the whole open: a tab
+  // switch behind the dialog cannot swap its target while it is up, and the
+  // first open render already has the right selection.
+  const [reconnect] = useState(reconnectProp);
+  const [worktree] = useState(worktreeProp);
+  // A reconnect or an existing worktree fixes the directory.
+  const locked = !!reconnect || !!worktree;
+
   const [state, setState] = useState<AnimState>("closed");
   const [name, setName] = useState("");
-  const [directory, setDirectory] = useState("");
+  const [directory, setDirectory] = useState(() => reconnect?.directory ?? worktree ?? "");
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
-  // Bumped on every open, so the conversation list reloads even when the
-  // directory is the same as last time.
-  const [openCount, setOpenCount] = useState(0);
 
   // Step 2: which conversation to open. "" means start a new one, null means
-  // nothing is chosen yet, which only happens when reconnecting (D1).
+  // nothing is chosen yet, which only happens when reconnecting (D1). Set up
+  // front rather than after the list loads, so Enter can never start a fresh
+  // session for a D1 tab.
   const [conversations, setConversations] = useState<main.Conversation[] | null>([]);
-  const [selected, setSelected] = useState<string | null>("");
-  const [pending, setPending] = useState<PendingSelection | null>(null);
+  const [selected, setSelected] = useState<string | null>(() =>
+    reconnect ? reconnect.claudeSessionId || null : "",
+  );
+  const [pending, setPending] = useState<PendingSelection | null>(() =>
+    reconnect
+      ? {
+          directory: reconnect.directory,
+          uuid: reconnect.claudeSessionId || null,
+          fallback: reconnect.claudeSessionId ? tabConversation(reconnect) : undefined,
+        }
+      : null,
+  );
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -221,7 +244,10 @@ export default function SessionDialog({
       setWorktreeError(null);
       return;
     }
-    setUseWorktree(activeDirs.includes(directory));
+    // Never when the directory is fixed. Opening an existing worktree that
+    // another tab uses would otherwise tick this, and Enter would create a
+    // new worktree inside the worktree.
+    setUseWorktree(!locked && activeDirs.includes(directory));
     GetBranchName(directory)
       .then((branch) => {
         setCurrentBranch(branch);
@@ -237,17 +263,16 @@ export default function SessionDialog({
         setWorktreeBranch(`wt-${suffix}`);
         setWorktreePath(`${dirParent(directory)}/${dirBasename(directory)}-${suffix}`);
       });
-  }, [directory]);
+  }, [directory, locked]);
 
   // Load the directory's conversations whenever it changes. A counter drops
   // replies that arrive after the user has moved on to another directory.
   const loadSeq = useRef(0);
   useEffect(() => {
-    void openCount; // reload on every open, not only on a directory change
     const seq = ++loadSeq.current;
     const pick = pending && pending.directory === directory ? pending : null;
-    // Select straight away, not after the load. For D1 that keeps Open
-    // disabled while loading, so a quick Enter cannot start a fresh session.
+    // Select straight away, not after the load. On the first run this repeats
+    // the initial selection. After a directory change it resets to new.
     setSelected(pick ? pick.uuid : "");
     if (pick?.uuid) setUseWorktree(false);
     setCreateError(null);
@@ -269,34 +294,18 @@ export default function SessionDialog({
         }
         setConversations(rows);
       });
-  }, [directory, pending, openCount]);
+  }, [directory, pending]);
 
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open && state === "closed") {
       setState("open");
-      setName("");
-      setCreating(false);
-      setOpenCount((n) => n + 1);
-      if (reconnect) {
-        // Preselect the tab's own conversation, so Enter restores it. A tab
-        // with none preselects nothing, and Open stays disabled (D1).
-        setDirectory(reconnect.directory);
-        setPending({
-          directory: reconnect.directory,
-          uuid: reconnect.claudeSessionId || null,
-          fallback: reconnect.claudeSessionId ? tabConversation(reconnect) : undefined,
-        });
-      } else {
-        setDirectory(initialDirectory ?? "");
-        setPending(null);
-        setTimeout(() => nameRef.current?.focus(), 50);
-      }
+      if (!reconnect) setTimeout(() => nameRef.current?.focus(), 50);
     } else if (!open && state === "open") {
       setState("closing");
     }
-  }, [open, state, reconnect, initialDirectory]);
+  }, [open, state, reconnect]);
 
   function handleAnimationEnd() {
     if (state === "closing") {
@@ -341,7 +350,7 @@ export default function SessionDialog({
 
     let finalDir = directory;
     // A new worktree has no conversations, so the two never combine.
-    if (useWorktree && !selected) {
+    if (useWorktree && !selected && !locked) {
       if (!worktreeBranch.trim() || !worktreePath.trim()) {
         setWorktreeError("Branch and worktree path are required");
         return;
@@ -365,7 +374,7 @@ export default function SessionDialog({
       setCreatingWorktree(false);
     }
 
-    const inWorktree = useWorktree && !selected;
+    const inWorktree = useWorktree && !selected && !locked;
     const sessionName =
       name.trim() || (inWorktree ? branchSlug(worktreeBranch) : dirBasename(finalDir));
 
@@ -379,7 +388,7 @@ export default function SessionDialog({
 
     setCreating(true);
     try {
-      await onCreate(sessionName, finalDir, inWorktree ? finalDir : undefined, resume);
+      await onCreate(sessionName, finalDir, inWorktree ? finalDir : worktree, resume);
     } catch (err) {
       // Most likely the conversation was opened elsewhere while the dialog
       // was up. Say so and stay open, rather than failing silently.
@@ -395,6 +404,8 @@ export default function SessionDialog({
     onOpenHeld,
     reconnect,
     onReconnect,
+    locked,
+    worktree,
     selected,
     history,
     useWorktree,
@@ -493,8 +504,9 @@ export default function SessionDialog({
               Project Directory
             </span>
 
-            {reconnect ? (
-              // Fixed: reconnecting happens in the tab's own directory.
+            {locked ? (
+              // Fixed: a reconnect stays in the tab's own directory, and an
+              // existing worktree is the directory.
               <div className="w-full flex items-center gap-3 px-3 py-2.5 text-sm bg-white/[0.04] border border-white/[0.06] rounded-md text-white/80">
                 <FolderOpen className="size-4 text-muted-foreground shrink-0" />
                 <span className="truncate">{shortenPath(directory)}</span>
@@ -526,9 +538,10 @@ export default function SessionDialog({
               </p>
             )}
 
-            {/* Worktree section, shown once a directory is selected. Not for a
-                reconnect, which stays in the tab's own directory. */}
-            {directory && !reconnect && (
+            {/* Worktree section, shown once a directory is selected. Not when
+                the directory is fixed: a reconnect stays put, and an existing
+                worktree needs no new one. */}
+            {directory && !locked && (
               <div className="mt-3 rounded-md border border-white/[0.06] bg-white/[0.02] overflow-hidden">
                 {dirCollides && (
                   <div className="flex items-start gap-2 px-3 py-2 bg-warning/8 border-b border-warning/15 text-[11px] text-warning">
@@ -618,6 +631,10 @@ export default function SessionDialog({
                   selected={selected}
                   onSelect={selectConversation}
                   holders={holders}
+                  // D1 starts with nothing chosen, so the new-conversation row
+                  // must show even with no stored conversations, or the tab
+                  // could never be reconnected.
+                  showWhenEmpty={!!reconnect}
                 />
               </div>
             )}

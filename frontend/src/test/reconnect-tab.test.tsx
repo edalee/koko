@@ -98,6 +98,33 @@ describe("useSessionTabs reconnecting (plan 028 step 5)", () => {
     expect(result.current.tabs[0].connected).toBe(true);
   });
 
+  // A second reconnect while one is running used to return quietly. The
+  // dialog took that as success and closed, dropping the user's choice.
+  it("rejects a reconnect while one is already running", async () => {
+    const { result } = await loaded("conv-1");
+    const tab = result.current.tabs[0];
+    let release: (v: string) => void = () => {};
+    mockCreate.mockImplementationOnce(
+      () =>
+        new Promise<string>((r) => {
+          release = r;
+        }),
+    );
+
+    let first: Promise<string> | undefined;
+    act(() => {
+      first = result.current.reconnectTab(tab);
+    });
+    await expect(result.current.reconnectTab(tab, { fresh: true })).rejects.toThrow(
+      "already reconnecting",
+    );
+
+    await act(async () => {
+      release("session-new");
+      await first;
+    });
+  });
+
   // The dialog shows the reason, so the failure has to reach it.
   it("rejects on failure and records the reason on the tab", async () => {
     const { result } = await loaded("conv-1");

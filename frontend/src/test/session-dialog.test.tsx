@@ -40,7 +40,8 @@ interface Opts {
   onOpenHeld?: Mock<OnOpenHeld>;
   onReconnect?: Mock<OnReconnect>;
   reconnect?: SessionTab;
-  initialDirectory?: string;
+  worktree?: string;
+  activeDirs?: string[];
 }
 
 function renderDialog(o: Opts = {}) {
@@ -55,9 +56,9 @@ function renderDialog(o: Opts = {}) {
       onOpenHeld={onOpenHeld}
       onReconnect={onReconnect}
       reconnect={o.reconnect}
-      initialDirectory={o.initialDirectory}
+      worktree={o.worktree}
       history={o.history ?? []}
-      activeDirs={[]}
+      activeDirs={o.activeDirs ?? []}
       tabs={o.tabs ?? []}
     />,
   );
@@ -247,14 +248,74 @@ describe("SessionDialog routing from other entry points (step 5)", () => {
   // opens the dialog on that worktree, with a new conversation selected.
   it("opens on a worktree with a new conversation selected", async () => {
     mockList.mockResolvedValue([conv("w", "Worktree conversation")]);
-    const { onCreate } = renderDialog({ initialDirectory: "/repo-wt" });
+    const { onCreate } = renderDialog({ worktree: "/repo-wt" });
 
     expect(await screen.findByText("Worktree conversation")).toBeInTheDocument();
     expect(mockList).toHaveBeenCalledWith("/repo-wt");
     fireEvent.click(screen.getByRole("button", { name: "Create Session" }));
     await waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0][1]).toBe("/repo-wt");
+    // The dialog reports the existing worktree, so close-time cleanup is
+    // still offered. App used to guess this by comparing directories.
+    expect(onCreate.mock.calls[0][2]).toBe("/repo-wt");
     expect(onCreate.mock.calls[0][3]).toBeUndefined();
+  });
+
+  // Opening a worktree another tab already uses must not tick "Create as a
+  // git worktree", or Enter would create a worktree inside the worktree.
+  it("does not offer a new worktree when opening an existing one", async () => {
+    const { onCreate } = renderDialog({ worktree: "/repo-wt", activeDirs: ["/repo-wt"] });
+
+    const create = await screen.findByRole("button", { name: "Create Session" });
+    expect(screen.queryByLabelText(/Create as a git worktree/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Browse...")).not.toBeInTheDocument();
+    fireEvent.click(create);
+    await waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0][1]).toBe("/repo-wt");
+  });
+
+  // D1 in a directory with no stored conversations. The picker used to render
+  // nothing, so there was no row to choose and the tab could never reconnect.
+  it("offers a new conversation to a D1 tab in an empty directory", async () => {
+    mockList.mockResolvedValue([]);
+    const t = tab({ connected: false, claudeSessionId: undefined });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByRole("button", { name: "Choose a conversation" })).toBeDisabled();
+    fireEvent.click(await screen.findByText("Start a new conversation"));
+    fireEvent.click(screen.getByRole("button", { name: "Start New Conversation" }));
+    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
+    expect(onReconnect.mock.calls[0][1]).toEqual({ fresh: true });
+  });
+
+  // An Enter pressed before anything is chosen must not start a fresh
+  // session for a D1 tab.
+  it("ignores Enter for a D1 tab until a row is chosen", async () => {
+    mockList.mockImplementation(() => new Promise(() => {}));
+    const t = tab({ connected: false, claudeSessionId: undefined });
+    const { onReconnect } = renderDialog({ reconnect: t, tabs: [t] });
+
+    await screen.findByText(/Reconnect koko-2/);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onReconnect).not.toHaveBeenCalled();
+  });
+
+  // The fallback row's real date is unknown, so it shows no age rather than
+  // the tab's creation date.
+  it("shows no age on a tab's own conversation when its date is unknown", async () => {
+    mockList.mockResolvedValue([]);
+    // Created three weeks ago, so showing its creation date would read 21d.
+    const t = tab({
+      name: "Old work",
+      connected: false,
+      claudeSessionId: "ancient",
+      createdAt: Date.now() - 21 * 86_400_000,
+    });
+    renderDialog({ reconnect: t, tabs: [t] });
+
+    const row = (await screen.findByText("Old work")).closest("label");
+    expect(row).not.toBeNull();
+    expect(row?.textContent).not.toMatch(/ago/);
   });
 
   // UX rule 2: a disconnected tab with a stored conversation is restored in
