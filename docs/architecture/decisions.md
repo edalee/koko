@@ -115,7 +115,7 @@
 
 ## ADR-014: Session persistence and resume with --continue
 - **Date:** 2026-03-08
-- **Status:** Superseded by ADR-028. Sessions still persist, but they resume by explicit conversation id only: the tab's stored id, as a reload uses, or one chosen in the session dialog. Plan 028 step 8 removed `--continue`, because it resumed the newest conversation in a directory, which was often a sibling tab's.
+- **Status:** Superseded by ADR-036
 - **Decision:** Persist session tabs to localStorage, mark as disconnected on app restart/session exit, reconnect with `claude --continue` flag
 - **Rationale:**
   - Users lose context when app restarts — persistence preserves session list
@@ -137,7 +137,7 @@
 
 ## ADR-016: Slack integration with user token and config persistence
 - **Date:** 2026-03-09
-- **Status:** Accepted
+- **Status:** Superseded by ADR-027
 - **Decision:** Real Slack DM + @mention fetching using a user token (`xoxp-`/`xoxe.xoxp-`), stored in `~/.config/koko/config.json` with `0600` permissions. Settings overlay for token configuration with test/debug tools.
 - **Rationale:**
   - User token scopes: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
@@ -237,7 +237,7 @@
 
 ## ADR-024: Slack mentions/threads and unread scoping
 - **Date:** 2026-03-18
-- **Status:** Accepted (updates ADR-016)
+- **Status:** Superseded by ADR-027 (updated ADR-016)
 - **Decision:** Upgraded Slack from bot token DMs-only to user token with mentions, threads, and time-scoped inbox
 - **Changes from ADR-016:**
   - User token (`xoxp-`) instead of bot token — sees all user's DMs
@@ -332,3 +332,156 @@
   - There is no `--continue`. It resumed the newest conversation in a directory, which could be held by another tab, so plan 028 step 8 removed it. The API and MCP take a conversation id to resume, and refuse `resume` without one rather than start fresh behind the caller's back. `GET /api/sessions` lists each session's id so callers can find one.
   - The picker marks a held conversation with its tab's slug, and choosing it switches to that tab.
 - **Plan:** `docs/plans/028-session-recovery-and-picker.md`
+
+## ADR-029: koko-worker as a separate binary under launchd
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** Scheduled work jobs run in `koko-worker`, a separate binary in its own Go module (`cmd/koko-worker/`). A launchd agent keeps it running. The jobs do not run as goroutines in the Koko app.
+- **Rationale:**
+  - Jobs must run with the Koko window closed.
+  - launchd restarts the worker if it stops (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 30).
+  - `koko-worker install` copies the binary to `~/Library/Application Support/koko/worker/bin/`. A rebuild or a moved `Koko.app` then never breaks the agent.
+  - The plist sets its own PATH, because launchd's default PATH has no `gh` or `claude`.
+  - The agent has its own label, `com.koko.worker`. It never calls Koko's API or touches Koko's sessions.
+  - A nested module, like `koko-cli`, keeps the worker's tests and lint apart from the app. `make test-worker` runs its tests, and `make test` calls it.
+  - The app finds the binary next to its own (inside `Koko.app`), then in `build/bin` for `make dev`, then at the agent's copy.
+  - If the running agent uses an older copy than the one next to Koko, `WorkerService.Status` reinstalls it. `install --if-idle` skips this while a job runs.
+- **Trade-off:** macOS only, because the worker depends on launchd, `pmset` and `caffeinate`.
+- **Files:** `cmd/koko-worker/main.go`, `cmd/koko-worker/launchd.go`, `worker_service.go`, `Makefile`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-030: One worker agent with its own scheduler and state on disk
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** One launchd agent runs `koko-worker serve`, which has its own scheduler. There is no launchd agent per job. Run state lives in `worker/state.json`.
+- **Rationale:**
+  - The scheduler reloads `worker.json` every 30 seconds. A time change in the UI needs no plist rewrite.
+  - It runs any of today's slots that have come round and not run. A job missed while the Mac slept runs on wake.
+  - One run covers every missed slot of a job. After a long sleep, tono runs once for 09:30 and 12:00. A slot from an earlier day is dropped.
+  - `state.json` records each slot's outcome, because a launchd restart loses memory. It is changed under a file lock, so the scheduler and "Run now" never overwrite each other.
+  - `TimesAdded` records when each run time first appeared. A slot counts only if its time was set before the slot came round. A time set earlier than now, or a job switched on after its time, waits for the next day.
+  - Each job has a lock file, shared by the scheduler and "Run now". A "Run now" is recorded against today's slots, so the scheduler does not repeat it.
+  - Before a run, the worker checks that Slack answers. Without internet, nothing runs and nothing is recorded, so the next tick tries again.
+  - Any other failure gets 3 tries, 5 minutes apart, then one warning DM.
+  - `caffeinate` stops idle sleep while jobs run.
+- **Files:** `cmd/koko-worker/scheduler.go`, `cmd/koko-worker/main.go`
+- **Tests:** `cmd/koko-worker/worker_test.go`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-031: The worker has its own config file
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** Worker settings live in `~/Library/Application Support/koko/worker.json`, not in Koko's `config.json`.
+- **Rationale:**
+  - Koko's `SaveConfig` rewrites `config.json` from its own struct. It would drop a `worker` key it does not know.
+  - A separate file needs no change to `config_service.go` or `types.go`.
+  - The Koko UI writes the file, with mode 0600, through `WorkerService.SaveConfig`. The worker only reads it.
+  - The worker restores the default for any empty value, so an empty text box in the UI never wipes a default.
+  - The worker has its own Slack bot token and user ID in this file. Koko's own Slack settings are not used.
+  - `WorkerService` passes JSON strings, not structs. The Wails bindings stay in their own files, and the shared `models.ts` does not change.
+- **Files:** `cmd/koko-worker/config.go`, `worker_service.go`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-032: Worker jobs run Claude headless with tight allowlists
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** Jobs that need judgement or a claude.ai connector run `claude -p`. Go does the rest: PR lists through `gh`, calendar gaps, Slack layout.
+- **Rationale:**
+  - The prompt goes on stdin. The tool flags take several values and would swallow a prompt passed as an argument.
+  - `--permission-mode dontAsk` refuses any tool not on the allowlist, so a run never waits for an answer.
+  - `--no-session-persistence` keeps worker runs out of Koko's conversation list.
+  - `--setting-sources ""` plus a worker settings file with `disableAllHooks` excludes your user allow rules, hooks and plugins.
+  - Each call passes its own allowlist, for example only `list_events` or only `create_event`. A fixed deny list (`denyWrites`) refuses file writes, GitHub writes, Jira writes and any calendar change other than create.
+  - Go reads the raw tool results from `--output-format stream-json`. Claude does not retype event data or links.
+  - Go builds the PR lists itself, so the links are exact. Claude only judges Jira ticket coverage and writes follow-up steps.
+- **Files:** `cmd/koko-worker/claude.go`, `cmd/koko-worker/jobs.go`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-033: Calendar through the Google Calendar connector
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** The worker reads and writes the calendar through the claude.ai Google Calendar connector. It does not use EventKit (the macOS calendar framework).
+- **Rationale:**
+  - EventKit under launchd needs a signed helper binary and a calendar permission. The connector needs neither.
+  - Focus time runs in three steps: Claude lists today's events, Go finds the gaps, Claude creates one event per gap.
+  - The gap finder is a pure Go function, with unit tests.
+  - Focus blocks are plain busy events titled "Focus", tagged `[koko-worker:focus]` in the description. They count as busy, so a second run books nothing.
+  - They are not Google's "Focus time" type, which can decline new invites by itself.
+- **Files:** `cmd/koko-worker/calendar.go`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-034: Tono reviews stay read-only
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** The tono job calls the tono CLI as `tono <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the review from posting to GitHub.
+- **Rationale:**
+  - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
+  - `TONO_CLAUDE` points to a wrapper. It adds `--no-session-persistence` and denies the posting commands.
+  - Read-only `gh` and `git` stand-ins go first on tono's PATH. They refuse any command that changes GitHub, including `gh api` calls that send data, and any `git push`. A deny list alone matches only command prefixes.
+  - A review is capped at 45 minutes. On timeout the whole process group gets SIGTERM, so tono removes its own lock.
+  - One review per PR: a PR reviewed once, or one that already has a tono comment, is not reviewed again.
+  - Results are keyed `repo#number@sha`, so the stand-up can say when a PR has new commits since its review.
+- **Files:** `cmd/koko-worker/jobs.go`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-035: Mac wake through pmset and a sudoers rule
+- **Date:** 2026-09-30
+- **Status:** Accepted
+- **Decision:** The worker books the next Mac wake with `sudo -n /usr/bin/pmset schedule wake`, two minutes before the next job.
+- **Rationale:**
+  - launchd cannot wake a sleeping Mac. `pmset` can, but it needs root.
+  - A sudoers rule allows only `pmset schedule wake` and `pmset schedule cancel wake`, with no password. You add it once. The wake check shows the exact line.
+  - `sudo -n` fails at once if the rule is missing, so the worker never waits for a password.
+  - The worker keeps one wake booked. If the times change, it cancels the old wake first. `uninstall` cancels any booked wake.
+  - The wake is booked even while offline.
+- **Open question:** a MacBook with the lid closed may wake only briefly, or only on power. This is not tested yet.
+- **Files:** `cmd/koko-worker/launchd.go`, `cmd/koko-worker/check.go`
+- **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-036: Sessions stored by the backend, resumed by conversation id
+- **Date:** 2026-03-26
+- **Status:** Accepted (supersedes ADR-014)
+- **Decision:** Koko stores its tabs and closed-session history in `sessions.json`, through `ConfigService`. A session reopens its Claude conversation with `claude --resume <id>`, using the tab's stored id or one chosen in the session dialog. There is no `--continue`: plan 028 step 8 removed it.
+- **Rationale:**
+  - `SaveSessions` writes to `sessions.json.new`, moves the old file to `sessions.json.bak`, then renames. A crash mid-write never leaves a half-written file.
+  - If `sessions.json` is missing or corrupt, `GetSessions` reads `sessions.json.bak`.
+  - The file lives in the user config directory, under `koko/`, with mode 0600. With neither file present, `GetSessions` migrates old data from WebKit localStorage.
+  - `--continue` opens the newest conversation in a directory. With two sessions in one directory, that is often the other session's conversation.
+  - Koko reads the conversation id from Claude's session files after the first submitted line, and stores it on the tab.
+  - Each session has a slug (`koko-1`), which the API, MCP, Slack bot and CLI use. A recovered session keeps its slug.
+  - At startup, `app.go` seeds the slug counters from `sessions.json` before the frontend can create a session. A new session then never takes a saved tab's slug.
+- **Consequences:**
+  - A disconnected tab opens the session dialog with its conversation preselected. It no longer reconnects silently.
+  - The API and MCP take a conversation id to resume, and refuse `resume` without one rather than start fresh behind the caller's back.
+- **Files:** `config_service.go`, `terminal_manager.go`, `app.go`, `frontend/src/hooks/useSessionTabs.ts`
+- **Tests:** `config_service_test.go`, `slug_test.go`, `terminal_manager_test.go`
+- **Plans:** `docs/plans/019-session-identity-and-recovery.md`, `docs/plans/028-session-recovery-and-picker.md`
+
+## ADR-037: Approval detection through Claude's PermissionRequest hook
+- **Date:** 2026-03-26
+- **Status:** Accepted
+- **Decision:** Koko learns that Claude waits for tool approval from Claude Code's `PermissionRequest` hook. It does not match patterns in the terminal output.
+- **Rationale:**
+  - Pattern matching against the output buffer gave false amber icons.
+  - At startup, `installPermissionHook` writes an HTTP hook to `~/.claude/settings.json`. It points at `http://127.0.0.1:<port>/api/hooks/permission-request`, with a 5 second timeout.
+  - The endpoint needs no Bearer token, because the local Claude process has none. The API server listens on `127.0.0.1` only.
+  - The handler matches the session by Claude's conversation id, then by working directory. It marks that session as waiting for approval.
+  - It returns `{}`, so Claude still shows its own prompt. A decision in the reply would approve or deny without the user.
+  - The flag clears when input reaches the session, through `Write` or `WriteKeystrokes`.
+  - `GetSessionState` returns `"approval"` or `"idle"`. The sidebar pulse, reload's confirmation and the API read it. The MCP `get_session_state` tool reaches it through the API.
+- **Consequences:** Koko replaces any other `PermissionRequest` hook entry in `~/.claude/settings.json` with its own.
+- **Files:** `app.go`, `api_server.go`, `terminal_manager.go`, `frontend/src/hooks/useSessionActivity.ts`
+
+## ADR-038: Git worktrees for parallel sessions
+- **Date:** 2026-05-20
+- **Status:** Accepted
+- **Decision:** Koko can start a session in a new git worktree, so parallel sessions on one repo do not share files, branch or index. It drives plain `git worktree` commands through `GitService`.
+- **Rationale:**
+  - `CreateWorktree`, `ListWorktrees`, `RemoveWorktree` and `PruneWorktrees` wrap `git worktree add`, `list --porcelain`, `remove` and `prune`.
+  - The session dialog proposes a new branch and a sibling directory, both with the same random suffix. The toggle starts on when another tab already uses the directory.
+  - The sidebar shows each session's branch, and an amber dot when two sessions share a directory.
+  - The Worktrees module lists the repo's worktrees and flags uncommitted changes. Opening one goes through the session dialog.
+  - A tab records the worktree Koko created for it (`worktreePath`). Closing that tab asks whether to remove it.
+  - Removal tries without `--force` first. Only when git refuses does the dialog offer a forced removal. This protects uncommitted work.
+- **Files:** `git_service.go`, `frontend/src/components/SessionDialog.tsx`, `frontend/src/components/WorktreesModule.tsx`, `frontend/src/components/WorktreeRemovalDialog.tsx`, `frontend/src/hooks/useWorktrees.ts`, `frontend/src/hooks/useSessionBranches.ts`
+- **Plan:** `docs/plans/027-git-worktrees-for-session-isolation.md`

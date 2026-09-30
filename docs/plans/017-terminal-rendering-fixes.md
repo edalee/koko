@@ -1,5 +1,7 @@
 # Plan 017: Terminal Rendering Fixes
 
+**Status:** Partially implemented. Fixes 2 and 4 are done. Open: batched PTY writes (fix 1) and WebGL recovery after context loss (fix 3).
+
 ## Problem
 
 Terminal panes suffer from flicker and rendering glitches. The same issue exists in [attn](https://github.com/victorarias/attn) (Tauri + xterm.js + WebGL), confirming the root cause is **xterm.js WebGL rendering inside macOS WKWebView** — not Koko-specific.

@@ -30,16 +30,21 @@ Koko uses a Slack bot to let you control sessions via DM. The bot has its own id
 4. Copy the **Bot User OAuth Token** (`xoxb-...`)
 
 ### 4. Configure in Koko
-1. Open Koko → Settings (gear icon in toolbar)
-2. Paste the bot token in the **Slack Bot Token** field
-3. Paste your **Slack Member ID** in the owner field (see below)
-4. Click **Save Token**
+The Slack tab in Settings is hidden (plan 029). It returns once the bot is dropped or rebuilt. Until then, set the bot up in the config file by hand.
+
+1. Quit Koko.
+2. Open `~/Library/Application Support/koko/config.json`.
+3. Set `slackToken` to the bot token.
+4. Set `slackOwnerId` to your Slack Member ID (see below).
+5. Start Koko. It reads the file only at start-up.
+
+The bot stays idle while `slackToken` is empty.
 
 #### Finding your Slack Member ID
 1. In Slack, click your profile picture → **Profile**
 2. Click the **⋯** (three dots) menu
 3. Click **Copy member ID**
-4. Paste it in the "Your Slack Member ID" field in Koko settings
+4. Put it in `slackOwnerId` in `config.json`
 
 This ensures only you can send commands to the bot. Without it, anyone who DMs the bot can control your sessions.
 
@@ -59,7 +64,8 @@ By default, Slack apps can't receive DMs until you enable it:
 |---------|-------------|
 | `sessions` | List active Koko sessions |
 | `status [id]` | Session state + recent output |
-| `send <id> <text>` | Send text to a session |
+| `send <id> <text>` | Send raw text to a session |
+| `prompt <id> <text>` | Send a prompt and wait for Claude's reply |
 | `output [id]` | Last ~50 lines of output |
 | `files <id>` | Git file changes for session |
 | `help` | Show command list |
@@ -73,7 +79,7 @@ If you only have one session, `status` and `output` default to it (no ID needed)
 - Verify the bot is running: check Koko logs at `~/Library/Application Support/koko/koko.log`
 - Make sure **Messages Tab** is enabled in App Home settings
 
-**"missing_scope" error on Test:**
+**"missing_scope" error:**
 - Go back to OAuth & Permissions and add the missing scope
 - Reinstall the app to your workspace after adding scopes
 

@@ -1,5 +1,7 @@
 # Plan 027 — Git Worktrees for Session Isolation
 
+**Status:** Implemented
+
 ## Problem
 
 Running multiple Claude sessions against the same repository directory

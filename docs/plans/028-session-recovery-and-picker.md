@@ -13,6 +13,8 @@
 | 7. Deletion | TODO, deferred | |
 | 8. Drop `--continue` | Done | #24 |
 
+#21 and #22 were stacked PRs. They merged into their base branches, not `main`. #23 lands steps 5 and 6 on `main`.
+
 Step 7 is recorded as a TODO in `docs/ROADMAP.md`. Until it lands, delete a
 conversation by removing `~/.claude/projects/<folder>/<id>.jsonl`. The
 filename is the conversation id the picker uses.

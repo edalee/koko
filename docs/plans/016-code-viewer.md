@@ -1,5 +1,7 @@
 # Plan 016: Code Viewer & Diff Experience
 
+**Status:** Implemented
+
 ## Goal
 Add a world-class code viewing experience to Koko: click any changed file in the right sidebar to see its diff with syntax highlighting, or view the raw file content. GitHub-style UI, dark theme, split/unified toggle.
 

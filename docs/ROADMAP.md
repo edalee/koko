@@ -17,9 +17,10 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Blame view** — git blame overlay for file viewer
 
 ### Slack
+These wait on the old Slack DM bot decision (see "Old Slack DM bot" under Worker). If the bot is dropped, they go too.
 - [ ] **Channel mentions** — monitor specific channels for keywords/mentions (needs `channels:history` scope)
 - [ ] **Reaction support** — quick-react to messages from the bot DM
-- [ ] **Real unread tracking** — if Slack API ever exposes unread state for user tokens
+- ~~**Real unread tracking**~~: dropped. It served the user-token Slack panel, which Koko removed
 
 ### Sessions
 - [x] **Conversation picker**: choose a new conversation or one of those stored for a directory (plan 028, steps 1 to 4)
@@ -30,7 +31,7 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Remove Koko's worktrees**: TODO. From Settings, never forced, skipping any with uncommitted changes (plan 028 step 7)
 - [x] **Drop `--continue`**: resume by explicit conversation id only, once the picker covers every entry point (plan 028 step 8)
 - [ ] **Session context polish** — MCP servers, agents, commands panel refinements
-- [ ] **Session grouping** — group sessions by project/directory
+- [x] **Session grouping** — group sessions by project/directory
 - [ ] **Session export** — export terminal scrollback as text/markdown/HTML
 
 ### GitHub
@@ -45,10 +46,21 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Notification sounds** — optional audio alerts for Slack DMs and PR reviews
 
 ### Infrastructure
-- [ ] **Auto-update** — check for new versions and prompt to update
+- [x] **Auto-update** — check for new versions and prompt to update
 - [ ] **Linux support** — test and fix Linux-specific issues
-- [ ] **Homebrew distribution** — `brew install koko`
+- [x] **Homebrew distribution** — `brew install koko`
 - [ ] **Remote API enhancements** — file diffs, GitHub PRs, notifications endpoints
+
+### Worker
+- [x] **koko-worker**: background launchd agent for scheduled work jobs (plan 029)
+- [x] **Stand-up DM**: meetings, PRs ready to merge with a Jira check, and PRs waiting for review
+- [x] **Focus time**: books "Focus" blocks in free calendar gaps
+- [x] **Tono reviews**: read-only tono runs on new PRs, reported by DM
+- [x] **Settings > Worker**: on/off, job times, Test and Run now, connection checks, log
+- [ ] **Mac wake test**: add the sudoers rule, then test a wake with the Mac asleep
+- [ ] **Dependabot strategy**: rules for approving or closing dependency bumps
+- [ ] **Old Slack DM bot**: drop `slack_commands.go`, or rebuild one bot for Koko and koko-worker
+- [ ] **GitHub settings tab**: make the followed repos and hidden PRs easier to manage
 
 ## Completed
 

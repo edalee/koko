@@ -1,5 +1,7 @@
 # Plan 021: PR Detail Overlay Improvements
 
+**Status:** Partially implemented. Open: linked issues (`closingIssuesReferences`). The review skill (section 5) was skipped.
+
 ## Overview
 
 Enhance the full-screen PR detail overlay with better layout, hide/ignore functionality, file changes list, collapsible checks, and richer reviewer context.

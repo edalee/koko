@@ -1,5 +1,7 @@
 # Plan 019: Session Identity, History, and Recovery
 
+**Status:** Partially implemented. Open: session upsert on new ("Reconnect koko-1?" dialog) and dated daily backups of `sessions.json`. Plan 028 now covers most of the recovery side.
+
 ## Problems
 
 ### 1. Session IDs are useless

@@ -1,7 +1,7 @@
 # Koko (Tui) - Claude Instructions
 
 ## Project
-A desktop application that serves as a unified workspace. Primary use: running Claude Code sessions with integrated GitHub and Slack awareness panels.
+A desktop application that serves as a unified workspace. Primary use: running Claude Code sessions with integrated GitHub and git awareness panels.
 
 **Repo:** `github.com/edalee/koko`
 **Stack:** Wails v2 (Go backend + React frontend)
@@ -11,11 +11,12 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **Wails v2 desktop shell** — Go backend + embedded webview
 - **Frameless window** — `Frameless: true`, custom traffic lights via `--wails-draggable`, 8px bevel
 - **Terminal sessions** — xterm.js v6 + WebGL + SearchAddon, one per tab, connected to PTY via Wails events
-- **Right sidebar** — 3 modules: file changes (+ CI runs), session context, notifications; PRs open via overlay
+- **Right sidebar**: 4 modules, which are file changes (+ CI runs), session context, worktrees and notifications. PRs open in an overlay
 - **Left sidebar** — session list grouped by directory, collapsible
 - **Remote API** — HTTP/WebSocket on localhost:19876 with Bearer auth
 - **MCP server** — JSON-RPC 2.0 over stdio, 8 tools (launched via `koko mcp`)
 - **CLI companion** — `koko-cli` (cmd/koko-cli/)
+- **koko-worker**: scheduled work jobs (stand-up, focus time, tono reviews) in `cmd/koko-worker/`. It is its own Go module and binary, run by a launchd agent (`com.koko.worker`), so jobs run with Koko closed. The app controls it only through `worker.json` and the binary's subcommands. macOS only.
 
 ## Key Dependencies
 **Go:**
@@ -35,7 +36,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - Follow Go standard project layout
 - Use conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`
 - Keep PRs small and focused
-- `make` targets: `dev`, `build`, `test`, `lint`, `install-fe`
+- `make` targets: `dev`, `build`, `test`, `lint`, `install-fe`, `build-worker`, `test-worker`
 
 ## Project Structure
 - `main.go` — Wails entry point + MCP subcommand detection
@@ -45,20 +46,25 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `mcp_server.go` + `mcp_tools.go` — MCP server, 8 tools
 - `github_service.go` — PR fetching, file diffs, reviews, commits, comments, CI status (Wails-bound)
 - `git_service.go` — Branch name, file changes, file diffs, repo slug detection
+- `process_monitor.go`: child process tree scan for the subagent monitor
 - `config_service.go` — Atomic writes, API key, hidden PRs
 - `claude_service.go` — Last message extraction, listing a directory's stored conversations
 - `slack_commands.go` — Slack bot DM command handler
 - `types.go` — Shared Go types with JSON tags
+- `worker_service.go`: Wails-bound bridge to koko-worker. It edits `worker.json` and calls the binary. Methods pass JSON strings, so `models.ts` stays unchanged.
 - `cmd/koko-cli/` — CLI companion
+- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`
 - `frontend/src/` — React app
-  - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, etc.
+  - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, WorktreesModule, WorktreeRemovalDialog, etc.
   - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.
+  - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx` (on/off, job times, Test and Run now, checks, log)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
 - `docs/plans/` — Implementation plans (001-029)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
+- Bound structs: `App`, `TerminalManager`, `GitHubService`, `GitService`, `ConfigService`, `ProcessMonitor`, `ClaudeService`, `WorkerService`
 - Exported methods on bound structs become callable from frontend
 - PTY output sent via `runtime.EventsEmit()` → frontend listens with `EventsOn()`
 - Base64 encoding for binary PTY data over Wails IPC

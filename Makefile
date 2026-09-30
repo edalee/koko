@@ -1,7 +1,7 @@
 .PHONY: dev build build-cli build-worker test test-worker lint lint-fe typecheck check clean install-fe setup
 
 WAILS := $(HOME)/go/bin/wails
-APP := build/bin/koko.app
+APP := build/bin/Koko.app
 
 # Koko finds koko-worker in build/bin during `make dev`, and next to its own
 # binary inside Koko.app after `make build`.
