@@ -217,10 +217,23 @@ Done since:
 - The Slack bot token and user ID are copied from baldrick-work.
 - End-to-end test of the serve loop: one stand-up slot, one DM, one state record.
 
+Done on 30 Sep:
+- The Worker section was tested in the app: switch on and off, "Test", "Run now" and "Check all".
+- Settings fills the window, with a tab for each section. The panel is nearly opaque, so it is easier to read.
+- Every toggle knob now stays inside its track.
+- A timed invite from midnight to midnight shows as "All day" in the stand-up.
+- The Slack tab is hidden. It held the old Slack DM bot, which lets you control Koko sessions by DM.
+- Tono has two separate settings, each reviewed once per PR:
+  - **My PRs** (`tonoMine`): every open PR you opened, whatever the team or age.
+  - **Team PRs** (`tonoTeamPRs`): PRs opened by `tonoTeam` members in the last `tonoMaxAgeDays` days. It covers PRs that ask for your review, plus every open PR in `tonoRepos`. You add and remove those repos in Settings.
+  - The old `tonoOwnPRsOnly: true` reads as Team PRs off.
+- The stand-up has a "Team PRs" section for team PRs in `tonoRepos` that do not ask for your review. Their reviews go in the stand-up thread.
+
 Still to do:
-1. Try the Worker section in the built app: switch on and off, "Test", "Check all".
-2. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
-3. Turn off baldrick-work's launchd agent.
+1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
+2. Turn off baldrick-work's launchd agent.
+3. Drop or rebuild the old Slack DM bot (`slack_commands.go`). See the last item under "Out of scope". The Slack tab stays hidden until then.
+4. Make the GitHub tab in Settings easier to use. It holds the followed repos and the hidden PRs.
 
 ## Rollout
 
@@ -246,3 +259,7 @@ Still to do:
   - an approval limit per day, and a DM listing every action taken.
 
 - **The Slack chat bot.** It has not worked well, because its Slack and Koko connections are hard to keep alive. If a follow-up plan solves that, the bot may move into koko-worker or merge into Koko's Slack handler.
+
+- **Koko's old Slack DM bot: drop it or rebuild it.** `slack_commands.go` polls Slack DMs and runs Koko commands. Its settings sit in the hidden Slack tab (`SettingsPanel.tsx`). It stays idle while no token is saved. A follow-up plan decides between two options:
+  - **Drop it:** delete `slack_commands.go`, its start call in `main.go`, the Slack tab, and `slackToken` and `slackOwnerId` in the config.
+  - **Rebuild it:** one Slack bot for Koko and koko-worker, with a single token, and a connection that survives sleep and restarts.

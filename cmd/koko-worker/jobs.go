@@ -84,14 +84,22 @@ func runStandup(ctx context.Context, env Env) error {
 		prs = append(prs, approvedPR{pr: p, detail: d, blockers: d.blockers()})
 	}
 
-	var queue []SearchPR
+	var queue, team []SearchPR
+	me, meErr := myLogin(ctx)
 	requests, queueErr := reviewRequests(ctx)
 	if queueErr == nil {
-		me, err := myLogin(ctx)
-		queue, queueErr = reviewQueue(requests, me), err
+		queue, queueErr = reviewQueue(requests, me), meErr
+	}
+	var teamErr error
+	if env.cfg.TonoTeamPRs && len(env.cfg.TonoRepos) > 0 {
+		var inRepos []SearchPR
+		inRepos, teamErr = repoPRs(ctx, env.cfg.TonoRepos)
+		if teamErr == nil {
+			team, teamErr = reviewQueue(inRepos, me), meErr
+		}
 	}
 
-	for _, err := range []error{calErr, prErr, queueErr} {
+	for _, err := range []error{calErr, prErr, queueErr, teamErr} {
 		if err != nil && !online(ctx) {
 			return err
 		}
@@ -175,16 +183,19 @@ func runStandup(ctx context.Context, env Env) error {
 	}
 	sections = append(sections, b.String())
 
-	review, thread, posted := reviewSection(ctx, env, queue, queueErr)
-	sections = append(sections, review)
+	tally := &reviewTally{}
+	sections = append(sections, reviewSection(ctx, env, tally, queue, queueErr))
+	if s := teamSection(ctx, env, tally, team, teamErr, queue); s != "" {
+		sections = append(sections, s)
+	}
 
-	if err := env.send(ctx, Message{Sections: sections, Thread: thread}); err != nil {
+	if err := env.send(ctx, Message{Sections: sections, Thread: tally.thread}); err != nil {
 		return err
 	}
-	if len(posted) > 0 {
+	if len(tally.posted) > 0 {
 		// Each review goes in one stand-up thread only, once per commit.
 		return env.persist(func(st *State) {
-			for _, k := range posted {
+			for _, k := range tally.posted {
 				if r, ok := st.TonoResults[k]; ok {
 					r.Posted = true
 					st.TonoResults[k] = r
@@ -195,60 +206,61 @@ func runStandup(ctx context.Context, env Env) error {
 	return nil
 }
 
-// reviewSection is the stand-up's "Needs your review" section: a summary of
-// tono's reviews, one line per PR, and the reviews not yet posted, for the
-// thread. It returns the keys of the reviews it puts in the thread. A PR
-// keeps its review after new commits, because tono reviews each PR once.
-func reviewSection(ctx context.Context, env Env, queue []SearchPR, queueErr error) (string, [][]string, []string) {
-	var b strings.Builder
-	b.WriteString("*Needs your review*\n")
+// reviewTally collects tono's reviews for the stand-up: the reviews not yet
+// posted, for the thread, and their keys. A PR keeps its review after new
+// commits, because tono reviews each PR once.
+type reviewTally struct {
+	scope    tonoScope
+	scopeErr error
+	loaded   bool
+	thread   [][]string
+	posted   []string
+}
+
+func (t *reviewTally) loadScope(ctx context.Context, env Env) {
+	if !t.loaded {
+		t.scope, t.scopeErr = loadScope(ctx, env.cfg, env.now)
+		t.loaded = true
+	}
+}
+
+// status is tono's status for one PR, counted in counts. A review not yet
+// posted goes in the thread.
+func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts map[string]int) string {
+	t.loadScope(ctx, env)
+	r, reviewed := latestResult(env.state, p.repo(), p.Number)
 	switch {
-	case queueErr != nil:
-		fmt.Fprintf(&b, "• Could not load review requests: %s\n", truncate(queueErr.Error(), 200))
-		return b.String(), nil, nil
-	case len(queue) == 0:
-		b.WriteString("• None\n")
-		return b.String(), nil, nil
-	}
-
-	scope, scopeErr := loadScope(ctx, env.cfg, env.now)
-	counts := map[string]int{}
-	var lines []string
-	var thread [][]string
-	var posted []string
-	for _, p := range queue {
-		line := fmt.Sprintf("• %s %s (%s)", slackLink(p.URL, p.short()), p.Title, p.Author.Login)
-		r, reviewed := latestResult(env.state, p.repo(), p.Number)
-		var status string
-		switch {
-		case reviewed && r.Failed != "":
-			status = "tono could not review it"
-			counts["failed"]++
-		case reviewed:
-			v := overallVerdict(r.Verdicts)
-			status = strings.ToLower(verdictLabel(v))
-			if d, err := prDetail(ctx, p.URL); err == nil && d.HeadRefOid != r.SHA {
-				status += " (reviewed at an earlier commit)"
-			}
-			counts[v]++
-			counts["reviewed"]++
-			if !r.Posted && r.Report != "" {
-				if report := loadReport(r.Report); len(report) > 0 {
-					thread = append(thread, report)
-					posted = append(posted, tonoKey(r.Repo, r.Number, r.SHA))
-				}
-			}
-		case scopeErr == nil && scope.outside(p) != "":
-			status = "outside tono's scope: " + scope.outside(p)
-			counts["outside"]++
-		default:
-			status = "not reviewed yet"
-			counts["waiting"]++
+	case reviewed && r.Failed != "":
+		counts["failed"]++
+		return "tono could not review it"
+	case reviewed:
+		v := overallVerdict(r.Verdicts)
+		status := strings.ToLower(verdictLabel(v))
+		if d, err := prDetail(ctx, p.URL); err == nil && d.HeadRefOid != r.SHA {
+			status += " (reviewed at an earlier commit)"
 		}
-		lines = append(lines, line+": "+status)
+		counts[v]++
+		counts["reviewed"]++
+		if !r.Posted && r.Report != "" {
+			if report := loadReport(r.Report); len(report) > 0 {
+				t.thread = append(t.thread, report)
+				t.posted = append(t.posted, tonoKey(r.Repo, r.Number, r.SHA))
+			}
+		}
+		return status
+	case t.scopeErr == nil && t.scope.outside(p) != "":
+		counts["outside"]++
+		return "outside tono's scope: " + t.scope.outside(p)
+	default:
+		counts["waiting"]++
+		return "not reviewed yet"
 	}
+}
 
-	fmt.Fprintf(&b, "%d PRs wait for your review. Tono has reviewed %d (code, docs and comments)", len(queue), counts["reviewed"])
+// summary is the sentence after a section's count: what tono made of the PRs.
+func (t *reviewTally) summary(env Env, counts map[string]int, threadBefore int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, " Tono has reviewed %d (code, docs and comments)", counts["reviewed"])
 	if counts["reviewed"] > 0 {
 		fmt.Fprintf(&b, ": %d ready to approve, %d with follow-ups, %d not mergeable", counts[verdictReady], counts[verdictFollowUps], counts[verdictNotMergeable])
 		if n := counts[""]; n > 0 {
@@ -265,14 +277,81 @@ func reviewSection(ctx context.Context, env Env, queue []SearchPR, queueErr erro
 	if counts["outside"] > 0 {
 		fmt.Fprintf(&b, " %d are outside tono's scope, which is PRs opened by %s in the last %d days.", counts["outside"], env.cfg.TonoTeam, env.cfg.TonoMaxAgeDays)
 	}
-	if scopeErr != nil {
-		fmt.Fprintf(&b, " _Could not load tono's scope: %s_", truncate(scopeErr.Error(), 150))
+	if t.scopeErr != nil {
+		fmt.Fprintf(&b, " _Could not load tono's scope: %s_", truncate(t.scopeErr.Error(), 150))
 	}
-	if len(thread) > 0 {
+	if len(t.thread) > threadBefore {
 		b.WriteString(" New reviews are in the thread.")
 	}
+	return b.String()
+}
+
+func prLine(p SearchPR, status string) string {
+	return fmt.Sprintf("• %s %s (%s): %s", slackLink(p.URL, p.short()), p.Title, p.Author.Login, status)
+}
+
+// reviewSection is the stand-up's "Needs your review" section: a summary of
+// tono's reviews, then one line per PR.
+func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []SearchPR, queueErr error) string {
+	var b strings.Builder
+	b.WriteString("*Needs your review*\n")
+	switch {
+	case queueErr != nil:
+		fmt.Fprintf(&b, "• Could not load review requests: %s\n", truncate(queueErr.Error(), 200))
+		return b.String()
+	case len(queue) == 0:
+		b.WriteString("• None\n")
+		return b.String()
+	}
+
+	before := len(tally.thread)
+	counts := map[string]int{}
+	var lines []string
+	for _, p := range queue {
+		lines = append(lines, prLine(p, tally.status(ctx, env, p, counts)))
+	}
+	fmt.Fprintf(&b, "%d PRs wait for your review.", len(queue))
+	b.WriteString(tally.summary(env, counts, before))
 	b.WriteString("\n\n" + strings.Join(lines, "\n"))
-	return b.String(), thread, posted
+	return b.String()
+}
+
+// teamSection is the stand-up's "Team PRs" section: the team's open PRs in
+// TonoRepos. It skips PRs outside tono's scope, and PRs that ask for your
+// review, because "Needs your review" lists those. It is empty if the
+// section is switched off or has no repos.
+func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchPR, prsErr error, queue []SearchPR) string {
+	if !env.cfg.TonoTeamPRs || len(env.cfg.TonoRepos) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("*Team PRs*\n")
+	if prsErr != nil {
+		fmt.Fprintf(&b, "• Could not load the team's PRs: %s\n", truncate(prsErr.Error(), 200))
+		return b.String()
+	}
+	inQueue := map[string]bool{}
+	for _, p := range queue {
+		inQueue[p.URL] = true
+	}
+	tally.loadScope(ctx, env)
+	before := len(tally.thread)
+	counts := map[string]int{}
+	var lines []string
+	for _, p := range prs {
+		if inQueue[p.URL] || (tally.scopeErr == nil && tally.scope.outside(p) != "") {
+			continue
+		}
+		lines = append(lines, prLine(p, tally.status(ctx, env, p, counts)))
+	}
+	if len(lines) == 0 {
+		fmt.Fprintf(&b, "• None in %s\n", strings.Join(env.cfg.TonoRepos, ", "))
+		return b.String()
+	}
+	fmt.Fprintf(&b, "%d open team PRs in %s.", len(lines), strings.Join(env.cfg.TonoRepos, ", "))
+	b.WriteString(tally.summary(env, counts, before))
+	b.WriteString("\n\n" + strings.Join(lines, "\n"))
+	return b.String()
 }
 
 func ticketLine(v ticketVerdict) string {
@@ -519,23 +598,30 @@ type tonoTarget struct {
 	mine bool
 }
 
-// tonoTargets is your open PRs, then the PRs waiting for your review (people,
-// not bots) unless TonoOwnPRsOnly is set.
+// tonoTargets is your open PRs if TonoMine is set. If TonoTeamPRs is set,
+// the PRs waiting for your review follow, then the open PRs in TonoRepos.
+// Others' PRs are people's, not bots', and runTono checks them against the team scope.
 func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
-	mine, err := myOpenPRs(ctx)
-	if err != nil {
-		return nil, err
-	}
 	var out []tonoTarget
 	seen := map[string]bool{}
-	for _, p := range mine {
-		out = append(out, tonoTarget{pr: p, mine: true})
-		seen[p.URL] = true
+	if env.cfg.TonoMine {
+		mine, err := myOpenPRs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range mine {
+			out = append(out, tonoTarget{pr: p, mine: true})
+			seen[p.URL] = true
+		}
 	}
-	if env.cfg.TonoOwnPRsOnly {
+	if !env.cfg.TonoTeamPRs {
 		return out, nil
 	}
 	requests, err := reviewRequests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inRepos, err := repoPRs(ctx, env.cfg.TonoRepos)
 	if err != nil {
 		return nil, err
 	}
@@ -543,7 +629,7 @@ func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range reviewQueue(requests, me) {
+	for _, p := range append(reviewQueue(requests, me), reviewQueue(inRepos, me)...) {
 		if !seen[p.URL] {
 			out = append(out, tonoTarget{pr: p})
 			seen[p.URL] = true
@@ -567,9 +653,11 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	if err != nil {
 		return err
 	}
-	scope, err := loadScope(ctx, env.cfg, env.now)
-	if err != nil {
-		return err
+	var scope tonoScope
+	if env.cfg.TonoTeamPRs {
+		if scope, err = loadScope(ctx, env.cfg, env.now); err != nil {
+			return err
+		}
 	}
 	var failures []string
 	var netErr error
@@ -583,9 +671,10 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		if env.test && onlyURL == "" && reviewed > 0 {
 			break
 		}
-		// A PR named with --pr is reviewed whatever the scope says.
+		// A PR named with --pr is reviewed whatever the scope says. Your own
+		// PRs are outside the team scope.
 		if onlyURL == "" {
-			if scope.outside(p) != "" || reviewedBefore(env.state, p.repo(), p.Number) {
+			if (!t.mine && scope.outside(p) != "") || reviewedBefore(env.state, p.repo(), p.Number) {
 				continue
 			}
 			onGitHub, err := hasTonoComment(ctx, p.repo(), p.Number)

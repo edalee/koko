@@ -43,11 +43,11 @@ export default function OverlayPage({ open, onClose, title, icon, children }: Ov
 
       {/* Card */}
       <div
-        className={`relative w-[520px] max-h-[70vh] flex flex-col rounded-xl border shadow-2xl glass-overlay inset-highlight ${
+        className={`relative w-[calc(100vw-48px)] h-[calc(100vh-48px)] flex flex-col rounded-xl border shadow-2xl glass-overlay inset-highlight ${
           state === "closing" ? "animate-overlay-out" : "animate-overlay-in"
         }`}
         style={{
-          backgroundColor: "rgba(255, 255, 255, 0.08)",
+          backgroundColor: "rgba(15, 17, 23, 0.94)",
           borderColor: "var(--color-glass-border)",
         }}
         onAnimationEnd={handleAnimationEnd}
@@ -68,7 +68,7 @@ export default function OverlayPage({ open, onClose, title, icon, children }: Ov
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="flex-1 min-h-0">{children}</div>
       </div>
     </div>
   );

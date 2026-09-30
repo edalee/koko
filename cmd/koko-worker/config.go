@@ -45,12 +45,20 @@ type Config struct {
 	TimeZone   string `json:"timeZone"`
 	CalendarID string `json:"calendarId"`
 	TonoPath   string `json:"tonoPath"`
-	// TonoOwnPRsOnly stops tono reviewing the PRs that wait for your review.
-	TonoOwnPRsOnly bool `json:"tonoOwnPRsOnly"`
-	// TonoTeam is "org/team-slug". tono reviews only PRs opened by its members.
-	TonoTeam string `json:"tonoTeam"`
-	// TonoMaxAgeDays is how recently a PR must have been opened for tono to review it.
-	TonoMaxAgeDays int                  `json:"tonoMaxAgeDays"`
+	// TonoMine has tono review your own open PRs, whoever the team is and
+	// however old the PR.
+	TonoMine bool `json:"tonoMine"`
+	// TonoTeamPRs has tono review PRs opened by TonoTeam's members in the last
+	// TonoMaxAgeDays days: the ones that ask for your review, and every open
+	// one in TonoRepos.
+	TonoTeamPRs bool `json:"tonoTeamPRs"`
+	// TonoTeam is "org/team-slug".
+	TonoTeam       string `json:"tonoTeam"`
+	TonoMaxAgeDays int    `json:"tonoMaxAgeDays"`
+	// TonoRepos are "owner/repo" names.
+	TonoRepos []string `json:"tonoRepos"`
+	// TonoOwnPRsOnly is the old switch for TonoTeamPRs. true turns TonoTeamPRs off.
+	TonoOwnPRsOnly bool                 `json:"tonoOwnPRsOnly,omitempty"`
 	Slack          SlackConfig          `json:"slack"`
 	Focus          FocusConfig          `json:"focus"`
 	Jobs           map[string]JobConfig `json:"jobs"`
@@ -63,6 +71,8 @@ func defaultConfig() Config {
 		TimeZone:       "Europe/Stockholm",
 		CalendarID:     "primary",
 		TonoPath:       filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
+		TonoMine:       true,
+		TonoTeamPRs:    true,
 		TonoTeam:       "epidemicsound/content-protection",
 		TonoMaxAgeDays: 4,
 		Focus:          FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
@@ -142,6 +152,16 @@ func (c *Config) fillDefaults() {
 	if c.TonoMaxAgeDays <= 0 {
 		c.TonoMaxAgeDays = def.TonoMaxAgeDays
 	}
+	if c.TonoOwnPRsOnly {
+		c.TonoTeamPRs = false
+	}
+	var repos []string
+	for _, r := range c.TonoRepos {
+		if r = strings.TrimSpace(r); r != "" {
+			repos = append(repos, r)
+		}
+	}
+	c.TonoRepos = repos
 	if c.Focus.WindowStart == "" {
 		c.Focus.WindowStart = def.Focus.WindowStart
 	}
@@ -187,6 +207,11 @@ func (c Config) validate() error {
 	}
 	if org, team, ok := strings.Cut(c.TonoTeam, "/"); !ok || org == "" || team == "" {
 		return fmt.Errorf("tono team %q, want org/team-slug", c.TonoTeam)
+	}
+	for _, r := range c.TonoRepos {
+		if owner, name, ok := strings.Cut(r, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return fmt.Errorf("tono repo %q, want owner/repo", r)
+		}
 	}
 	for _, t := range []string{c.Focus.WindowStart, c.Focus.WindowEnd} {
 		if _, _, err := parseClock(t); err != nil {

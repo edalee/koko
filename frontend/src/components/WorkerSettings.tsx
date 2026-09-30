@@ -33,9 +33,12 @@ interface WorkerConfig {
   timeZone: string;
   calendarId: string;
   tonoPath: string;
-  tonoOwnPRsOnly: boolean;
+  tonoMine: boolean;
+  tonoTeamPRs: boolean;
   tonoTeam: string;
   tonoMaxAgeDays: number;
+  tonoRepos: string[];
+  tonoOwnPRsOnly?: boolean; // old switch, read once by merge()
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
   jobs: Record<string, JobConfig>;
@@ -68,9 +71,11 @@ const DEFAULTS: WorkerConfig = {
   timeZone: "Europe/Stockholm",
   calendarId: "primary",
   tonoPath: "",
-  tonoOwnPRsOnly: false,
+  tonoMine: true,
+  tonoTeamPRs: true,
   tonoTeam: "epidemicsound/content-protection",
   tonoMaxAgeDays: 4,
+  tonoRepos: [],
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
   jobs: {
@@ -84,7 +89,8 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
   {
     key: "standup",
     name: "Stand-up",
-    about: "Today's meetings, approved PRs ready to merge, and PRs waiting for your review.",
+    about:
+      "Today's meetings, approved PRs ready to merge, PRs waiting for your review, and team PRs.",
     multi: false,
   },
   {
@@ -97,7 +103,7 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
     key: "tono",
     name: "Tono reviews",
     about:
-      "Reviews each new commit on your open PRs and on the PRs waiting for your review. Posts nothing to GitHub.",
+      "Reviews each PR once and posts nothing to GitHub. Reviews of your PRs come by DM. Reviews of team PRs go in the stand-up.",
     multi: true,
   },
 ];
@@ -120,10 +126,12 @@ const CONNECTION_NAMES: Record<string, string> = {
 };
 
 function merge(raw: string): WorkerConfig {
-  const parsed = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
+  const { tonoOwnPRsOnly, ...parsed } = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
   return {
     ...DEFAULTS,
+    ...(tonoOwnPRsOnly ? { tonoTeamPRs: false } : {}),
     ...parsed,
+    tonoRepos: parsed.tonoRepos ?? [],
     slack: { ...DEFAULTS.slack, ...parsed.slack },
     focus: { ...DEFAULTS.focus, ...parsed.focus },
     jobs: { ...DEFAULTS.jobs, ...parsed.jobs },
@@ -153,11 +161,86 @@ function Toggle({ id, on, onClick }: { id: string; on: boolean; onClick: () => v
     >
       <span
         className={cn(
-          "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
+          "absolute left-0 top-[2px] size-[14px] rounded-full bg-white transition-transform",
           on ? "translate-x-[16px]" : "translate-x-[2px]",
         )}
       />
     </button>
+  );
+}
+
+// RepoList adds and removes "owner/repo" names. A bare name means epidemicsound/<name>.
+function RepoList({ repos, onChange }: { repos: string[]; onChange: (next: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const add = () => {
+    const name = draft.trim();
+    setProblem(null);
+    if (!name) return;
+    if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(name)) {
+      setProblem("Use owner/repo, or a bare repo name");
+      return;
+    }
+    const full = name.includes("/") ? name : `epidemicsound/${name}`;
+    if (repos.some((r) => r.toLowerCase() === full.toLowerCase())) {
+      setProblem("Already in the list");
+      return;
+    }
+    onChange([...repos, full]);
+    setDraft("");
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {repos.map((repo) => (
+          <span
+            key={repo}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-white/[0.05] border border-white/[0.08] text-white/85 font-mono"
+          >
+            {repo}
+            <button
+              type="button"
+              onClick={() => onChange(repos.filter((r) => r !== repo))}
+              className="opacity-50 hover:opacity-100 hover:text-error transition-opacity"
+              title={`Remove ${repo}`}
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        {repos.length === 0 && (
+          <span className="text-[10px] text-tertiary">
+            No repos yet. Only PRs that ask for your review are reviewed.
+          </span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="owner/repo, or repo for epidemicsound"
+          className={cn(inputClass, "flex-1 py-1.5 font-mono placeholder:text-tertiary")}
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={!draft.trim()}
+          className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Plus className="size-3" />
+          <span className="text-white">Add</span>
+        </button>
+      </div>
+      {problem && <p className="text-[10px] text-error">{problem}</p>}
+    </div>
   );
 }
 
@@ -256,7 +339,7 @@ export default function WorkerSettings() {
         : "stopped";
 
   return (
-    <div className="space-y-4 pt-3 border-t border-white/[0.06]">
+    <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h4 className="text-sm text-white font-medium">Worker</h4>
@@ -311,13 +394,11 @@ export default function WorkerSettings() {
           placeholder="Your Slack member ID, U02F4AZV2"
           className={cn(inputClass, "w-full py-1.5 font-mono placeholder:text-tertiary")}
         />
-        <p className="text-[10px] text-tertiary">
-          A separate bot from the Slack Bot above. It needs the chat:write scope.
-        </p>
+        <p className="text-[10px] text-tertiary">It needs the chat:write scope.</p>
       </div>
 
       {/* Jobs */}
-      <div className="space-y-3">
+      <div className="space-y-5">
         {JOBS.map(({ key, name, about, multi }) => {
           const job = cfg.jobs[key] ?? DEFAULTS.jobs[key];
           const last = status?.jobs?.[key]?.lastRun;
@@ -421,43 +502,76 @@ export default function WorkerSettings() {
               )}
 
               {key === "tono" && (
-                <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
-                  <span>PRs opened by</span>
-                  <input
-                    type="text"
-                    value={cfg.tonoTeam}
-                    onChange={(e) => setCfg({ ...cfg, tonoTeam: e.target.value })}
-                    onBlur={() => save(cfg)}
-                    placeholder="org/team-slug"
-                    className={cn(
-                      inputClass,
-                      "flex-1 min-w-40 font-mono placeholder:text-tertiary",
-                    )}
-                  />
-                  <span>in the last</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={cfg.tonoMaxAgeDays}
-                    onChange={(e) =>
-                      save({ ...cfg, tonoMaxAgeDays: Number.parseInt(e.target.value, 10) || 0 })
-                    }
-                    className={cn(inputClass, "w-12 tabular-nums")}
-                  />
-                  <span>days, one review each</span>
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <label htmlFor="tono-mine" className="text-xs text-white/80">
+                        My PRs
+                      </label>
+                      <p className="text-[10px] text-tertiary">Every open PR you opened.</p>
+                    </div>
+                    <Toggle
+                      id="tono-mine"
+                      on={cfg.tonoMine}
+                      onClick={() => save({ ...cfg, tonoMine: !cfg.tonoMine })}
+                    />
+                  </div>
                 </div>
               )}
 
               {key === "tono" && (
-                <div className="flex items-center justify-between gap-2">
-                  <label htmlFor="tono-queue" className="text-[10px] text-tertiary">
-                    Also review PRs waiting for your review. Results go in the stand-up.
-                  </label>
-                  <Toggle
-                    id="tono-queue"
-                    on={!cfg.tonoOwnPRsOnly}
-                    onClick={() => save({ ...cfg, tonoOwnPRsOnly: !cfg.tonoOwnPRsOnly })}
-                  />
+                <div className="space-y-2.5 pt-3 border-t border-white/[0.05]">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <label htmlFor="tono-team" className="text-xs text-white/80">
+                        Team PRs
+                      </label>
+                      <p className="text-[10px] text-tertiary">
+                        PRs that ask for your review, and every open PR in the repos below.
+                      </p>
+                    </div>
+                    <Toggle
+                      id="tono-team"
+                      on={cfg.tonoTeamPRs}
+                      onClick={() => save({ ...cfg, tonoTeamPRs: !cfg.tonoTeamPRs })}
+                    />
+                  </div>
+                  {cfg.tonoTeamPRs && (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
+                        <span>Opened by</span>
+                        <input
+                          type="text"
+                          value={cfg.tonoTeam}
+                          onChange={(e) => setCfg({ ...cfg, tonoTeam: e.target.value })}
+                          onBlur={() => save(cfg)}
+                          placeholder="org/team-slug"
+                          className={cn(
+                            inputClass,
+                            "flex-1 min-w-40 font-mono placeholder:text-tertiary",
+                          )}
+                        />
+                        <span>in the last</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={cfg.tonoMaxAgeDays}
+                          onChange={(e) =>
+                            save({
+                              ...cfg,
+                              tonoMaxAgeDays: Number.parseInt(e.target.value, 10) || 0,
+                            })
+                          }
+                          className={cn(inputClass, "w-12 tabular-nums")}
+                        />
+                        <span>days</span>
+                      </div>
+                      <RepoList
+                        repos={cfg.tonoRepos}
+                        onChange={(tonoRepos) => save({ ...cfg, tonoRepos })}
+                      />
+                    </>
+                  )}
                 </div>
               )}
 

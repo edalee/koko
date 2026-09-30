@@ -154,21 +154,29 @@ func meetings(events []GCalEvent, loc *time.Location) []string {
 		if title == "" {
 			title = "(no title)"
 		}
-		if e.allDay() {
-			out = append(out, "All day: "+title)
-			continue
-		}
 		s, en, err := e.times(loc)
 		if err != nil {
 			continue
 		}
-		line := fmt.Sprintf("%s–%s %s", s.Format("15:04"), en.Format("15:04"), title)
+		var line string
+		if e.allDay() || spansWholeDays(s, en) {
+			line = "All day: " + title
+		} else {
+			line = fmt.Sprintf("%s–%s %s", s.Format("15:04"), en.Format("15:04"), title)
+		}
 		if r := e.myResponse(); r == "needsAction" || r == "tentative" {
 			line += " _(" + map[string]string{"needsAction": "not answered", "tentative": "tentative"}[r] + ")_"
 		}
 		out = append(out, line)
 	}
 	return out
+}
+
+// spansWholeDays reports a timed event that runs from one midnight to a later
+// one. Some invites are sent this way instead of as all-day events.
+func spansWholeDays(s, en time.Time) bool {
+	midnight := func(t time.Time) bool { return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 }
+	return en.After(s) && midnight(s) && midnight(en)
 }
 
 // listEvents fetches one day's events through the Google Calendar connector.

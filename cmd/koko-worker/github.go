@@ -166,6 +166,20 @@ func reviewRequests(ctx context.Context) ([]SearchPR, error) {
 	return prs, err
 }
 
+// repoPRs is every open, non-draft PR in the repos, by anyone.
+func repoPRs(ctx context.Context, repos []string) ([]SearchPR, error) {
+	if len(repos) == 0 {
+		return nil, nil
+	}
+	args := []string{"search", "prs", "--state", "open", "--draft=false"}
+	for _, r := range repos {
+		args = append(args, "--repo", r)
+	}
+	var prs []SearchPR
+	err := ghJSON(ctx, &prs, append(args, "--json", searchFields, "--limit", "200")...)
+	return prs, err
+}
+
 func prDetail(ctx context.Context, url string) (PRDetail, error) {
 	var d PRDetail
 	err := ghJSON(ctx, &d, "pr", "view", url, "--json",

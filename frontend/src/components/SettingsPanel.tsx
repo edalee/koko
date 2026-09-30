@@ -1,5 +1,18 @@
-import { Check, Copy, Eye, EyeOff, Loader2, Plus, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import {
+  Bot,
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Github,
+  HeartPulse,
+  Loader2,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
   ClearHiddenPRs,
   GetConfig,
@@ -24,11 +37,23 @@ const BREAK_PRESETS = [
   { label: "45 / 5", work: 45, rest: 5 },
 ];
 
+type Tab = "general" | "safe" | "slack" | "github" | "worker";
+
+const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+  { id: "general", label: "General", icon: <SlidersHorizontal className="size-4" /> },
+  { id: "safe", label: "Safe working", icon: <HeartPulse className="size-4" /> },
+  // Hidden until the Slack DM bot is dropped or rebuilt (plan 029, still to do).
+  // { id: "slack", label: "Slack", icon: <MessageSquare className="size-4" /> },
+  { id: "github", label: "GitHub", icon: <Github className="size-4" /> },
+  { id: "worker", label: "Worker", icon: <Bot className="size-4" /> },
+];
+
 export default function SettingsPanel({
   safeWorkingConfig,
   onSafeWorkingChange,
   onReposChanged,
 }: SettingsPanelProps) {
+  const [tab, setTab] = useState<Tab>("general");
   const [slackToken, setSlackToken] = useState("");
   const [slackOwnerID, setSlackOwnerID] = useState("");
   const [showToken, setShowToken] = useState(false);
@@ -124,435 +149,469 @@ export default function SettingsPanel({
     }
   }, [slackToken]);
 
+  // Every section stays mounted, so a switch of tab keeps unsaved input and a running worker test.
+  const shown = (id: Tab) => tab !== id && "hidden";
+
   return (
-    <div className="p-4 space-y-6">
-      {/* Slack Bot */}
-      <div className="space-y-3">
-        <div>
-          <h4 className="text-sm text-white font-medium">Slack Bot</h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            DM the bot to control Koko sessions from Slack.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="slack-token" className="text-xs text-muted-foreground">
-            Bot Token
-          </label>
-          <div className="relative">
-            <input
-              id="slack-token"
-              type={showToken ? "text" : "password"}
-              value={slackToken}
-              onChange={(e) => setSlackToken(e.target.value)}
-              placeholder="xoxb-..."
-              className="w-full px-3 py-2 pr-10 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave();
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShowToken(!showToken)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-white transition-colors"
-            >
-              {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            </button>
-          </div>
-          <p className="text-[10px] text-tertiary">
-            Bot token scopes: im:history, im:read, chat:write
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="slack-owner" className="text-xs text-muted-foreground">
-            Your Slack Member ID
-          </label>
-          <input
-            id="slack-owner"
-            type="text"
-            value={slackOwnerID}
-            onChange={(e) => setSlackOwnerID(e.target.value)}
-            placeholder="U02F4AZV2"
-            className="w-full px-3 py-2 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
-          />
-          <p className="text-[10px] text-tertiary">
-            Only respond to DMs from this user. Find in Slack profile → ⋯ → Copy member ID.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <div className="flex h-full">
+      <nav className="w-48 shrink-0 p-3 space-y-1.5 border-r border-white/[0.08]">
+        {TABS.map((t) => (
           <button
+            key={t.id}
             type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-50"
-          >
-            {saving ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : saved ? (
-              <Check className="size-3.5 text-accent" />
-            ) : null}
-            <span className="text-white">{saved ? "Saved" : "Save Token"}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Safe Working */}
-      <div className="space-y-4 pt-3 border-t border-white/[0.06]">
-        <div>
-          <h4 className="text-sm text-white font-medium">Safe Working</h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            Set boundaries to protect your wellbeing.
-          </p>
-        </div>
-
-        {/* Quiet Hours */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label htmlFor="quiet-toggle" className="text-xs text-white/80">
-              Quiet Hours
-            </label>
-            <button
-              id="quiet-toggle"
-              type="button"
-              onClick={() =>
-                onSafeWorkingChange({
-                  ...safeWorkingConfig,
-                  quietHoursEnabled: !safeWorkingConfig.quietHoursEnabled,
-                })
-              }
-              className={cn(
-                "w-8 h-[18px] rounded-full transition-colors relative",
-                safeWorkingConfig.quietHoursEnabled ? "bg-accent" : "bg-white/[0.12]",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
-                  safeWorkingConfig.quietHoursEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
-                )}
-              />
-            </button>
-          </div>
-          <p className="text-[10px] text-tertiary">Block access during set hours.</p>
-          {safeWorkingConfig.quietHoursEnabled && (
-            <div className="flex items-center gap-2">
-              <input
-                type="time"
-                value={safeWorkingConfig.quietHoursStart}
-                onChange={(e) =>
-                  onSafeWorkingChange({ ...safeWorkingConfig, quietHoursStart: e.target.value })
-                }
-                className="px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 [color-scheme:dark]"
-              />
-              <span className="text-xs text-muted-foreground">to</span>
-              <input
-                type="time"
-                value={safeWorkingConfig.quietHoursEnd}
-                onChange={(e) =>
-                  onSafeWorkingChange({ ...safeWorkingConfig, quietHoursEnd: e.target.value })
-                }
-                className="px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 [color-scheme:dark]"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Break Reminders */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label htmlFor="break-toggle" className="text-xs text-white/80">
-              Break Reminders
-            </label>
-            <button
-              id="break-toggle"
-              type="button"
-              onClick={() =>
-                onSafeWorkingChange({
-                  ...safeWorkingConfig,
-                  breakEnabled: !safeWorkingConfig.breakEnabled,
-                })
-              }
-              className={cn(
-                "w-8 h-[18px] rounded-full transition-colors relative",
-                safeWorkingConfig.breakEnabled ? "bg-accent" : "bg-white/[0.12]",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
-                  safeWorkingConfig.breakEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
-                )}
-              />
-            </button>
-          </div>
-          <p className="text-[10px] text-tertiary">Scheduled breaks at regular intervals.</p>
-          {safeWorkingConfig.breakEnabled && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <label htmlFor="work-mins" className="text-[10px] text-tertiary block mb-1">
-                    Work (min)
-                  </label>
-                  <input
-                    id="work-mins"
-                    type="number"
-                    min={1}
-                    value={safeWorkingConfig.workMinutes}
-                    onChange={(e) =>
-                      onSafeWorkingChange({
-                        ...safeWorkingConfig,
-                        workMinutes: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
-                      })
-                    }
-                    className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label htmlFor="break-mins" className="text-[10px] text-tertiary block mb-1">
-                    Break (min)
-                  </label>
-                  <input
-                    id="break-mins"
-                    type="number"
-                    min={1}
-                    value={safeWorkingConfig.breakMinutes}
-                    onChange={(e) =>
-                      onSafeWorkingChange({
-                        ...safeWorkingConfig,
-                        breakMinutes: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
-                      })
-                    }
-                    className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {BREAK_PRESETS.map((p) => (
-                  <button
-                    key={p.label}
-                    type="button"
-                    onClick={() =>
-                      onSafeWorkingChange({
-                        ...safeWorkingConfig,
-                        workMinutes: p.work,
-                        breakMinutes: p.rest,
-                      })
-                    }
-                    className={cn(
-                      "px-2 py-0.5 text-[10px] rounded transition-colors",
-                      safeWorkingConfig.workMinutes === p.work &&
-                        safeWorkingConfig.breakMinutes === p.rest
-                        ? "bg-white/[0.08] text-white"
-                        : "text-tertiary hover:text-muted-foreground hover:bg-white/[0.04]",
-                    )}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-                <span className="text-[10px] text-tertiary ml-1">work / break</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Remote API */}
-      <div className="space-y-3 pt-3 border-t border-white/[0.06]">
-        <div>
-          <h4 className="text-sm text-white font-medium">Remote API</h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            HTTP/WebSocket API for MCP, Slack commands, and CLI access.
-          </p>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <label htmlFor="api-toggle" className="text-xs text-white/80">
-            Enabled
-          </label>
-          <button
-            id="api-toggle"
-            type="button"
-            onClick={async () => {
-              const next = !apiEnabled;
-              setApiEnabled(next);
-              const config = await GetConfig();
-              config.apiEnabled = next;
-              await SaveConfig(config);
-            }}
+            onClick={() => setTab(t.id)}
             className={cn(
-              "w-8 h-[18px] rounded-full transition-colors relative",
-              apiEnabled ? "bg-accent" : "bg-white/[0.12]",
+              "w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg transition-colors",
+              tab === t.id
+                ? "bg-white/[0.08] text-white"
+                : "text-muted-foreground hover:text-white hover:bg-white/[0.04]",
             )}
           >
-            <span
-              className={cn(
-                "absolute top-[2px] size-[14px] rounded-full bg-white transition-transform",
-                apiEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
-              )}
-            />
+            <span className={tab === t.id ? "text-accent" : undefined}>{t.icon}</span>
+            {t.label}
           </button>
-        </div>
+        ))}
+      </nav>
 
-        {apiEnabled && (
-          <>
-            <div className="space-y-1">
-              <label htmlFor="api-port" className="text-[10px] text-tertiary">
-                Port
-              </label>
-              <input
-                id="api-port"
-                type="number"
-                value={apiPort}
-                onChange={async (e) => {
-                  const port = Number.parseInt(e.target.value, 10) || 19876;
-                  setApiPort(port);
-                  const config = await GetConfig();
-                  config.apiPort = port;
-                  await SaveConfig(config);
-                }}
-                className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums font-mono"
-              />
+      <div className="flex-1 min-w-0 overflow-y-auto">
+        <div className="max-w-2xl p-6">
+          {/* Slack Bot */}
+          <div className={cn("space-y-3", shown("slack"))}>
+            <div>
+              <h4 className="text-sm text-white font-medium">Slack Bot</h4>
+              <p className="text-xs text-muted-foreground mt-1">
+                DM the bot to control Koko sessions from Slack.
+              </p>
             </div>
 
-            <div className="space-y-1">
-              <label htmlFor="api-key-display" className="text-[10px] text-tertiary">
-                API Key
+            <div className="space-y-2">
+              <label htmlFor="slack-token" className="text-xs text-muted-foreground">
+                Bot Token
               </label>
-              <div className="flex items-center gap-2">
-                <code
-                  id="api-key-display"
-                  className="flex-1 px-2 py-1 text-[10px] bg-white/[0.04] border border-white/[0.06] rounded-md text-white/60 font-mono truncate"
-                >
-                  {apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-8)}` : "generating..."}
-                </code>
+              <div className="relative">
+                <input
+                  id="slack-token"
+                  type={showToken ? "text" : "password"}
+                  value={slackToken}
+                  onChange={(e) => setSlackToken(e.target.value)}
+                  placeholder="xoxb-..."
+                  className="w-full px-3 py-2 pr-10 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSave();
+                  }}
+                />
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(apiKey);
-                    setKeyCopied(true);
-                    setTimeout(() => setKeyCopied(false), 2000);
-                  }}
-                  className="p-1.5 rounded-md border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
-                  title="Copy API key"
+                  onClick={() => setShowToken(!showToken)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-white transition-colors"
                 >
-                  {keyCopied ? (
-                    <Check className="size-3 text-accent" />
-                  ) : (
-                    <Copy className="size-3 text-muted-foreground" />
-                  )}
+                  {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                 </button>
               </div>
               <p className="text-[10px] text-tertiary">
-                Used by MCP server and koko-cli. Auto-generated on first run.
+                Bot token scopes: im:history, im:read, chat:write
               </p>
             </div>
-          </>
-        )}
-      </div>
 
-      {/* GitHub */}
-      <div className="space-y-3 pt-3 border-t border-white/[0.06]">
-        <div>
-          <h4 className="text-sm text-white font-medium">GitHub</h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            Watch repos for PRs and manage hidden ones.
-          </p>
-        </div>
+            <div className="space-y-2">
+              <label htmlFor="slack-owner" className="text-xs text-muted-foreground">
+                Your Slack Member ID
+              </label>
+              <input
+                id="slack-owner"
+                type="text"
+                value={slackOwnerID}
+                onChange={(e) => setSlackOwnerID(e.target.value)}
+                placeholder="U02F4AZV2"
+                className="w-full px-3 py-2 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
+              />
+              <p className="text-[10px] text-tertiary">
+                Only respond to DMs from this user. Find in Slack profile → ⋯ → Copy member ID.
+              </p>
+            </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-white/80">
-              Tracked Repos <span className="text-tertiary">({trackedRepos.length})</span>
-            </p>
-            {reposSaved && <Check className="size-3 text-accent" />}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {trackedRepos.map((repo) => (
-              <span
-                key={repo}
-                className="group inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-white/[0.05] border border-white/[0.08] text-white/85 font-mono"
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-50"
               >
-                {repo}
+                {saving ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : saved ? (
+                  <Check className="size-3.5 text-accent" />
+                ) : null}
+                <span className="text-white">{saved ? "Saved" : "Save Token"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Safe Working */}
+          <div className={cn("space-y-4", shown("safe"))}>
+            <div>
+              <h4 className="text-sm text-white font-medium">Safe Working</h4>
+              <p className="text-xs text-muted-foreground mt-1">
+                Set boundaries to protect your wellbeing.
+              </p>
+            </div>
+
+            {/* Quiet Hours */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label htmlFor="quiet-toggle" className="text-xs text-white/80">
+                  Quiet Hours
+                </label>
+                <button
+                  id="quiet-toggle"
+                  type="button"
+                  onClick={() =>
+                    onSafeWorkingChange({
+                      ...safeWorkingConfig,
+                      quietHoursEnabled: !safeWorkingConfig.quietHoursEnabled,
+                    })
+                  }
+                  className={cn(
+                    "w-8 h-[18px] rounded-full transition-colors relative",
+                    safeWorkingConfig.quietHoursEnabled ? "bg-accent" : "bg-white/[0.12]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute left-0 top-[2px] size-[14px] rounded-full bg-white transition-transform",
+                      safeWorkingConfig.quietHoursEnabled
+                        ? "translate-x-[16px]"
+                        : "translate-x-[2px]",
+                    )}
+                  />
+                </button>
+              </div>
+              <p className="text-[10px] text-tertiary">Block access during set hours.</p>
+              {safeWorkingConfig.quietHoursEnabled && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={safeWorkingConfig.quietHoursStart}
+                    onChange={(e) =>
+                      onSafeWorkingChange({ ...safeWorkingConfig, quietHoursStart: e.target.value })
+                    }
+                    className="px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 [color-scheme:dark]"
+                  />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <input
+                    type="time"
+                    value={safeWorkingConfig.quietHoursEnd}
+                    onChange={(e) =>
+                      onSafeWorkingChange({ ...safeWorkingConfig, quietHoursEnd: e.target.value })
+                    }
+                    className="px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 [color-scheme:dark]"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Break Reminders */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label htmlFor="break-toggle" className="text-xs text-white/80">
+                  Break Reminders
+                </label>
+                <button
+                  id="break-toggle"
+                  type="button"
+                  onClick={() =>
+                    onSafeWorkingChange({
+                      ...safeWorkingConfig,
+                      breakEnabled: !safeWorkingConfig.breakEnabled,
+                    })
+                  }
+                  className={cn(
+                    "w-8 h-[18px] rounded-full transition-colors relative",
+                    safeWorkingConfig.breakEnabled ? "bg-accent" : "bg-white/[0.12]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute left-0 top-[2px] size-[14px] rounded-full bg-white transition-transform",
+                      safeWorkingConfig.breakEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
+                    )}
+                  />
+                </button>
+              </div>
+              <p className="text-[10px] text-tertiary">Scheduled breaks at regular intervals.</p>
+              {safeWorkingConfig.breakEnabled && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <label htmlFor="work-mins" className="text-[10px] text-tertiary block mb-1">
+                        Work (min)
+                      </label>
+                      <input
+                        id="work-mins"
+                        type="number"
+                        min={1}
+                        value={safeWorkingConfig.workMinutes}
+                        onChange={(e) =>
+                          onSafeWorkingChange({
+                            ...safeWorkingConfig,
+                            workMinutes: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                          })
+                        }
+                        className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label htmlFor="break-mins" className="text-[10px] text-tertiary block mb-1">
+                        Break (min)
+                      </label>
+                      <input
+                        id="break-mins"
+                        type="number"
+                        min={1}
+                        value={safeWorkingConfig.breakMinutes}
+                        onChange={(e) =>
+                          onSafeWorkingChange({
+                            ...safeWorkingConfig,
+                            breakMinutes: Math.max(1, Number.parseInt(e.target.value, 10) || 1),
+                          })
+                        }
+                        className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {BREAK_PRESETS.map((p) => (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() =>
+                          onSafeWorkingChange({
+                            ...safeWorkingConfig,
+                            workMinutes: p.work,
+                            breakMinutes: p.rest,
+                          })
+                        }
+                        className={cn(
+                          "px-2 py-0.5 text-[10px] rounded transition-colors",
+                          safeWorkingConfig.workMinutes === p.work &&
+                            safeWorkingConfig.breakMinutes === p.rest
+                            ? "bg-white/[0.08] text-white"
+                            : "text-tertiary hover:text-muted-foreground hover:bg-white/[0.04]",
+                        )}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <span className="text-[10px] text-tertiary ml-1">work / break</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Remote API */}
+          <div className={cn("space-y-3", shown("general"))}>
+            <div>
+              <h4 className="text-sm text-white font-medium">Remote API</h4>
+              <p className="text-xs text-muted-foreground mt-1">
+                HTTP/WebSocket API for MCP, Slack commands, and CLI access.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label htmlFor="api-toggle" className="text-xs text-white/80">
+                Enabled
+              </label>
+              <button
+                id="api-toggle"
+                type="button"
+                onClick={async () => {
+                  const next = !apiEnabled;
+                  setApiEnabled(next);
+                  const config = await GetConfig();
+                  config.apiEnabled = next;
+                  await SaveConfig(config);
+                }}
+                className={cn(
+                  "w-8 h-[18px] rounded-full transition-colors relative",
+                  apiEnabled ? "bg-accent" : "bg-white/[0.12]",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute left-0 top-[2px] size-[14px] rounded-full bg-white transition-transform",
+                    apiEnabled ? "translate-x-[16px]" : "translate-x-[2px]",
+                  )}
+                />
+              </button>
+            </div>
+
+            {apiEnabled && (
+              <>
+                <div className="space-y-1">
+                  <label htmlFor="api-port" className="text-[10px] text-tertiary">
+                    Port
+                  </label>
+                  <input
+                    id="api-port"
+                    type="number"
+                    value={apiPort}
+                    onChange={async (e) => {
+                      const port = Number.parseInt(e.target.value, 10) || 19876;
+                      setApiPort(port);
+                      const config = await GetConfig();
+                      config.apiPort = port;
+                      await SaveConfig(config);
+                    }}
+                    className="w-full px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40 tabular-nums font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="api-key-display" className="text-[10px] text-tertiary">
+                    API Key
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <code
+                      id="api-key-display"
+                      className="flex-1 px-2 py-1 text-[10px] bg-white/[0.04] border border-white/[0.06] rounded-md text-white/60 font-mono truncate"
+                    >
+                      {apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-8)}` : "generating..."}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(apiKey);
+                        setKeyCopied(true);
+                        setTimeout(() => setKeyCopied(false), 2000);
+                      }}
+                      className="p-1.5 rounded-md border border-white/[0.08] hover:bg-white/[0.06] transition-colors"
+                      title="Copy API key"
+                    >
+                      {keyCopied ? (
+                        <Check className="size-3 text-accent" />
+                      ) : (
+                        <Copy className="size-3 text-muted-foreground" />
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-tertiary">
+                    Used by MCP server and koko-cli. Auto-generated on first run.
+                  </p>
+                </div>
+              </>
+            )}
+
+            <div className="pt-3 border-t border-white/[0.06]">
+              <p className="text-[10px] text-tertiary">
+                Config stored at ~/.config/koko/config.json
+              </p>
+            </div>
+          </div>
+
+          {/* GitHub */}
+          <div className={cn("space-y-3", shown("github"))}>
+            <div>
+              <h4 className="text-sm text-white font-medium">GitHub</h4>
+              <p className="text-xs text-muted-foreground mt-1">
+                See Git diffs in the app for these repos and their PRs. Follow or unfollow the repos
+                you care about.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-white/80">
+                  Followed repos <span className="text-tertiary">({trackedRepos.length})</span>
+                </p>
+                {reposSaved && <Check className="size-3 text-accent" />}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {trackedRepos.map((repo) => (
+                  <span
+                    key={repo}
+                    className="group inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-white/[0.05] border border-white/[0.08] text-white/85 font-mono"
+                  >
+                    {repo}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRepo(repo)}
+                      className="opacity-50 hover:opacity-100 hover:text-error transition-opacity"
+                      title={`Remove ${repo}`}
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+                {trackedRepos.length === 0 && (
+                  <span className="text-[11px] text-tertiary">
+                    You follow no repos yet. Add one below.
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={newRepo}
+                  onChange={(e) => setNewRepo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddRepo();
+                    }
+                  }}
+                  placeholder="owner/repo or repo (defaults to epidemicsound)"
+                  className="flex-1 px-2.5 py-1.5 text-[12px] font-mono bg-white/[0.04] border border-white/[0.08] rounded-md text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
+                />
                 <button
                   type="button"
-                  onClick={() => handleRemoveRepo(repo)}
-                  className="opacity-50 hover:opacity-100 hover:text-error transition-opacity"
-                  title={`Remove ${repo}`}
+                  onClick={handleAddRepo}
+                  disabled={!newRepo.trim()}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <X className="size-3" />
+                  <Plus className="size-3" />
+                  <span className="text-white">Add</span>
                 </button>
-              </span>
-            ))}
-            {trackedRepos.length === 0 && (
-              <span className="text-[11px] text-tertiary">No repos tracked — add one below.</span>
-            )}
+              </div>
+              {repoError && <p className="text-[10px] text-error">{repoError}</p>}
+              <p className="text-[10px] text-tertiary">
+                Bare names resolve to <span className="font-mono">epidemicsound/&lt;name&gt;</span>.
+                Use full <span className="font-mono">owner/repo</span> to track other orgs.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
+              <div>
+                <p className="text-xs text-white/80">Hidden PRs</p>
+                <p className="text-[10px] text-tertiary">
+                  {hiddenPRCount} {hiddenPRCount === 1 ? "PR" : "PRs"} hidden from sidebar
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={hiddenPRCount === 0 || prCleared}
+                onClick={async () => {
+                  await ClearHiddenPRs();
+                  setHiddenPRCount(0);
+                  setPrCleared(true);
+                  setTimeout(() => setPrCleared(false), 2000);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40"
+              >
+                {prCleared ? (
+                  <Check className="size-3 text-accent" />
+                ) : (
+                  <Trash2 className="size-3 text-muted-foreground" />
+                )}
+                <span className="text-white">{prCleared ? "Cleared" : "Clear All"}</span>
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <input
-              value={newRepo}
-              onChange={(e) => setNewRepo(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddRepo();
-                }
-              }}
-              placeholder="owner/repo or repo (defaults to epidemicsound)"
-              className="flex-1 px-2.5 py-1.5 text-[12px] font-mono bg-white/[0.04] border border-white/[0.08] rounded-md text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
-            />
-            <button
-              type="button"
-              onClick={handleAddRepo}
-              disabled={!newRepo.trim()}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Plus className="size-3" />
-              <span className="text-white">Add</span>
-            </button>
+
+          {/* Scheduled jobs: stand-up, focus time and tono reviews */}
+          <div className={cn(shown("worker"))}>
+            <WorkerSettings />
           </div>
-          {repoError && <p className="text-[10px] text-error">{repoError}</p>}
-          <p className="text-[10px] text-tertiary">
-            Bare names resolve to <span className="font-mono">epidemicsound/&lt;name&gt;</span>. Use
-            full <span className="font-mono">owner/repo</span> to track other orgs.
-          </p>
         </div>
-
-        <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
-          <div>
-            <p className="text-xs text-white/80">Hidden PRs</p>
-            <p className="text-[10px] text-tertiary">
-              {hiddenPRCount} {hiddenPRCount === 1 ? "PR" : "PRs"} hidden from sidebar
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={hiddenPRCount === 0 || prCleared}
-            onClick={async () => {
-              await ClearHiddenPRs();
-              setHiddenPRCount(0);
-              setPrCleared(true);
-              setTimeout(() => setPrCleared(false), 2000);
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40"
-          >
-            {prCleared ? (
-              <Check className="size-3 text-accent" />
-            ) : (
-              <Trash2 className="size-3 text-muted-foreground" />
-            )}
-            <span className="text-white">{prCleared ? "Cleared" : "Clear All"}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Scheduled jobs: stand-up, focus time and tono reviews */}
-      <WorkerSettings />
-
-      {/* Config file location */}
-      <div className="pt-3 border-t border-white/[0.06]">
-        <p className="text-[10px] text-tertiary">Config stored at ~/.config/koko/config.json</p>
       </div>
     </div>
   );

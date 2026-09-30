@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -314,9 +315,17 @@ func TestMeetings(t *testing.T) {
 		ev("11:00", "12:00", title("Focus"), func(e *GCalEvent) { e.EventType = "FOCUS_TIME" }),
 		ev("13:00", "14:00", title("Planning"), response("needsAction")),
 		ev("14:00", "15:00", title("Focus"), func(e *GCalEvent) { e.Description = focusMarker }),
+		ev("00:00", "00:00", title("Time report"), response("needsAction"), func(e *GCalEvent) {
+			e.End.DateTime = "2026-09-29T00:00:00+02:00"
+		}),
+		ev("00:00", "00:00", title("Holiday"), func(e *GCalEvent) {
+			e.Start = gcalTime{Date: "2026-09-28"}
+			e.End = gcalTime{Date: "2026-09-29"}
+		}),
 	}
 	got := strings.Join(meetings(events, stockholm), " | ")
-	want := "09:30–09:45 Standup | 13:00–14:00 Planning _(not answered)_"
+	want := "09:30–09:45 Standup | 13:00–14:00 Planning _(not answered)_ | " +
+		"All day: Time report _(not answered)_ | All day: Holiday"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -694,8 +703,77 @@ func TestTonoScopeConfig(t *testing.T) {
 	if cfg.TonoTeam != "epidemicsound/content-protection" || cfg.TonoMaxAgeDays != 4 {
 		t.Errorf("defaults: %q, %d", cfg.TonoTeam, cfg.TonoMaxAgeDays)
 	}
+	if !cfg.TonoMine || !cfg.TonoTeamPRs {
+		t.Errorf("my PRs and team PRs should default on: %v, %v", cfg.TonoMine, cfg.TonoTeamPRs)
+	}
 	cfg.TonoTeam = "content-protection"
 	if cfg.validate() == nil {
 		t.Error("want an error for a team without its org")
+	}
+	cfg = defaultConfig()
+	for _, bad := range []string{"kalimba", "epidemicsound/", "a/b/c"} {
+		cfg.TonoRepos = []string{bad}
+		if cfg.validate() == nil {
+			t.Errorf("want an error for repo %q", bad)
+		}
+	}
+}
+
+func TestLoadConfigTonoPRs(t *testing.T) {
+	load := func(body string) Config {
+		t.Helper()
+		path := t.TempDir() + "/worker.json"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := loadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	// A config from before the split keeps both kinds on.
+	if cfg := load(`{"tonoTeam": "epidemicsound/content-protection"}`); !cfg.TonoMine || !cfg.TonoTeamPRs {
+		t.Errorf("old config: %+v", cfg)
+	}
+	// The old "own PRs only" switch turns team PRs off.
+	if cfg := load(`{"tonoOwnPRsOnly": true}`); !cfg.TonoMine || cfg.TonoTeamPRs {
+		t.Errorf("tonoOwnPRsOnly: mine %v, team %v", cfg.TonoMine, cfg.TonoTeamPRs)
+	}
+	cfg := load(`{"tonoMine": false, "tonoRepos": [" epidemicsound/kalimba ", ""]}`)
+	if cfg.TonoMine || strings.Join(cfg.TonoRepos, ",") != "epidemicsound/kalimba" {
+		t.Errorf("mine %v, repos %q", cfg.TonoMine, cfg.TonoRepos)
+	}
+}
+
+func TestTeamSection(t *testing.T) {
+	pr := func(n int, author, created string) SearchPR {
+		p := SearchPR{URL: fmt.Sprintf("https://github.com/epidemicsound/kalimba/pull/%d", n), Number: n, Title: "Change", CreatedAt: created}
+		p.Repository.NameWithOwner = "epidemicsound/kalimba"
+		p.Author.Login = author
+		return p
+	}
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
+	cfg := defaultConfig()
+	cfg.TonoRepos = []string{"epidemicsound/kalimba"}
+	env := Env{cfg: cfg, now: now, state: &State{}}
+	tally := &reviewTally{loaded: true, scope: tonoScope{
+		team: cfg.TonoTeam, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
+	}}
+	recent := "2026-09-29T10:00:00Z"
+	prs := []SearchPR{
+		pr(1, "alice", recent),                 // listed
+		pr(2, "alice", recent),                 // asks for your review, so listed under "Needs your review"
+		pr(3, "bob", recent),                   // not in the team
+		pr(4, "alice", "2026-09-01T10:00:00Z"), // too old
+	}
+	got := teamSection(context.Background(), env, tally, prs, nil, prs[1:2])
+	if !strings.Contains(got, "1 open team PRs") || !strings.Contains(got, "kalimba#1") ||
+		strings.Contains(got, "kalimba#2") || strings.Contains(got, "kalimba#3") || strings.Contains(got, "kalimba#4") {
+		t.Errorf("team section:\n%s", got)
+	}
+	env.cfg.TonoTeamPRs = false
+	if s := teamSection(context.Background(), env, tally, prs, nil, nil); s != "" {
+		t.Errorf("switched off, got:\n%s", s)
 	}
 }
