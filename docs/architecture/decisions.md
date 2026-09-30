@@ -115,7 +115,7 @@
 
 ## ADR-014: Session persistence and resume with --continue
 - **Date:** 2026-03-08
-- **Status:** Superseded by ADR-028. Sessions still persist, but they resume by explicit conversation id only: the tab's stored id, as a reload uses, or one chosen in the session dialog. Plan 028 step 8 removed `--continue`, because it resumed the newest conversation in a directory, which was often a sibling tab's.
+- **Status:** Superseded by ADR-036
 - **Decision:** Persist session tabs to localStorage, mark as disconnected on app restart/session exit, reconnect with `claude --continue` flag
 - **Rationale:**
   - Users lose context when app restarts — persistence preserves session list
@@ -137,7 +137,7 @@
 
 ## ADR-016: Slack integration with user token and config persistence
 - **Date:** 2026-03-09
-- **Status:** Accepted
+- **Status:** Superseded by ADR-027
 - **Decision:** Real Slack DM + @mention fetching using a user token (`xoxp-`/`xoxe.xoxp-`), stored in `~/.config/koko/config.json` with `0600` permissions. Settings overlay for token configuration with test/debug tools.
 - **Rationale:**
   - User token scopes: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
@@ -237,7 +237,7 @@
 
 ## ADR-024: Slack mentions/threads and unread scoping
 - **Date:** 2026-03-18
-- **Status:** Accepted (updates ADR-016)
+- **Status:** Superseded by ADR-027 (updated ADR-016)
 - **Decision:** Upgraded Slack from bot token DMs-only to user token with mentions, threads, and time-scoped inbox
 - **Changes from ADR-016:**
   - User token (`xoxp-`) instead of bot token — sees all user's DMs
@@ -437,3 +437,51 @@
 - **Open question:** a MacBook with the lid closed may wake only briefly, or only on power. This is not tested yet.
 - **Files:** `cmd/koko-worker/launchd.go`, `cmd/koko-worker/check.go`
 - **Plan:** `docs/plans/029-koko-worker.md`
+
+## ADR-036: Sessions stored by the backend, resumed by conversation id
+- **Date:** 2026-03-26
+- **Status:** Accepted (supersedes ADR-014)
+- **Decision:** Koko stores its tabs and closed-session history in `sessions.json`, through `ConfigService`. A session reopens its Claude conversation with `claude --resume <id>`. `--continue` is only a fallback, for a resume request with no id.
+- **Rationale:**
+  - `SaveSessions` writes to `sessions.json.new`, moves the old file to `sessions.json.bak`, then renames. A crash mid-write never leaves a half-written file.
+  - If `sessions.json` is missing or corrupt, `GetSessions` reads `sessions.json.bak`.
+  - The file lives in the user config directory, under `koko/`, with mode 0600. With neither file present, `GetSessions` migrates old data from WebKit localStorage.
+  - `--continue` opens the newest conversation in a directory. With two sessions in one directory, that is often the other session's conversation.
+  - Koko reads the conversation id from Claude's session files after the first submitted line, and stores it on the tab.
+  - Each session has a slug (`koko-1`), which the API, MCP, Slack bot and CLI use. A recovered session keeps its slug.
+  - At startup, `app.go` seeds the slug counters from `sessions.json` before the frontend can create a session. A new session then never takes a saved tab's slug.
+- **Consequences:**
+  - A disconnected tab opens the session dialog with its conversation preselected. It no longer reconnects silently.
+  - Plan 028 step 8 removes the `--continue` fallback.
+- **Files:** `config_service.go`, `terminal_manager.go`, `app.go`, `frontend/src/hooks/useSessionTabs.ts`
+- **Tests:** `config_service_test.go`, `slug_test.go`, `terminal_manager_test.go`
+- **Plans:** `docs/plans/019-session-identity-and-recovery.md`, `docs/plans/028-session-recovery-and-picker.md`
+
+## ADR-037: Approval detection through Claude's PermissionRequest hook
+- **Date:** 2026-03-26
+- **Status:** Accepted
+- **Decision:** Koko learns that Claude waits for tool approval from Claude Code's `PermissionRequest` hook. It does not match patterns in the terminal output.
+- **Rationale:**
+  - Pattern matching against the output buffer gave false amber icons.
+  - At startup, `installPermissionHook` writes an HTTP hook to `~/.claude/settings.json`. It points at `http://127.0.0.1:<port>/api/hooks/permission-request`, with a 5 second timeout.
+  - The endpoint needs no Bearer token, because the local Claude process has none. The API server listens on `127.0.0.1` only.
+  - The handler matches the session by Claude's conversation id, then by working directory. It marks that session as waiting for approval.
+  - It returns `{}`, so Claude still shows its own prompt. A decision in the reply would approve or deny without the user.
+  - The flag clears when input reaches the session, through `Write` or `WriteKeystrokes`.
+  - `GetSessionState` returns `"approval"` or `"idle"`. The sidebar pulse, reload's confirmation and the API read it. The MCP `get_session_state` tool reaches it through the API.
+- **Consequences:** Koko replaces any other `PermissionRequest` hook entry in `~/.claude/settings.json` with its own.
+- **Files:** `app.go`, `api_server.go`, `terminal_manager.go`, `frontend/src/hooks/useSessionActivity.ts`
+
+## ADR-038: Git worktrees for parallel sessions
+- **Date:** 2026-05-20
+- **Status:** Accepted
+- **Decision:** Koko can start a session in a new git worktree, so parallel sessions on one repo do not share files, branch or index. It drives plain `git worktree` commands through `GitService`.
+- **Rationale:**
+  - `CreateWorktree`, `ListWorktrees`, `RemoveWorktree` and `PruneWorktrees` wrap `git worktree add`, `list --porcelain`, `remove` and `prune`.
+  - The session dialog proposes a new branch and a sibling directory, both with the same random suffix. The toggle starts on when another tab already uses the directory.
+  - The sidebar shows each session's branch, and an amber dot when two sessions share a directory.
+  - The Worktrees module lists the repo's worktrees and flags uncommitted changes. Opening one goes through the session dialog.
+  - A tab records the worktree Koko created for it (`worktreePath`). Closing that tab asks whether to remove it.
+  - Removal tries without `--force` first. Only when git refuses does the dialog offer a forced removal. This protects uncommitted work.
+- **Files:** `git_service.go`, `frontend/src/components/SessionDialog.tsx`, `frontend/src/components/WorktreesModule.tsx`, `frontend/src/components/WorktreeRemovalDialog.tsx`, `frontend/src/hooks/useWorktrees.ts`, `frontend/src/hooks/useSessionBranches.ts`
+- **Plan:** `docs/plans/027-git-worktrees-for-session-isolation.md`

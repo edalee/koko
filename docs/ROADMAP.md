@@ -30,7 +30,7 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Remove Koko's worktrees**: TODO. From Settings, never forced, skipping any with uncommitted changes (plan 028 step 7)
 - [x] **Drop `--continue`**: resume by explicit conversation id only, once the picker covers every entry point (plan 028 step 8)
 - [ ] **Session context polish** — MCP servers, agents, commands panel refinements
-- [ ] **Session grouping** — group sessions by project/directory
+- [x] **Session grouping** — group sessions by project/directory
 - [ ] **Session export** — export terminal scrollback as text/markdown/HTML
 
 ### GitHub
@@ -45,9 +45,9 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Notification sounds** — optional audio alerts for Slack DMs and PR reviews
 
 ### Infrastructure
-- [ ] **Auto-update** — check for new versions and prompt to update
+- [x] **Auto-update** — check for new versions and prompt to update
 - [ ] **Linux support** — test and fix Linux-specific issues
-- [ ] **Homebrew distribution** — `brew install koko`
+- [x] **Homebrew distribution** — `brew install koko`
 - [ ] **Remote API enhancements** — file diffs, GitHub PRs, notifications endpoints
 
 ### Worker

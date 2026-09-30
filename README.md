@@ -42,6 +42,8 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **Approval detection** — Amber pulse on session icons when Claude is waiting for tool approval
 - **Clipboard support** — `Cmd+C` (plain + HTML), `Cmd+Shift+C` (Markdown), right-click context menu
 - **Keyboard shortcuts** — `Cmd+N` new session, `Cmd+W` close, `Cmd+1-9` switch
+- **Terminal search**: `Cmd+F` searches the terminal scrollback
+- **Git worktrees**: The session dialog can create a worktree on a new branch, so parallel sessions on one repo stay apart. The Worktrees module lists, opens and removes them. Closing a session offers to remove the worktree Koko created for it
 
 ### Session Context
 - **MCP Servers** — Connection status of configured MCP servers
@@ -51,14 +53,16 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 
 ### Awareness Panels
 - **GitHub PRs** — Live PR list from your repos with review status, approve/merge actions
+- **PR detail**: A full-screen overlay with the PR's files, diffs, reviews, commits and CI. You can read and reply to review threads and comments
+- **CI status**: GitHub Actions runs for the active branch, in the File Changes module
 - **GitHub Notifications** — Unread notifications with participating/all filter, mark-as-read
 - **File Changes** — Git diff for the active session's directory (staged/unstaged), click to view full diff
 - **Code Viewer** — GitHub-style split/unified diff with syntax highlighting
 
 ### Remote Access
 - **HTTP API** — Control sessions, read output, and stream terminal data over REST/WebSocket on localhost
-- **MCP Server** — Any Claude instance with the Koko MCP configured can list sessions, read output, send input, and manage files. Works with Claude Code, Claude in custom apps, Telegram bots, or any MCP-compatible client. Auto-registered on startup (`koko mcp`)
-- **Slack Bot** — DM the bot: `sessions`, `status`, `send <slug> <text>` — owner-only access
+- **MCP Server** — Any Claude instance with the Koko MCP configured can list sessions, read output, send input, and list file changes. Works with Claude Code, Claude in custom apps, Telegram bots, or any MCP-compatible client. Auto-registered on startup (`koko mcp`)
+- **Slack Bot** — DM the bot: `sessions`, `status`, `send <slug> <text>` — owner-only access. The Slack tab in Settings is hidden, so the bot runs only if `config.json` already holds a bot token. It stays idle otherwise
 - **CLI Companion** — `koko-cli sessions`, `koko-cli tail <slug>`, `koko-cli send <slug> <text>`
 
 ### Safe Working
@@ -139,7 +143,7 @@ You also need an Anthropic API key or active Claude subscription configured for 
 ### Optional Integrations
 
 - **GitHub PRs** — Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`)
-- **Slack Bot** — Create a Slack app with bot scopes `im:history`, `im:read`, `chat:write` — see [Slack Bot Setup](docs/references/slack-bot-setup.md)
+- **Slack Bot** — Create a Slack app with bot scopes `im:history`, `im:read`, `chat:write` — see [Slack Bot Setup](docs/references/slack-bot-setup.md). The Slack tab in Settings is hidden for now, so the guide's Settings steps do not apply
 - **CLI Companion** — Build with `make build-cli`, reads config from `~/Library/Application Support/koko/cli.json`
 - **koko-worker** (macOS only): see [koko-worker setup](#koko-worker-setup)
 
@@ -227,11 +231,11 @@ Kõkõ is built with [Wails v2](https://wails.io/) — a Go backend connected to
 - **Wails IPC** bridges Go ↔ JavaScript with type-safe bindings (Go structs become TypeScript classes)
 - **PTY sessions** stream base64-encoded terminal data over Wails events
 - **API server** exposes sessions, output, and git changes over HTTP/WebSocket for remote access
-- **MCP server** (`koko mcp`) exposes 7 tools for session management — usable by any MCP-compatible Claude client (Claude Code, custom apps, bots)
+- **MCP server** (`koko mcp`) exposes 8 tools for session management — usable by any MCP-compatible Claude client (Claude Code, custom apps, bots)
 - **Slack bot** listens for DMs from the configured owner and responds with session data
 - **koko-worker** runs apart from the app as a launchd agent. Through `worker_service.go`, the app edits `worker.json`, calls the `koko-worker` binary and reads the worker log
-- **Go tests** cover API server, auth, MCP protocol, Slack commands, config, and subscriber fan-out
-- **Vitest** tests guard against terminal resize and state regressions
+- **Go tests** cover API server, auth, MCP protocol, Slack commands, config, subscriber fan-out, conversation listing, conversation ownership and slugs
+- **Vitest** tests guard against terminal resize and state regressions, and cover the session dialog, reconnect and reload
 
 ## Tech Stack
 
@@ -261,14 +265,14 @@ api_server.go              HTTP/WebSocket API server (Bearer auth)
 mcp_server.go              MCP stdio server (JSON-RPC 2.0)
 mcp_tools.go               MCP tool definitions and dispatch
 slack_commands.go           Slack bot DM command handler (owner-only)
-claude_service.go          MCP servers, agents, commands, plugin skills
+claude_service.go          MCP servers, agents, commands, plugin skills, stored conversations
 github_service.go          GitHub PR + notification fetching via gh CLI
-git_service.go             Git file changes, branch info, file diffs
+git_service.go             Git file changes, branch info, file diffs, worktrees
 config_service.go          App config + API key + Slack bot persistence
 process_monitor.go         Child process tree scanning for subagents
 types.go                   Shared Go types
 worker_service.go          Settings panel bridge to koko-worker (config, on/off, run, checks)
-*_test.go                  Go tests (API, MCP, Slack commands, config, subscriber)
+*_test.go                  Go tests (API, MCP, Slack commands, config, subscriber, conversations, ownership, slugs)
 
 cmd/koko-cli/              CLI companion binary
   main.go                  Subcommand dispatch (sessions, status, send, output, tail, files)
@@ -293,16 +297,19 @@ frontend/src/
   components/
     Toolbar.tsx            Title bar with notification badges + update banner
     SessionSidebar.tsx     Session list with approval detection + inline rename
-    RightSidebar.tsx       File changes, session context, subagent monitor
+    RightSidebar.tsx       Modules: file changes (+ CI runs), session context, worktrees, notifications
     TerminalPane.tsx       xterm.js terminal wrapper (one per session)
     QuickTerminal.tsx      Per-session slide-up zsh shell
     ClaudeModeSwitcher.tsx Context usage bar + mode buttons
     CodeViewer.tsx         GitHub-style split/unified diff overlay
-    GitHubPanel.tsx        PR cards with approve/merge actions
+    PRDetailOverlay.tsx    Full-screen PR detail with approve/merge, comments and CI
     NotificationsPanel.tsx GitHub notifications with filter + mark-read
     SessionDialog.tsx      Start or recover a session: directory, history, worktree
     ConversationPicker.tsx New conversation or one of those stored for a directory
-    SettingsPanel.tsx      Slack bot, safe working, remote API config
+    WorktreesModule.tsx    Worktree list in the right sidebar: open or remove
+    WorktreeRemovalDialog.tsx  Offers to remove Koko's worktree when its session closes
+    ConfirmDialog.tsx      Confirmation dialog, for example before a reload
+    SettingsPanel.tsx      Tabs: General (remote API), Safe working, GitHub, Worker. Slack tab hidden
     SafeWorkingOverlay.tsx Quiet hours + break reminder overlays
     OverlayPage.tsx        Glassmorphism floating overlay wrapper
     WorkerSettings.tsx     Worker tab in Settings: jobs, times, checks, log
@@ -319,11 +326,19 @@ frontend/src/
     useOverlay.ts          Floating overlay page management
     useKeyboardShortcuts.ts  Cmd+N/W/1-9 bindings
     useUpdateCheck.ts      Release update polling
+    useCI.ts               GitHub Actions runs for the active branch
+    useWorktrees.ts        Worktree list for the Worktrees module
+    useSessionBranches.ts  Current git branch per session directory
   test/
     setup.ts               Vitest setup with Wails binding mocks
     terminal-resize-guard.test.tsx  Scroll position preservation tests
     quick-terminal-state.test.tsx   Per-session QT state tests
     session-activity.test.ts        Activity tracking tests
+    session-dialog.test.tsx         Session dialog and conversation picker tests
+    reconnect-tab.test.tsx          Disconnected tab reconnect tests
+    reconnect-message.test.ts       Reconnect error message tests
+    reload-session.test.tsx         Reload session tests
+    terminal-search-web.test.tsx    Search Web context menu tests
 
 docs/
   plans/                   Implementation plans (001-029)

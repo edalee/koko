@@ -1,5 +1,7 @@
 # Plan 018: Slack Bot Simplification
 
+**Status:** Implemented
+
 ## Context
 The Slack integration had two separate systems sharing one user token:
 1. **Awareness panel** — fetched DMs, @mentions, threads for sidebar display
