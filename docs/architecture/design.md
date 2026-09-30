@@ -3,22 +3,18 @@
 ## Layout (3-panel resizable)
 
 ```
-┌───────────────────────────────────────────────────┐
-│ ● ● ●  w-18  KOKO  File  Search  Settings    [⊞] │  ← Toolbar (glass, blur(24px))
-├───────────────────────────────────────────────────┤
-│ ▾ Open Sessions (2)                               │  ← SessionTabs (collapsible)
-│  Session 1 ×  │  Session 2 ×                      │  ← mint border active, plain inactive
-├──────┬────────────────────────────────┬───────────┤
-│ Sess │                                │ Icon │ Mod │
-│ Side │    Terminal (xterm.js)          │ bar  │ ule │
-│ bar  │    full PTY, WebGL             │ w-9  │ con │
-│ 15%  │                                │ 3%   │tent │
-│      │    bg #0f1117                  │      │ 300 │
-│      │    fg rgba(255,255,255,0.92)   │ glass│ px+ │
-│      │    cursor #1FF2AB             │panel │     │
-└──────┴────────────────────────────────┴───────────┘
-  ResizablePanelGroup (horizontal)        RightSidebar
-  min 12% / max 25% for sidebar           collapsed 3% (w-9 icon bar)
+┌──────────────────────────────────────────────────────┐
+│ ● ● ●             KOKO               [update] [⚙]    │  ← Toolbar (frameless, drag region)
+├────────┬──────────────────────────────────┬──────────┤
+│ Session│                                  │ Mod │Icon│
+│ sidebar│    Terminal (xterm.js v6)        │ ule │bar │
+│ 15%    │    full PTY, WebGL               │ con │    │
+│ grouped│                                  │ tent│ w-9│
+│ by dir │    bg #0f1117, cursor #1FF2AB    │ 19% │    │
+│        ├──────────────────────────────────┤     │    │
+│        │ Mode switcher · Quick Terminal   │     │    │
+└────────┴──────────────────────────────────┴──────────┘
+  Left: 14 to 25% (4% collapsed)            Right: 15 to 35% (3% collapsed)
 ```
 
 **Background:** `#0f1117` base with animated mesh gradient orbs (mint/blue/teal, 12s breathing animation) and SVG noise texture overlay.
@@ -50,6 +46,7 @@
 | Success | `oklch(0.65 0.15 155)` | Approved badges |
 | Warning | `oklch(0.75 0.15 80)` | Review-needed badges |
 | Error | `oklch(0.65 0.2 25)` | Changes-requested badges |
+| Merge | `#a78bfa` | Merge button, distinct from approve (mint) |
 
 ## Glass Utility Classes
 
@@ -70,97 +67,142 @@
 - **Mint accent** — active states use mint border tint + glow shadow (not gradient fills)
 - **Breathing mesh** — 12s ease-in-out animation on background gradient orbs
 - **Clean spacing** — generous padding, no cramped elements
-- **Token compliance** — use glass utility classes and CSS variables, not raw Tailwind colors
+- **Token compliance** — use glass utility classes and CSS variables, not raw Tailwind colors. Semantic colours use the `success`, `warning`, `error` and `merge` tokens
 
 ## Components
 
 ### Toolbar
-- `.glass-toolbar`, `border-b border-white/8`, drag region via `WebkitAppRegion: "drag"`
-- macOS traffic light spacer (`w-18`)
-- KOKO SVG logo (`h-4 w-auto`)
-- Notification icons: GitHub PRs, Slack, Mail — all `p-2 rounded-md`, active: `text-accent bg-white/10`
-- Settings: icon-only (no text label), same pattern as notification icons, separated by `w-px h-4 bg-white/10` divider
-- Badge dots via `NotificationBadge` component at `-top-1 -right-1`
-
-### SessionTabs
-- Collapsible header: chevron + "Open Sessions (N)" in secondary text
-- Active tab: mint border tint + `.glow-accent` shadow
-- Inactive tab: `hover:bg-white/5`
-- Close button (X) per tab
+- `.glass-toolbar`, `border-b border-border`. The whole bar is a drag region through `--wails-draggable: drag`
+- Custom traffic lights (close, minimise, maximise) at the left. They fade in on hover
+- Maximise saves the window bounds, then fills the screen. This avoids the macOS two-step zoom animation
+- KOKO SVG logo, centred (`h-4 w-auto`)
+- Right side: an update pill (mint, links to the release) when a new version exists, then the Settings button
+- Interactive controls opt out of dragging with `--wails-draggable: no-drag`
 
 ### SessionSidebar
-- `.glass-panel`, `border-r border-white/8`, resizable 12–25% width
-- "New Session" button: mint accent styled
-- Search input with icon
-- Session list: Terminal icon + title, active state with mint border + glow
-
-### RightSidebar
-- `.glass-panel`, `border-l border-white/8`, toggleable
-- Collapsed: 3% width, `w-9` icon bar
-- Icon bar: module buttons (FileCode2, Bot), collapse toggle at bottom
-- Active module: mint accent icon + `bg-white/[0.08]`
-- Module content panel: full-height, scrollable
-
-### File Changes Module (RightSidebar)
-- Header: "File Changes" title + branch name + file count + refresh button
-- File list: icon + filename + directory path, hover reveals status badge
-- Color coding: staged=green (all statuses), unstaged: added=green, modified=orange, deleted=red, renamed=blue
-- Partially staged files appear twice (staged + unstaged entries)
-- Polls every 5 seconds via `useFileChanges` hook
-- Empty states: "No changes on this branch" / "No active session"
-
-### Subagents Module (RightSidebar)
-- Header: "Subagents" title + "N agents · M MCPs" summary (accent/blue colors) + refresh button
-- Subagents: sparkle icon + green dot + command name + elapsed time + child process count
-- MCP Servers: dedicated section with blue plug icon header "MCP Servers (N)", blue dot + name + elapsed time
-  - Friendly names extracted from command line (nolo, docker mcp, npx package names)
-- Tools: wrench icon, de-emphasized text
-- Infrastructure: collapsible section with cog icon (caffeinate, docker-credential)
-- Green dot on Bot icon in sidebar icon bar when subagents active
-- Polls every 3 seconds via `useSubagents` hook
-- Empty states: "No active session" / "No active subagents"
-
-### QuickTerminal
-- `Cmd+`` ` toggles slide-up panel (35% height) from bottom
-- Spawns `zsh -l` in active session directory
-- Glass toolbar header: Terminal icon + "Terminal" + directory path + close/minimize buttons
-- Slide-up/slide-down CSS animations (200ms/150ms cubic-bezier)
-- Ring buffer (64KB) on Go side for prompt replay on late mount
-- Separate from Claude sessions — utility shell for git, make, etc.
+- `.glass-panel`, resizable 14 to 25% width. Collapses to a 4% icon strip
+- "New Session" button with a `⌘N` hint, and a search input
+- Sessions group under a directory header when two or more share a directory. Headers collapse and show a count
+- Each row: status dot, name or slug, `⌘1` to `⌘9` hint on hover, reload and close buttons on hover
+- An amber pulse marks a session waiting for tool approval
+- A warning marks a directory that two sessions share, and suggests a worktree
 
 ### TerminalPane
 - Full-size xterm.js v6, no wrapper card
 - Theme: bg `#0f1117`, fg `rgba(255,255,255,0.92)`, cursor `#1FF2AB`
-- WebGL addon for performance
-- Hidden (not unmounted) when tab inactive — preserves scrollback
-- Calls `ReplayBuffer()` on mount to replay any missed PTY output
-- Copy: Cmd+C (trimmed plain text + HTML), Cmd+Shift+C (Markdown), right-click context menu
-- SerializeAddon for HTML serialization of terminal selections
+- WebGL, fit, web-links, search and serialize addons
+- Hidden (not unmounted) when its tab is inactive, so scrollback survives
+- Re-fits when its tab becomes active, so a resize in the background does not crop it
+- Calls `ReplayBuffer()` on mount to replay missed PTY output
+- `Cmd+F` searches the scrollback
+- A disconnected session shows a context card with its last reply, its directory and "Click to reconnect"
+- Right-click menu:
+
+| Item | Shortcut | Notes |
+|------|----------|-------|
+| Copy | `⌘C` | Trimmed plain text plus HTML |
+| Copy as Markdown | `⇧⌘C` | |
+| Paste | `⌘V` | |
+| Search Web | | Opens the selection in the default browser |
+| Select All | `⌘A` | |
+| Redraw Terminal | | Rebuilds the WebGL glyph cache |
+| Clear Terminal | | |
+| Reload Session | | Only for Claude sessions |
+
+### ClaudeModeSwitcher
+- Buttons below the terminal for Claude Code's modes
+- Sends Shift+Tab to the PTY. The cycle order is `auto → plan → ask`, with 80ms between writes
+
+### QuickTerminal
+- `Cmd+`` ` toggles a slide-up panel (35% height) from the bottom
+- One per session, keyed by the tab's creation time. Spawns `zsh -l` in the session's directory
+- Glass header: Terminal icon, "Terminal", directory path, close and minimise buttons
+- Ring buffer (64KB) on the Go side replays the prompt on a late mount
+
+### RightSidebar
+- `.glass-panel`, resizable 15 to 35% width. Collapses to a `w-9` icon bar
+- Icon bar buttons: File Changes, Session Context, Worktrees, Pull Requests, Notifications
+- Active module: mint accent icon + `bg-white/[0.08]`
+- Pull Requests opens the PR detail overlay instead of a module
+- Badges on the icon bar come from `NotificationBadge`
+
+### File Changes module
+- Header: branch name with a CI status dot, file count, refresh button
+- File list: icon, file name, directory, and a status badge on hover
+- Colour: staged is green. Unstaged: added green, modified orange, deleted red, renamed blue
+- A partly staged file appears twice (staged and unstaged)
+- Shows files committed on the branch and untracked files, not only the working tree
+- CI runs: a collapsible list of GitHub Actions runs for the branch. It opens by itself on a failure. A click opens the run on GitHub
+- Polls files every 5s and CI every 60s (`useFileChanges`, `useCI`)
+
+### Session Context module
+- Running subagents from the session's process tree (`useSubagents`, every 5s)
+- MCP Servers: configured servers and their status
+- Agents: built-in Claude agents and their models
+- Commands: project, global and plugin slash commands. A click types the command into the terminal
+
+### Worktrees module
+- Lists the repo's git worktrees, with branch, uncommitted changes and prunable state
+- Open a worktree (through the session dialog) or remove it
+- Polls every 10s (`useWorktrees`)
+
+### Notifications module
+- GitHub notifications, participating or all
+- Mark one or all as read, with optimistic updates. Polls every 60s
+
+### PRDetailOverlay
+- Full-screen overlay (`z-50`) with a PR list sidebar and a detail panel
+- PRs come from the tracked repos. They poll every 60s and can be hidden
+- Detail: author, actions (approve, merge in `merge` purple, view), description as markdown with raw HTML, files, reviews, commits, collapsible CI checks, labels and merge state
+- Comments: review threads grouped by file with the diff hunk, and discussion comments. Both take replies
+- A file click opens the CodeViewer with the PR diff
+- Opens in 100ms and closes in 75ms
 
 ### CodeViewer
-- Full-screen overlay (reuses OverlayPage pattern) — opens on file click in right sidebar
-- `@git-diff-view/react` with Shiki syntax highlighting
-- Split / Unified toggle in header bar
-- File path, status badge (A/M/D + staged indicator), +/- stats
-- Dark theme CSS variables: mint green additions, red deletions, subtle hunk headers
-- Escape to close
-- Go backend: `GetFileDiff(dir, path, staged)` returns old/new content + hunks
+- Full-screen overlay at `z-[60]`, so it sits above the PR overlay
+- `@git-diff-view/react` with Shiki highlighting. Split or unified view, and wrap
+- Raw mode shows the whole file with Shiki
+- Binary files show a notice. A file over 10,000 lines asks before it renders
+- `[` and `]`, or `↑` and `↓`, switch files. Escape closes
+- Backend: `GetFileDiff`, `GetFileContent`, and `FetchPRFileDiff` for PRs. The diff must keep its `---` and `+++` headers
+
+### SessionDialog
+- One dialog, three modes: new, reconnect and worktree. It remounts on each open
+- New: name, directory (with recent directories), optional new worktree, then the conversation picker
+- Reconnect: opens with the tab's conversation preselected, so Enter restores it. A tab with no stored conversation preselects nothing
+- Worktree: opens for a worktree from the Worktrees module
+- Recent Sessions: closed sessions with their last reply. Choosing one reopens its conversation
+- `role="dialog"`, `aria-modal`. Focus goes to the name field, or to the panel in reconnect mode
+
+### ConversationPicker
+- Lists the conversations Claude stored for the directory, newest first, with title and last reply
+- Native radio inputs, with "New conversation" first
+- A conversation another tab holds switches to that tab instead of opening twice
+
+### ConfirmDialog
+- Used for reload of a busy session and other destructive actions
+- Focus goes to Cancel when the action is destructive, else to Confirm
+- Escape cancels. Enter acts only on the focused button
+
+### WorktreeRemovalDialog
+- Opens when a session closes whose worktree Koko created. Offers to remove it
 
 ### SettingsPanel
-- Slack token input with show/hide toggle (Eye/EyeOff icons)
-- Save Token button with loading/saved feedback states
-- Test Connection button (calls `TestConnection()`, shows user@team)
-- Debug API Responses link (dev-only, calls `DebugFetch()`)
-- Results in `<pre>` with green=success / red=error color coding
-- **Remote API section:** enable/disable toggle, port input, API key display (truncated with copy button)
-- Scopes note updated: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
+- Fills the window as a nearly opaque overlay (`OverlayPage`, `.glass-overlay`)
+- Tabs:
 
-### OverlayPage
-- Full-panel overlay using `.glass-overlay`
-- Slides over right sidebar content
+| Tab | Contents |
+|-----|----------|
+| General | Remote API: on/off, port, API key with copy button |
+| Safe working | Quiet hours, break cycle and presets (90/15, 60/10, 45/5) |
+| GitHub | Tracked repos, hidden PRs |
+| Worker | `WorkerSettings.tsx`: on/off, job times, Test and Run now, connection checks, log |
 
-### NotificationBadge
-- Unread count indicator on icon bar buttons
+- The Slack tab is hidden until the Slack DM bot is dropped or rebuilt (plan 029)
+
+### SafeWorkingOverlay
+- Full-screen overlay for quiet hours, with a 30-minute delay button
+- Break screen with "Skip this break". Checks every 30s
 
 ### Resizable (ui/resizable.tsx)
 - Wraps `react-resizable-panels` (Group, Panel, Separator)
@@ -176,13 +218,13 @@
 
 ## Wails Config
 
-- `Frameless: false` — required for macOS traffic lights
-- `TitleBarHiddenInset()` — hides title text, shows traffic lights inset
-- `BackgroundColour: {R: 15, G: 17, B: 23}` — matches base `#0f1117`
+- `Frameless: true`: Koko draws its own traffic lights
+- 8px `border-radius` on `html, body, #root` gives the window its bevel
+- `BackgroundColour: {R: 15, G: 17, B: 23}` matches base `#0f1117`
 - `WebviewIsTransparent: true`
+- Default size 1280×800, minimum 800×600
 
 ## App Icon
 
-- Source: `build/koko-bird-colour.png` — colourful tui bird
-- Wails generates `.icns` from this
-- Baked-in squircle mask for macOS dev builds
+- Source: `build/appicon.png`, the colourful tui bird
+- Wails generates the `.icns` from it
