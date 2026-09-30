@@ -464,7 +464,11 @@ export default function SessionDialog({
               <Plus className="size-4" />
             </span>
             <h2 className="text-white text-sm font-medium">
-              {reconnect ? `Reconnect ${reconnect.slug || reconnect.name}` : "New Session"}
+              {reconnect
+                ? // A live tab lands here when reloaded with no stored
+                  // conversation, so it is a reload rather than a reconnect.
+                  `${reconnect.connected ? "Reload" : "Reconnect"} ${reconnect.slug || reconnect.name}`
+                : "New Session"}
             </h2>
           </div>
           <button

@@ -1,10 +1,11 @@
 import { Settings } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GetHiddenPRs } from "../wailsjs/go/main/ConfigService";
-import { Write } from "../wailsjs/go/main/TerminalManager";
+import { GetSessionState, Write } from "../wailsjs/go/main/TerminalManager";
 import kokoBird from "./assets/koko_bird.svg";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
+import ConfirmDialog from "./components/ConfirmDialog";
 import OverlayPage from "./components/OverlayPage";
 import PRDetailOverlay from "./components/PRDetailOverlay";
 import QuickTerminal from "./components/QuickTerminal";
@@ -28,7 +29,7 @@ import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionActivity } from "./hooks/useSessionActivity";
 import { useSessionBranches } from "./hooks/useSessionBranches";
 import { useSessionContext } from "./hooks/useSessionContext";
-import { useSessionTabs } from "./hooks/useSessionTabs";
+import { reloadAction, useSessionTabs } from "./hooks/useSessionTabs";
 import { useSubagents } from "./hooks/useSubagents";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
@@ -145,6 +146,44 @@ export default function App() {
     [tabs, switchTab, openSessionDialog],
   );
 
+  // Plan 028 step 6: restart a live session in place, keeping its tab, slug
+  // and conversation. Set while the "Claude isn't idle" confirmation is up.
+  const [pendingReload, setPendingReload] = useState<{ id: string; label: string } | null>(null);
+  // Kept after the confirmation closes, so its title does not change during
+  // the closing animation.
+  const reloadLabel = useRef("session");
+  if (pendingReload) reloadLabel.current = pendingReload.label;
+
+  const doReload = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      // A failure shows on the tab's reconnect card.
+      if (tab) reconnectTab(tab).catch(() => {});
+    },
+    [tabs, reconnectTab],
+  );
+
+  const requestReload = useCallback(
+    async (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      // If the state cannot be read, ask rather than kill a busy Claude.
+      const state = tab.connected ? await GetSessionState(tabId).catch(() => "unknown") : "idle";
+      switch (reloadAction(tab, state)) {
+        case "pick":
+          openSessionDialog({ reconnect: tabId });
+          break;
+        case "confirm":
+          setPendingReload({ id: tabId, label: tab.slug || tab.name });
+          break;
+        case "reload":
+          doReload(tabId);
+          break;
+      }
+    },
+    [tabs, openSessionDialog, doReload],
+  );
+
   // The dialog is modal, so the tab shortcuts wait while it is open. Cmd+2
   // behind a reconnect dialog used to change its target mid-way.
   const handleSwitchByIndex = useCallback(
@@ -243,6 +282,7 @@ export default function App() {
               onNewSession={() => openSessionDialog()}
               onDeleteSession={requestCloseTab}
               onRenameSession={renameTab}
+              onReloadSession={requestReload}
               isCollapsed={isLeftSidebarCollapsed}
               onToggleCollapse={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
             />
@@ -266,6 +306,7 @@ export default function App() {
                         sessionId={tab.id}
                         active={tab.id === activeTabId}
                         onExit={() => handleSessionExit(tab.id)}
+                        onReload={() => requestReload(tab.id)}
                       />
                       {!tab.connected && (
                         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
@@ -469,6 +510,21 @@ export default function App() {
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
           tabs={tabs}
+        />
+
+        {/* UX rule 6: reload never silently discards work in progress. */}
+        <ConfirmDialog
+          open={pendingReload !== null}
+          title={`Reload ${reloadLabel.current}?`}
+          message="Claude isn't idle. Reloading stops what it is doing, and anything typed but not sent is lost. The conversation itself is kept."
+          confirmLabel="Reload"
+          destructive
+          onConfirm={() => {
+            const id = pendingReload?.id;
+            setPendingReload(null);
+            if (id) doReload(id);
+          }}
+          onCancel={() => setPendingReload(null)}
         />
 
         <WorktreeRemovalDialog
