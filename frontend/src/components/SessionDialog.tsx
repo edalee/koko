@@ -297,15 +297,23 @@ export default function SessionDialog({
   }, [directory, pending]);
 
   const nameRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open && state === "closed") {
       setState("open");
-      if (!reconnect) setTimeout(() => nameRef.current?.focus(), 50);
     } else if (!open && state === "open") {
       setState("closing");
     }
-  }, [open, state, reconnect]);
+  }, [open, state]);
+
+  // Take focus from the terminal behind as soon as the panel is up. Without
+  // it the terminal received the same Escape and Enter, which interrupted or
+  // submitted to Claude. A reconnect has no name field, so focus the panel.
+  useEffect(() => {
+    if (state !== "open") return;
+    (reconnect ? panelRef.current : nameRef.current)?.focus();
+  }, [state, reconnect]);
 
   function handleAnimationEnd() {
     if (state === "closing") {
@@ -448,7 +456,11 @@ export default function SessionDialog({
       />
 
       <div
-        className={`relative w-[480px] flex flex-col rounded-xl border shadow-2xl glass-overlay inset-highlight ${
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        className={`relative w-[480px] flex flex-col rounded-xl border shadow-2xl glass-overlay inset-highlight outline-none ${
           state === "closing" ? "animate-overlay-out" : "animate-overlay-in"
         }`}
         style={{

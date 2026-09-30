@@ -38,16 +38,19 @@ export interface ResumeTarget {
 export type ReloadAction = "pick" | "confirm" | "reload";
 
 /**
- * Decide how to reload a tab, given its session state from the backend.
+ * Decide how to reload a tab, given its activity state: "active", "idle" or
+ * "approval", as tracked from terminal output.
  *
- * A tab with no stored conversation opens the picker, because reloading
- * would otherwise have to guess (D1). A live tab whose Claude is working or
- * waiting on approval asks first, because reload stops it mid-task and loses
- * anything typed but not sent. Otherwise reload goes straight ahead.
+ * A live tab whose Claude is not idle asks first, because reload stops it
+ * mid-task and loses anything typed but not sent. That comes before anything
+ * else: a busy tab with no stored conversation must be confirmed too, or
+ * picking a row would kill it unasked. After that, a tab with no stored
+ * conversation opens the picker, because reloading would otherwise have to
+ * guess (D1). Otherwise reload goes straight ahead.
  */
 export function reloadAction(tab: SessionTab, sessionState: string): ReloadAction {
-  if (!tab.claudeSessionId) return "pick";
   if (tab.connected && sessionState !== "idle") return "confirm";
+  if (!tab.claudeSessionId) return "pick";
   return "reload";
 }
 
@@ -332,18 +335,22 @@ export function useSessionTabs() {
         // Show why on the tab's reconnect card. Logging alone left the tab
         // looking broken, and every later click failed the same silent way.
         console.error("reconnectTab failed:", err);
-        // A refusal happens before anything is closed, so a live tab stays
-        // live. Any other failure comes after the backend closed the session
-        // it was replacing, so the tab is now disconnected, and its card
-        // shows why. Its exit event was ignored above, so set it here.
-        const refused = reconnectMessage(err).includes("already open in another tab");
+        // Ask the backend whether the replaced session still exists, rather
+        // than guess from the error text. It is gone only if the backend got
+        // as far as closing it, and then the tab is disconnected. A refusal,
+        // or a failure before that point, leaves the tab as it was. Its exit
+        // event was ignored above, so the state has to be set here.
+        const stillThere = await GetSessionSlug(tab.id).then(
+          () => true,
+          () => false,
+        );
         setTabs((prev) =>
           prev.map((t) =>
             t.id === tab.id
               ? {
                   ...t,
                   reconnectError: reconnectMessage(err),
-                  connected: refused ? t.connected : false,
+                  connected: stillThere ? t.connected : false,
                 }
               : t,
           ),

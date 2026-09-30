@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -17,8 +17,13 @@ type AnimState = "closed" | "open" | "closing";
 
 /**
  * A small yes-or-no dialog for an action that loses something. Escape and a
- * backdrop click cancel. Enter confirms, since the dialog only opens once the
- * user has asked for the action.
+ * backdrop click cancel.
+ *
+ * The dialog takes focus when it opens. Without that, the terminal kept focus
+ * and received the same keypress: Escape interrupted the Claude the dialog was
+ * protecting, and Enter submitted its half-typed prompt. Enter acts on the
+ * focused button, and a destructive dialog focuses Cancel, so a stray Enter
+ * cancels rather than confirms.
  */
 export default function ConfirmDialog({
   open,
@@ -30,21 +35,30 @@ export default function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const [state, setState] = useState<AnimState>("closed");
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (open && state === "closed") setState("open");
     else if (!open && state === "open") setState("closing");
   }, [open, state]);
 
+  // Take focus away from the terminal as soon as the dialog is up.
+  useEffect(() => {
+    if (state !== "open") return;
+    (destructive ? cancelRef : confirmRef).current?.focus();
+  }, [state, destructive]);
+
+  // Escape only. Enter is left to the focused button, so it can never
+  // confirm while Cancel has focus.
   useEffect(() => {
     if (state !== "open") return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCancel();
-      else if (e.key === "Enter") onConfirm();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state, onCancel, onConfirm]);
+  }, [state, onCancel]);
 
   if (state === "closed") return null;
 
@@ -85,13 +99,15 @@ export default function ConfirmDialog({
         <p className="px-5 py-4 text-[12px] text-white/85 leading-relaxed">{message}</p>
         <div className="px-5 py-3 border-t border-white/[0.08] flex justify-end gap-2">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 text-xs rounded-md text-muted-foreground hover:text-white hover:bg-white/[0.06] transition-colors"
+            className="px-3 py-1.5 text-xs rounded-md text-muted-foreground hover:text-white hover:bg-white/[0.06] transition-colors focus-visible:ring-1 focus-visible:ring-white/40 outline-none"
           >
             Cancel
           </button>
           <button
+            ref={confirmRef}
             type="button"
             onClick={onConfirm}
             className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${confirmClass}`}

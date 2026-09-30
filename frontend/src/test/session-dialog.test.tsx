@@ -410,6 +410,16 @@ describe("SessionDialog routing from other entry points (step 5)", () => {
     );
   });
 
+  // The terminal behind kept focus and received the dialog's Escape and Enter,
+  // which interrupted or submitted to Claude. The panel now takes focus.
+  it("takes focus from the terminal when reconnecting", async () => {
+    const t = tab({ connected: false, claudeSessionId: "mine" });
+    renderDialog({ reconnect: t, tabs: [t] });
+
+    const panel = await screen.findByRole("dialog");
+    await waitFor(() => expect(document.activeElement).toBe(panel));
+  });
+
   it("titles the dialog after the tab and hides new-session fields", async () => {
     const t = tab({ slug: "koko-7", connected: false, claudeSessionId: "mine" });
     renderDialog({ reconnect: t, tabs: [t] });

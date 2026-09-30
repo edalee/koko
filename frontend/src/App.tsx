@@ -1,7 +1,7 @@
 import { Settings } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { GetHiddenPRs } from "../wailsjs/go/main/ConfigService";
-import { GetSessionState, Write } from "../wailsjs/go/main/TerminalManager";
+import { Write } from "../wailsjs/go/main/TerminalManager";
 import kokoBird from "./assets/koko_bird.svg";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
@@ -148,52 +148,59 @@ export default function App() {
 
   // Plan 028 step 6: restart a live session in place, keeping its tab, slug
   // and conversation. Set while the "Claude isn't idle" confirmation is up.
-  const [pendingReload, setPendingReload] = useState<{ id: string; label: string } | null>(null);
-  // Kept after the confirmation closes, so its title does not change during
-  // the closing animation.
-  const reloadLabel = useRef("session");
-  if (pendingReload) reloadLabel.current = pendingReload.label;
+  const [pendingReload, setPendingReload] = useState<string | null>(null);
+  // Set when the confirmation opens and never cleared, so its title does not
+  // change during the closing animation.
+  const [reloadLabel, setReloadLabel] = useState("session");
+  // Any modal up. The shortcuts wait for all of them, not just the session
+  // dialog: Cmd+N behind the reload confirmation opened a second dialog, and
+  // one Enter then fired both.
+  const modalOpen = dialogOpen || pendingReload !== null;
 
-  const doReload = useCallback(
+  // Carry out a reload the user has settled on. A tab with no stored
+  // conversation opens the picker, since reloading would have to guess (D1).
+  const proceedReload = useCallback(
     (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      if (!tab.claudeSessionId) {
+        openSessionDialog({ reconnect: tabId });
+        return;
+      }
       // A failure shows on the tab's reconnect card.
-      if (tab) reconnectTab(tab).catch(() => {});
+      reconnectTab(tab).catch(() => {});
     },
-    [tabs, reconnectTab],
+    [tabs, openSessionDialog, reconnectTab],
   );
 
   const requestReload = useCallback(
-    async (tabId: string) => {
+    (tabId: string) => {
       const tab = tabs.find((t) => t.id === tabId);
       if (!tab) return;
-      // If the state cannot be read, ask rather than kill a busy Claude.
-      const state = tab.connected ? await GetSessionState(tabId).catch(() => "unknown") : "idle";
-      switch (reloadAction(tab, state)) {
-        case "pick":
-          openSessionDialog({ reconnect: tabId });
-          break;
-        case "confirm":
-          setPendingReload({ id: tabId, label: tab.slug || tab.name });
-          break;
-        case "reload":
-          doReload(tabId);
-          break;
+      // Busy comes from terminal output, tracked here. The backend's
+      // GetSessionState only knows about approvals, so it called a Claude
+      // that was mid-task idle, and reload killed it without asking.
+      const state = tab.connected ? (sessionStates.get(tabId) ?? "unknown") : "idle";
+      if (reloadAction(tab, state) === "confirm") {
+        setReloadLabel(tab.slug || tab.name);
+        setPendingReload(tabId);
+        return;
       }
+      proceedReload(tabId);
     },
-    [tabs, openSessionDialog, doReload],
+    [tabs, sessionStates, proceedReload],
   );
 
   // The dialog is modal, so the tab shortcuts wait while it is open. Cmd+2
   // behind a reconnect dialog used to change its target mid-way.
   const handleSwitchByIndex = useCallback(
     (index: number) => {
-      if (dialogOpen) return;
+      if (modalOpen) return;
       if (index < tabs.length) {
         selectTab(tabs[index].id);
       }
     },
-    [tabs, selectTab, dialogOpen],
+    [tabs, selectTab, modalOpen],
   );
 
   // When closing a session, intercept if Koko created a worktree for it
@@ -218,20 +225,24 @@ export default function App() {
     if (activeTabId) requestCloseTab(activeTabId);
   }, [activeTabId, requestCloseTab]);
 
-  const showQuickTerminal = activeTabId ? quickTerminalTabs.has(activeTabId) : false;
+  // Keyed by the tab's creation time, not its session id. Reconnect and
+  // reload swap the session id, which used to close the Quick Terminal and
+  // orphan its shell. createdAt survives both, and is already the pane key.
+  const quickKey = activeTab ? String(activeTab.createdAt) : null;
+  const showQuickTerminal = quickKey ? quickTerminalTabs.has(quickKey) : false;
 
   const handleToggleTerminal = useCallback(() => {
-    if (!activeTabId) return;
+    if (!quickKey) return;
     setQuickTerminalTabs((prev) => {
       const next = new Set(prev);
-      if (next.has(activeTabId)) {
-        next.delete(activeTabId);
+      if (next.has(quickKey)) {
+        next.delete(quickKey);
       } else {
-        next.add(activeTabId);
+        next.add(quickKey);
       }
       return next;
     });
-  }, [activeTabId]);
+  }, [quickKey]);
 
   const handleInjectCommand = useCallback(
     (command: string) => {
@@ -250,7 +261,7 @@ export default function App() {
   useKeyboardShortcuts({
     // Cmd+N inside an open dialog would remount it and lose what was typed.
     onNewSession: () => {
-      if (!dialogOpen) openSessionDialog();
+      if (!modalOpen) openSessionDialog();
     },
     onSwitchSession: handleSwitchByIndex,
     onCloseSession: handleCloseActive,
@@ -370,15 +381,15 @@ export default function App() {
               <QuickTerminal
                 open={showQuickTerminal}
                 onClose={() => {
-                  if (activeTabId) {
+                  if (quickKey) {
                     setQuickTerminalTabs((prev) => {
                       const next = new Set(prev);
-                      next.delete(activeTabId);
+                      next.delete(quickKey);
                       return next;
                     });
                   }
                 }}
-                activeTabId={activeTabId}
+                activeTabId={quickKey}
                 directory={activeTab?.directory ?? "."}
               />
             </div>
@@ -515,14 +526,16 @@ export default function App() {
         {/* UX rule 6: reload never silently discards work in progress. */}
         <ConfirmDialog
           open={pendingReload !== null}
-          title={`Reload ${reloadLabel.current}?`}
+          title={`Reload ${reloadLabel}?`}
           message="Claude isn't idle. Reloading stops what it is doing, and anything typed but not sent is lost. The conversation itself is kept."
           confirmLabel="Reload"
           destructive
           onConfirm={() => {
-            const id = pendingReload?.id;
+            const id = pendingReload;
             setPendingReload(null);
-            if (id) doReload(id);
+            // Confirmed first, even for a tab with no conversation, which
+            // then goes on to the picker.
+            if (id) proceedReload(id);
           }}
           onCancel={() => setPendingReload(null)}
         />

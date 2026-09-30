@@ -1,7 +1,7 @@
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GetSessions } from "../../wailsjs/go/main/ConfigService";
-import { CreateSessionWithOpts } from "../../wailsjs/go/main/TerminalManager";
+import { CreateSessionWithOpts, GetSessionSlug } from "../../wailsjs/go/main/TerminalManager";
 import ConfirmDialog from "../components/ConfirmDialog";
 import SessionSidebar from "../components/SessionSidebar";
 import { reloadAction, useSessionTabs } from "../hooks/useSessionTabs";
@@ -64,6 +64,7 @@ import TerminalPane from "../components/TerminalPane";
 
 const mockGetSessions = GetSessions as ReturnType<typeof vi.fn>;
 const mockCreate = CreateSessionWithOpts as ReturnType<typeof vi.fn>;
+const mockSlug = GetSessionSlug as ReturnType<typeof vi.fn>;
 
 function tab(over: Partial<SessionTab> = {}): SessionTab {
   return {
@@ -83,10 +84,12 @@ describe("reloadAction", () => {
     expect(reloadAction(tab(), "idle")).toBe("reload");
   });
 
-  // UX rule 6: reload never silently discards work in progress.
-  it("asks first when Claude is working or waiting", () => {
-    expect(reloadAction(tab(), "working")).toBe("confirm");
-    expect(reloadAction(tab(), "waiting")).toBe("confirm");
+  // UX rule 6: reload never silently discards work in progress. The states
+  // are the frontend's activity states. The backend only knew "approval", so
+  // a Claude mid-task used to count as idle.
+  it("asks first when Claude is active or waiting on approval", () => {
+    expect(reloadAction(tab(), "active")).toBe("confirm");
+    expect(reloadAction(tab(), "approval")).toBe("confirm");
   });
 
   // If the state could not be read, asking is the safe side.
@@ -95,9 +98,14 @@ describe("reloadAction", () => {
   });
 
   // D1: reloading a tab with no stored conversation would have to guess.
-  it("opens the picker for a tab with no stored conversation", () => {
+  it("opens the picker for an idle tab with no stored conversation", () => {
     expect(reloadAction(tab({ claudeSessionId: undefined }), "idle")).toBe("pick");
-    expect(reloadAction(tab({ claudeSessionId: undefined }), "working")).toBe("pick");
+  });
+
+  // A busy tab with no stored conversation must be confirmed too. It used to
+  // go straight to the picker, and picking a row killed Claude unasked.
+  it("confirms a busy tab even when it has no stored conversation", () => {
+    expect(reloadAction(tab({ claudeSessionId: undefined }), "active")).toBe("confirm");
   });
 
   it("does not ask for a disconnected tab, which has nothing running", () => {
@@ -106,7 +114,7 @@ describe("reloadAction", () => {
 });
 
 describe("ConfirmDialog", () => {
-  function renderConfirm() {
+  function renderConfirm(destructive = true) {
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
     render(
@@ -115,7 +123,7 @@ describe("ConfirmDialog", () => {
         title="Reload koko-1?"
         message="Claude isn't idle."
         confirmLabel="Reload"
-        destructive
+        destructive={destructive}
         onConfirm={onConfirm}
         onCancel={onCancel}
       />,
@@ -123,11 +131,35 @@ describe("ConfirmDialog", () => {
     return { onConfirm, onCancel };
   }
 
-  it("confirms with the button and with Enter", async () => {
+  it("confirms with the button", async () => {
     const { onConfirm } = renderConfirm();
     fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  // The dialog takes focus from the terminal, which otherwise received the
+  // same keypress. A destructive one focuses Cancel, so a stray Enter cancels.
+  it("focuses Cancel when destructive, and the action otherwise", async () => {
+    renderConfirm(true);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })),
+    );
+  });
+
+  it("focuses the action when not destructive", async () => {
+    renderConfirm(false);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Reload" })),
+    );
+  });
+
+  // Enter from a window listener used to confirm whatever had focus,
+  // including Cancel. It is now left to the focused button.
+  it("does not confirm on a window Enter", async () => {
+    const { onConfirm } = renderConfirm();
+    await screen.findByRole("button", { name: "Cancel" });
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(onConfirm).toHaveBeenCalledTimes(2);
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it("cancels with the button and with Escape", async () => {
@@ -278,12 +310,33 @@ describe("useSessionTabs during a reload", () => {
     });
     expect(result.current.tabs[0].connected).toBe(true);
 
+    // The backend closed the old session before the new one failed, so it no
+    // longer knows it.
     mockCreate.mockRejectedValueOnce("failed to start PTY: fork failed");
+    mockSlug.mockRejectedValueOnce("session not found");
     await act(async () => {
       await result.current.reconnectTab(result.current.tabs[0]).catch(() => {});
     });
     expect(result.current.tabs[0].connected).toBe(false);
     expect(result.current.tabs[0].reconnectError).toMatch(/Could not reconnect/);
+  });
+
+  // A failure before the backend closed anything, such as a bridge error,
+  // used to be read from the error text and marked the live tab dead. The
+  // backend is now asked, and the session is still there.
+  it("keeps a live tab connected when a reload fails before closing", async () => {
+    const { result } = await loaded();
+    mockCreate.mockResolvedValueOnce("session-live");
+    await act(async () => {
+      await result.current.reconnectTab(result.current.tabs[0]);
+    });
+
+    mockCreate.mockRejectedValueOnce("bridge error: call timed out");
+    mockSlug.mockResolvedValueOnce("koko-1");
+    await act(async () => {
+      await result.current.reconnectTab(result.current.tabs[0]).catch(() => {});
+    });
+    expect(result.current.tabs[0].connected).toBe(true);
   });
 
   // A refusal happens before anything is closed, so a live tab stays live.
