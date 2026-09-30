@@ -281,8 +281,7 @@ type CreateSessionOpts struct {
 	Dir             string `json:"dir"`
 	Cols            int    `json:"cols"`
 	Rows            int    `json:"rows"`
-	Resume          bool   `json:"resume"`
-	ClaudeSessionID string `json:"claudeSessionId"` // UUID for --resume. Empty starts fresh, even with Resume set
+	ClaudeSessionID string `json:"claudeSessionId"` // resume this conversation. Empty starts a fresh one
 	Slug            string `json:"slug"`            // reuse an existing slug on recovery
 	// Replaces is the session id this one takes over from, set by reconnect.
 	// It is exempt from the ownership and slug checks, and is closed before
@@ -294,16 +293,6 @@ type CreateSessionOpts struct {
 // another session already holds. Two Claude processes writing one conversation
 // file corrupt it, so this refuses rather than letting it happen.
 var ErrConversationBusy = errors.New("that conversation is already open in another session")
-
-func (tm *TerminalManager) CreateSession(name, dir string, cols, rows int, resume bool) (string, error) {
-	return tm.CreateSessionWithOpts(CreateSessionOpts{
-		Name:   name,
-		Dir:    dir,
-		Cols:   cols,
-		Rows:   rows,
-		Resume: resume,
-	})
-}
 
 // CreateSessionWithOpts creates a session with full options including Claude session ID for --resume.
 //
@@ -319,18 +308,20 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 		opts.Rows = 40
 	}
 
-	// Snapshot Claude's session files before launch, so Claude cannot write its
-	// file in the gap between launch and the first look.
-	projectDir := claudeProjectDir(opts.Dir)
-	preExisting := listJSONL(projectDir)
-
 	// Resume by explicit conversation id only (plan 028 step 8). There is no
 	// --continue: it resumed the newest conversation in the directory, which
-	// with a sibling live was the sibling's, and nothing could tell. A caller
-	// that asks to resume without an id gets a fresh conversation instead.
+	// with a sibling live was the sibling's, and nothing could tell. No id
+	// means a fresh conversation.
 	target := opts.ClaudeSessionID
-	if opts.Resume && target == "" {
-		log.Printf("[pty] resume requested with no conversation id in %s, starting fresh", opts.Dir)
+
+	// Snapshot Claude's session files before launch, so Claude cannot write its
+	// file in the gap between launch and the first look. Only a fresh
+	// conversation needs it: the detector is the only reader, and a resume
+	// already knows its id. The folder can hold hundreds of files.
+	projectDir := claudeProjectDir(opts.Dir)
+	var preExisting map[string]bool
+	if target == "" {
+		preExisting = listJSONL(projectDir)
 	}
 
 	tm.mu.Lock()
@@ -373,9 +364,12 @@ func (tm *TerminalManager) CreateSessionWithOpts(opts CreateSessionOpts) (string
 	}
 
 	claudePath := resolveClaudePath()
-	claudeCmd := fmt.Sprintf("exec %s", claudePath)
+	// Both values are quoted for the shell. The id reaches here from the API,
+	// MCP and saved sessions, so an unquoted `x;touch pwned` would have run as
+	// a command, and an id with a space would have broken the resume.
+	claudeCmd := "exec " + shellQuote(claudePath)
 	if target != "" {
-		claudeCmd = fmt.Sprintf("exec %s --resume %s", claudePath, target)
+		claudeCmd += " --resume " + shellQuote(target)
 	}
 	cmd := newShellCommand(shell, claudeCmd)
 	cmd.Dir = opts.Dir
@@ -430,6 +424,12 @@ func (tm *TerminalManager) emit(name string, data ...interface{}) {
 		return
 	}
 	runtime.EventsEmit(tm.ctx, name, data...)
+}
+
+// shellQuote wraps s in single quotes for sh, so it is always one argument
+// and never code. A single quote inside is closed, escaped and reopened.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // newShellCommand builds the process a session runs. A variable so tests can
@@ -1007,11 +1007,15 @@ func (tm *TerminalManager) GetSessions() []SessionInfo {
 	defer tm.mu.Unlock()
 	sessions := make([]SessionInfo, 0, len(tm.sessions))
 	for _, s := range tm.sessions {
+		s.mu.Lock()
+		claudeSessionID := s.claudeSessionID
+		s.mu.Unlock()
 		sessions = append(sessions, SessionInfo{
-			ID:   s.id,
-			Slug: s.slug,
-			Name: s.name,
-			Dir:  s.dir,
+			ID:              s.id,
+			Slug:            s.slug,
+			Name:            s.name,
+			Dir:             s.dir,
+			ClaudeSessionID: claudeSessionID,
 		})
 	}
 	return sessions

@@ -228,6 +228,57 @@ func TestSessionsPost_InvalidBody(t *testing.T) {
 	}
 }
 
+// Resume used to mean --continue, which is gone. Setting it without a
+// conversation id used to return 201 and silently start fresh, so a caller
+// sent prompts that assumed context Claude did not have. It is refused now.
+func TestSessionsPost_ResumeWithoutAnIDIsRefused(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+
+	body := strings.NewReader(`{"dir":"/tmp","resume":true}`)
+	req := httptest.NewRequest("POST", "/api/sessions", body)
+	w := httptest.NewRecorder()
+	api.handleSessions(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "claudeSessionId") {
+		t.Errorf("expected the error to name claudeSessionId, got %s", w.Body.String())
+	}
+	if n := len(tm.GetSessions()); n != 0 {
+		t.Errorf("expected no session to start, got %d", n)
+	}
+}
+
+// A conversation another session holds is a conflict, not a server error.
+func TestSessionsPost_HeldConversationIsAConflict(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+	addSession(tm, "holder", "/tmp", "conv-1")
+
+	body := strings.NewReader(`{"dir":"/tmp","claudeSessionId":"conv-1"}`)
+	req := httptest.NewRequest("POST", "/api/sessions", body)
+	w := httptest.NewRecorder()
+	api.handleSessions(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// Resuming takes an id, so callers have to be able to find one.
+func TestSessionsGet_ListsConversationIDs(t *testing.T) {
+	api, tm := newTestAPIServer(t)
+	addSession(tm, "holder", "/tmp", "conv-1")
+
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
+	w := httptest.NewRecorder()
+	api.handleSessions(w, req)
+
+	if !strings.Contains(w.Body.String(), `"claudeSessionId":"conv-1"`) {
+		t.Fatalf("expected claudeSessionId in the list, got %s", w.Body.String())
+	}
+}
+
 // newPipeSession creates a session whose ptmx is backed by an os.Pipe so tests
 // can read exactly what bytes were written to the "PTY".  Returns the session
 // and the read-end of the pipe.  The caller must close both ends when done.

@@ -115,7 +115,7 @@
 
 ## ADR-014: Session persistence and resume with --continue
 - **Date:** 2026-03-08
-- **Status:** Superseded by ADR-028. Sessions still persist, but reconnect resumes by explicit conversation id, chosen in the session dialog. `--continue` was removed in plan 028 step 8, because it resumed the newest conversation in a directory, which was often a sibling tab's.
+- **Status:** Superseded by ADR-028. Sessions still persist, but they resume by explicit conversation id only: the tab's stored id, as a reload uses, or one chosen in the session dialog. Plan 028 step 8 removed `--continue`, because it resumed the newest conversation in a directory, which was often a sibling tab's.
 - **Decision:** Persist session tabs to localStorage, mark as disconnected on app restart/session exit, reconnect with `claude --continue` flag
 - **Rationale:**
   - Users lose context when app restarts — persistence preserves session list
@@ -329,6 +329,6 @@
 - **Consequences:**
   - A dead session still owns its conversation, because reconnecting its tab resumes it. Only the session named in `Replaces` is exempt, and it is closed before its successor starts.
   - A create reserves the conversation before its PTY starts, keyed by the create, so two racing creates cannot both pass the check.
-  - There is no `--continue`. It resumed the newest conversation in a directory, which could be held by another tab, so plan 028 step 8 removed it. A resume without a conversation id now starts a fresh conversation, including from the API and MCP.
+  - There is no `--continue`. It resumed the newest conversation in a directory, which could be held by another tab, so plan 028 step 8 removed it. The API and MCP take a conversation id to resume, and refuse `resume` without one rather than start fresh behind the caller's back. `GET /api/sessions` lists each session's id so callers can find one.
   - The picker marks a held conversation with its tab's slug, and choosing it switches to that tab.
 - **Plan:** `docs/plans/028-session-recovery-and-picker.md`

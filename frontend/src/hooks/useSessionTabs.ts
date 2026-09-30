@@ -198,32 +198,18 @@ export function useSessionTabs() {
     [],
   );
 
-  // Read the slug and UUID once, straight after a session is created.
+  // Read the slug once, straight after a session is created.
   //
   // The slug is assigned by the backend and has no other route to the
   // frontend. It used to be left as "" for ever, so every persisted slug was
   // empty and koko-1 named nothing.
   //
-  // For --continue the backend resolves the UUID synchronously, so the
-  // session:claude-id event fires before the caller has the new session id and
-  // the event listener matches no tab. This closes that gap too.
-  const mergeSessionMeta = useCallback(async (sessionId: string) => {
-    const [slug, claudeId] = await Promise.all([
-      GetSessionSlug(sessionId).catch(() => ""),
-      GetClaudeSessionID(sessionId).catch(() => ""),
-    ]);
-    if (!slug && !claudeId) return;
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.id === sessionId
-          ? {
-              ...t,
-              slug: slug || t.slug,
-              claudeSessionId: claudeId || t.claudeSessionId,
-            }
-          : t,
-      ),
-    );
+  // The conversation id needs no read here. A resume already knows it, and a
+  // fresh conversation's id arrives later on the session:claude-id event.
+  const mergeSlug = useCallback(async (sessionId: string) => {
+    const slug = await GetSessionSlug(sessionId).catch(() => "");
+    if (!slug) return;
+    setTabs((prev) => prev.map((t) => (t.id === sessionId ? { ...t, slug } : t)));
   }, []);
 
   const createTab = useCallback(
@@ -235,7 +221,6 @@ export function useSessionTabs() {
         dir: directory,
         cols: 80,
         rows: 24,
-        resume: !!resume,
         claudeSessionId: resume?.claudeSessionId ?? "",
         // Reuse the slug a closed session had, so koko-1 keeps naming it.
         slug: resume?.slug ?? "",
@@ -243,7 +228,7 @@ export function useSessionTabs() {
       });
       const newTab: SessionTab = {
         id: sessionId,
-        slug: "", // filled in by mergeSessionMeta below
+        slug: "", // filled in by mergeSlug below
         name,
         directory,
         createdAt: Date.now(),
@@ -257,16 +242,16 @@ export function useSessionTabs() {
 
       // The slug is ready now. The UUID usually resolves later, on the
       // session:claude-id event.
-      void mergeSessionMeta(sessionId);
+      void mergeSlug(sessionId);
       return sessionId;
     },
-    [mergeSessionMeta],
+    [mergeSlug],
   );
 
   // The backend tells us when it captures a Claude session UUID. Claude writes
   // its session file on the first message, so this can arrive minutes after the
   // session starts. Polling on a timer missed it, which left the tab with no
-  // UUID and made a later resume fall back to --continue.
+  // UUID, so a later reconnect had nothing to resume.
   useEffect(() => {
     return EventsOn("session:claude-id", (payload: SessionClaudeIDEvent) => {
       if (!payload?.sessionId || !payload.claudeSessionId) return;
@@ -304,9 +289,8 @@ export function useSessionTabs() {
           dir: tab.directory,
           cols: 80,
           rows: 24,
-          // Resume only with an explicit id. There is no --continue any more:
-          // without an id the backend starts fresh, so say so plainly.
-          resume: claudeSessionId !== "",
+          // An id resumes that conversation. Without one the backend starts a
+          // fresh conversation: there is no --continue to fall back on.
           claudeSessionId,
           // Keep the slug, so koko-1 still names this session after a restart.
           slug: tab.slug || "",
@@ -331,7 +315,7 @@ export function useSessionTabs() {
         );
         setActiveTabId((prev) => (prev === tab.id ? sessionId : prev));
 
-        void mergeSessionMeta(sessionId);
+        void mergeSlug(sessionId);
         return sessionId;
       } catch (err) {
         // Show why on the tab's reconnect card. Logging alone left the tab
@@ -362,7 +346,7 @@ export function useSessionTabs() {
         reconnectingRef.current.delete(tab.id);
       }
     },
-    [mergeSessionMeta],
+    [mergeSlug],
   );
 
   const closeTab = useCallback(

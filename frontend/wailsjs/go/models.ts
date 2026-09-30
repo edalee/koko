@@ -199,7 +199,6 @@ export namespace main {
 	    dir: string;
 	    cols: number;
 	    rows: number;
-	    resume: boolean;
 	    claudeSessionId: string;
 	    slug: string;
 	    replaces: string;
@@ -214,7 +213,6 @@ export namespace main {
 	        this.dir = source["dir"];
 	        this.cols = source["cols"];
 	        this.rows = source["rows"];
-	        this.resume = source["resume"];
 	        this.claudeSessionId = source["claudeSessionId"];
 	        this.slug = source["slug"];
 	        this.replaces = source["replaces"];
@@ -627,6 +625,7 @@ export namespace main {
 	    }
 	}
 	export class SessionInfo {
+	    claudeSessionId?: string;
 	    id: string;
 	    slug: string;
 	    name: string;
@@ -635,13 +634,14 @@ export namespace main {
 	    static createFrom(source: any = {}) {
 	        return new SessionInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.slug = source["slug"];
 	        this.name = source["name"];
 	        this.dir = source["dir"];
+	        this.claudeSessionId = source["claudeSessionId"];
 	    }
 	}
 	export class SessionRecord {
