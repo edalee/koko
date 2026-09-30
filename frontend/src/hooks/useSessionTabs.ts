@@ -304,7 +304,9 @@ export function useSessionTabs() {
           dir: tab.directory,
           cols: 80,
           rows: 24,
-          resume: !fresh,
+          // Resume only with an explicit id. There is no --continue any more:
+          // without an id the backend starts fresh, so say so plainly.
+          resume: claudeSessionId !== "",
           claudeSessionId,
           // Keep the slug, so koko-1 still names this session after a restart.
           slug: tab.slug || "",

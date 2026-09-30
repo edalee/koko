@@ -115,7 +115,7 @@
 
 ## ADR-014: Session persistence and resume with --continue
 - **Date:** 2026-03-08
-- **Status:** Accepted
+- **Status:** Superseded by ADR-028. Sessions still persist, but reconnect resumes by explicit conversation id, chosen in the session dialog. `--continue` was removed in plan 028 step 8, because it resumed the newest conversation in a directory, which was often a sibling tab's.
 - **Decision:** Persist session tabs to localStorage, mark as disconnected on app restart/session exit, reconnect with `claude --continue` flag
 - **Rationale:**
   - Users lose context when app restarts — persistence preserves session list
@@ -321,7 +321,7 @@
 ## ADR-028: One conversation, one owner
 - **Date:** 2026-09-27
 - **Status:** Accepted
-- **Decision:** A Claude conversation is held by at most one Koko session. `CreateSessionWithOpts` refuses with `ErrConversationBusy` when another session holds the requested conversation. Every path goes through `uuidClaimedLocked`: an explicit `--resume`, the `--continue` fallback, and the capture detector.
+- **Decision:** A Claude conversation is held by at most one Koko session. `CreateSessionWithOpts` refuses with `ErrConversationBusy` when another session holds the requested conversation. Every path goes through `uuidClaimedLocked`: an explicit `--resume` and the capture detector.
 - **Rationale:**
   - Two Claude processes writing one conversation file corrupt it.
   - A disabled row in the picker is not enforcement. The API and the MCP server reach the create path too.
@@ -329,6 +329,6 @@
 - **Consequences:**
   - A dead session still owns its conversation, because reconnecting its tab resumes it. Only the session named in `Replaces` is exempt, and it is closed before its successor starts.
   - A create reserves the conversation before its PTY starts, keyed by the create, so two racing creates cannot both pass the check.
-  - `--continue` resumes the newest conversation in a directory. When that is held, the session starts fresh instead. Plan 028 step 8 removes `--continue` altogether.
+  - There is no `--continue`. It resumed the newest conversation in a directory, which could be held by another tab, so plan 028 step 8 removed it. A resume without a conversation id now starts a fresh conversation, including from the API and MCP.
   - The picker marks a held conversation with its tab's slug, and choosing it switches to that tab.
 - **Plan:** `docs/plans/028-session-recovery-and-picker.md`

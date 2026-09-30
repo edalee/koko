@@ -79,7 +79,7 @@ func mcpToolDefinitions() []map[string]interface{} {
 					},
 					"resume": map[string]string{
 						"type":        "boolean",
-						"description": "Resume previous session (--continue flag)",
+						"description": "Deprecated. Resuming needs a conversation id, which this tool does not take, so the session always starts a fresh conversation",
 					},
 				},
 				"required": []string{"dir"},

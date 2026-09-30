@@ -149,10 +149,11 @@ func TestCreateSessionWithOpts_WithoutReplacesTheSameRequestIsRefused(t *testing
 	}
 }
 
-// --continue resumes the newest conversation in the directory. It was the
-// only path the API and MCP reach, and it had no check. When that newest
-// conversation is held, the session must start fresh, not land in it.
-func TestCreateSessionWithOpts_ContinueStartsFreshWhenTheNewestIsHeld(t *testing.T) {
+// Plan 028 step 8: resuming needs an explicit conversation id. --continue
+// resumed the newest conversation in the directory, which with a sibling
+// live was the sibling's. A resume with no id, as the API and MCP send, now
+// starts a fresh conversation and never guesses.
+func TestCreateSessionWithOpts_ResumeWithoutAnIDStartsFresh(t *testing.T) {
 	scripts := fakeClaude(t)
 	tm := newTestManager()
 	closeAll(t, tm)
@@ -163,10 +164,10 @@ func TestCreateSessionWithOpts_ContinueStartsFreshWhenTheNewestIsHeld(t *testing
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+	// A stored conversation --continue would have picked up.
 	if err := os.WriteFile(filepath.Join(projectDir, "newest.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	addSession(tm, "holder", workDir, "newest")
 
 	id, err := tm.CreateSessionWithOpts(CreateSessionOpts{Dir: workDir, Resume: true})
 	if err != nil {
@@ -177,48 +178,41 @@ func TestCreateSessionWithOpts_ContinueStartsFreshWhenTheNewestIsHeld(t *testing
 	got := tm.sessions[id].claudeSessionID
 	tm.mu.Unlock()
 	if got != "" {
-		t.Errorf("session took %q, which another session holds", got)
+		t.Errorf("session took %q without being asked for it", got)
 	}
 	last := (*scripts)[len(*scripts)-1]
-	if strings.Contains(last, "--continue") {
-		t.Errorf("launched with --continue into a held conversation: %q", last)
+	if strings.Contains(last, "--continue") || strings.Contains(last, "--resume") {
+		t.Errorf("expected a bare claude, got %q", last)
 	}
 }
 
-// When the newest conversation is free, --continue still works and the
-// session records it.
-func TestCreateSessionWithOpts_ContinueClaimsAFreeNewest(t *testing.T) {
+// An explicit id still resumes exactly that conversation.
+func TestCreateSessionWithOpts_ResumesAnExplicitID(t *testing.T) {
 	scripts := fakeClaude(t)
 	tm := newTestManager()
 	closeAll(t, tm)
 
-	workDir := t.TempDir()
-	t.Setenv("HOME", t.TempDir())
-	projectDir := claudeProjectDir(workDir)
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "newest.jsonl"), []byte("{}\n"), 0o600); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	id, err := tm.CreateSessionWithOpts(CreateSessionOpts{Dir: workDir, Resume: true})
+	id, err := tm.CreateSessionWithOpts(CreateSessionOpts{
+		Dir:             t.TempDir(),
+		Resume:          true,
+		ClaudeSessionID: "conv-7",
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	tm.mu.Lock()
 	got := tm.sessions[id].claudeSessionID
 	tm.mu.Unlock()
-	if got != "newest" {
-		t.Errorf("expected the session to record newest, got %q", got)
+	if got != "conv-7" {
+		t.Errorf("expected conv-7, got %q", got)
 	}
-	if !strings.Contains((*scripts)[len(*scripts)-1], "--continue") {
-		t.Error("expected --continue")
+	if !strings.HasSuffix((*scripts)[len(*scripts)-1], "--resume conv-7") {
+		t.Errorf("expected --resume conv-7, got %q", (*scripts)[len(*scripts)-1])
 	}
 }
 
-// A reservation blocks every path, not just other creates. The --continue
-// claim and the detector both go through uuidClaimedLocked.
+// A reservation blocks every path, not just other creates. The detector goes
+// through uuidClaimedLocked too.
 func TestUUIDClaimed_SeesAReservation(t *testing.T) {
 	tm := newTestManager()
 	tm.mu.Lock()
