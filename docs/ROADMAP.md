@@ -43,6 +43,17 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Homebrew distribution** — `brew install koko`
 - [ ] **Remote API enhancements** — file diffs, GitHub PRs, notifications endpoints
 
+### Worker
+- [x] **koko-worker**: background launchd agent for scheduled work jobs (plan 029)
+- [x] **Stand-up DM**: meetings, PRs ready to merge with a Jira check, and PRs waiting for review
+- [x] **Focus time**: books "Focus" blocks in free calendar gaps
+- [x] **Tono reviews**: read-only tono runs on new PRs, reported by DM
+- [x] **Settings > Worker**: on/off, job times, Test and Run now, connection checks, log
+- [ ] **Mac wake test**: add the sudoers rule, then test a wake with the Mac asleep
+- [ ] **Dependabot strategy**: rules for approving or closing dependency bumps
+- [ ] **Old Slack DM bot**: drop `slack_commands.go`, or rebuild one bot for Koko and koko-worker
+- [ ] **GitHub settings tab**: make the followed repos and hidden PRs easier to manage
+
 ## Completed
 
 See `docs/plans/` for detailed implementation plans of completed features (001-026).

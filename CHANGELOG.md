@@ -18,6 +18,13 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **PermissionRequest hook** — HTTP callback from Claude Code for deterministic approval detection. Replaces fragile terminal pattern matching
 - **Go test suite** — 44+ tests covering API, auth, MCP, Slack commands, config, terminal manager
 - **CHANGELOG.md** — Version history
+- **koko-worker**: a separate binary (`cmd/koko-worker/`) that a launchd agent keeps running. It runs scheduled work jobs on weekdays, with Koko open or closed. macOS only
+- **Stand-up job**: a 07:00 Slack DM with today's meetings, your PRs ready to merge with a Jira check, follow-up steps, and PRs waiting for your review
+- **Focus time job**: at 09:15, books "Focus" blocks in free calendar gaps of 30 minutes or more, through the Google Calendar connector
+- **Tono review job**: at 09:30, 12:00 and 14:00, reviews new PRs in scope with the tono CLI and DMs the report. It never posts to GitHub
+- **Worker scheduler**: runs jobs missed while the Mac slept, waits for the internet, and retries other failures 3 times. It books the next Mac wake with `pmset`
+- **Worker settings**: a Worker tab in Settings with an on/off switch, job switches and times, "Test", "Run now", connection checks and the log (`WorkerSettings.tsx`, `worker_service.go`)
+- **Make targets**: `make build-worker` and `make test-worker`. `make build` puts `koko-worker` inside `Koko.app`
 
 ### Changed
 - **Slack integration** — Replaced user token awareness panel with dedicated bot token command handler. Scopes reduced from 5 to 3
@@ -25,11 +32,14 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Session history** — Expanded to 50 entries, not deduplicated by directory. Multiple sessions per directory preserved
 - **tailText buffer** — Increased from 2KB to 32KB for richer API output
 - **lastMsg extraction** — Handles current Claude Code JSONL format (type:"assistant") in addition to legacy (type:"progress")
+- **Settings panel**: fills the window, with a tab for each section (General, Safe working, GitHub, Worker). The panel is nearly opaque, so it is easier to read
+- **Slack settings tab**: hidden. It held the old Slack DM bot, which stays idle while no token is saved
 
 ### Fixed
 - **Unicode paste** — `btoa()` crashes on chars > U+00FF (em dashes, smart quotes). Now uses TextEncoder for UTF-8 safe base64
 - **Ghost amber icons** — False positive approval detection from broad pattern matching against 32KB buffer
 - **Slug URL collision** — Changed separator from `/` to `-` (koko/1 → koko-1) to avoid API route conflicts
+- **Settings toggles**: every toggle knob now stays inside its track
 
 ### Removed
 - **Slack awareness panel** — `slack_service.go`, `SlackPanel.tsx`, `useSlack.ts` removed (~400 lines)

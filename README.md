@@ -67,6 +67,14 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
   <img src="docs/screenshots/quiet-hours.png" alt="Kõkõ — Quiet hours blocker encouraging rest" width="800" />
 </p>
 
+### Worker (macOS)
+- **koko-worker**: a background agent that runs scheduled work jobs on weekdays, even with the Koko window closed
+- **Stand-up (07:00)**: one Slack DM with today's meetings, your PRs ready to merge with a Jira check, and PRs waiting for your review
+- **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more
+- **Tono reviews (09:30, 12:00, 14:00)**: runs the tono CLI on new PRs in scope and DMs the report. It never posts to GitHub
+- **Settings > Worker**: one switch for the worker, a switch and times per job, "Test" and "Run now" buttons, connection checks and the log
+- **Catch-up and retries**: a job missed while the Mac slept runs on wake. A job waits for the internet, and gets 3 tries for other failures
+
 ### Workspace
 - **Quick Terminal** — `Cmd+`` ` slides up a per-session zsh shell for quick commands
 - **Glassmorphism UI** — Dark theme with frosted glass panels and mint accents
@@ -131,6 +139,23 @@ You also need an Anthropic API key or active Claude subscription configured for 
 - **GitHub PRs** — Requires [`gh` CLI](https://cli.github.com/) authenticated (`gh auth login`)
 - **Slack Bot** — Create a Slack app with bot scopes `im:history`, `im:read`, `chat:write` — see [Slack Bot Setup](docs/references/slack-bot-setup.md)
 - **CLI Companion** — Build with `make build-cli`, reads config from `~/Library/Application Support/koko/cli.json`
+- **koko-worker** (macOS only): see [koko-worker setup](#koko-worker-setup)
+
+### koko-worker setup
+
+The worker uses launchd, `pmset` and `caffeinate`, so it runs on macOS only. `make build` puts `koko-worker` inside `Koko.app`. `make dev` builds it into `build/bin`.
+
+It needs these connections. Settings > Worker checks each one and says how to fix a missing one.
+
+- **Slack**: a bot token (`xoxb-`) with the `chat:write` scope, and your Slack user ID. The worker keeps its own Slack settings, apart from Koko's Slack bot.
+- **GitHub**: the `gh` CLI, signed in with `gh auth login`.
+- **Claude Code**: `claude` on the PATH, with the claude.ai Google Calendar and Atlassian connectors connected.
+- **tono**: the path to the tonometer repo's `tono` script.
+- **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the exact line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
+
+The switch in Settings > Worker installs the launchd agent `com.koko.worker`. The same switch removes it. You can also run `koko-worker install` and `koko-worker uninstall` by hand.
+
+The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state, logs and tono reports sit in `~/Library/Application Support/koko/worker/`. Tono's cache clones sit in `~/.cache/koko-worker/repos`.
 
 ## Build from Source
 
@@ -149,6 +174,10 @@ cp -R build/bin/Koko.app /Applications/
 
 # Build CLI companion
 make build-cli
+
+# Build and test koko-worker (its own Go module, so it has its own targets)
+make build-worker
+make test-worker
 
 # Or run in development mode (hot reload)
 make dev
@@ -198,6 +227,7 @@ Kõkõ is built with [Wails v2](https://wails.io/) — a Go backend connected to
 - **API server** exposes sessions, output, and git changes over HTTP/WebSocket for remote access
 - **MCP server** (`koko mcp`) exposes 7 tools for session management — usable by any MCP-compatible Claude client (Claude Code, custom apps, bots)
 - **Slack bot** listens for DMs from the configured owner and responds with session data
+- **koko-worker** runs apart from the app as a launchd agent. Through `worker_service.go`, the app edits `worker.json`, calls the `koko-worker` binary and reads the worker log
 - **Go tests** cover API server, auth, MCP protocol, Slack commands, config, and subscriber fan-out
 - **Vitest** tests guard against terminal resize and state regressions
 
@@ -235,12 +265,25 @@ git_service.go             Git file changes, branch info, file diffs
 config_service.go          App config + API key + Slack bot persistence
 process_monitor.go         Child process tree scanning for subagents
 types.go                   Shared Go types
+worker_service.go          Settings panel bridge to koko-worker (config, on/off, run, checks)
 *_test.go                  Go tests (API, MCP, Slack commands, config, subscriber)
 
 cmd/koko-cli/              CLI companion binary
   main.go                  Subcommand dispatch (sessions, status, send, output, tail, files)
   client.go                HTTP + WebSocket client
   config.go                Reads ~/Library/Application Support/koko/cli.json
+
+cmd/koko-worker/           Scheduled work jobs (own Go module, launchd agent)
+  main.go                  Subcommands: serve, run, check, status, install, uninstall
+  scheduler.go             Due slots, catch-up, retries, state.json under a file lock
+  jobs.go                  Stand-up, focus time and tono review jobs
+  claude.go                Headless `claude -p` runner with allowlists
+  calendar.go              Google Calendar events and the focus gap finder
+  github.go                PR lists through gh
+  slack.go                 Slack DMs in blocks
+  launchd.go               Agent install and removal, Mac wake booking
+  check.go                 Connection checks for the Settings panel
+  config.go                worker.json, defaults and paths
 
 frontend/src/
   App.tsx                  App shell with session sidebar + overlay routing
@@ -259,6 +302,7 @@ frontend/src/
     SettingsPanel.tsx      Slack bot, safe working, remote API config
     SafeWorkingOverlay.tsx Quiet hours + break reminder overlays
     OverlayPage.tsx        Glassmorphism floating overlay wrapper
+    WorkerSettings.tsx     Worker tab in Settings: jobs, times, checks, log
   hooks/
     useSessionTabs.ts      Session state, persistence, history
     useSessionActivity.ts  PTY activity monitoring + approval detection
