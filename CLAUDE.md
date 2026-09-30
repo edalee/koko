@@ -46,7 +46,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `mcp_server.go` + `mcp_tools.go` — MCP server, 8 tools
 - `github_service.go` — PR fetching, file diffs, reviews, commits, comments, CI status (Wails-bound)
 - `git_service.go` — Branch name, file changes, file diffs, repo slug detection
-- `process_monitor.go`: child process tree scan for the subagent monitor (Wails-bound)
+- `process_monitor.go`: child process tree scan for the subagent monitor
 - `config_service.go` — Atomic writes, API key, hidden PRs
 - `claude_service.go` — Last message extraction, listing a directory's stored conversations
 - `slack_commands.go` — Slack bot DM command handler
@@ -64,6 +64,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
+- Bound structs: `App`, `TerminalManager`, `GitHubService`, `GitService`, `ConfigService`, `ProcessMonitor`, `ClaudeService`, `WorkerService`
 - Exported methods on bound structs become callable from frontend
 - PTY output sent via `runtime.EventsEmit()` → frontend listens with `EventsOn()`
 - Base64 encoding for binary PTY data over Wails IPC

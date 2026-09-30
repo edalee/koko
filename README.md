@@ -62,7 +62,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 ### Remote Access
 - **HTTP API** — Control sessions, read output, and stream terminal data over REST/WebSocket on localhost
 - **MCP Server** — Any Claude instance with the Koko MCP configured can list sessions, read output, send input, and list file changes. Works with Claude Code, Claude in custom apps, Telegram bots, or any MCP-compatible client. Auto-registered on startup (`koko mcp`)
-- **Slack Bot** — DM the bot: `sessions`, `status`, `send <slug> <text>` — owner-only access. The Slack tab in Settings is hidden, so the bot runs only if `config.json` already holds a bot token. It stays idle otherwise
+- **Slack Bot** — DM the bot: `sessions`, `status`, `prompt <slug> <text>`, `send <slug> <text>`, `files`, `output`, `help` — owner-only access. The Slack tab in Settings is hidden, so the bot runs only if `config.json` already holds a bot token. It stays idle otherwise
 - **CLI Companion** — `koko-cli sessions`, `koko-cli tail <slug>`, `koko-cli send <slug> <text>`
 
 ### Safe Working
