@@ -226,7 +226,7 @@ Built on `feat/koko-worker`, not committed:
 Done since:
 - The Worker section shows in Settings, with fields for tono's team and window, and focus time's minimum gap.
 - `make build-worker`, `make test-worker`, and the worker in `make dev`, `make test` and `make lint`.
-- `make build` puts `koko-worker` inside `koko.app`, next to Koko's own binary.
+- `make build` puts `koko-worker` inside `Koko.app`, next to Koko's own binary.
 - The Slack bot token and user ID are copied from baldrick-work.
 - End-to-end test of the serve loop: one stand-up slot, one DM, one state record.
 

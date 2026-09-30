@@ -36,11 +36,15 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **Full interactive TUI** — Claude Code renders natively in xterm.js v6 with WebGL
 - **Session persistence**: Sessions survive app restarts. Clicking a disconnected tab opens the session dialog with its conversation preselected, so Enter resumes it exactly with `claude --resume <id>`. The tab keeps its slug
 - **Conversation picker**: After choosing a directory, pick a new conversation or reopen one Claude has stored for it, newest first, with its title and last reply. A conversation already open in another tab switches to that tab rather than opening twice
+- **One tab per conversation**: Koko refuses to open a conversation another session already holds, whether from the UI, the API or MCP
+- **Stable slugs**: A session keeps its slug (such as `koko-1`) across restarts, so the CLI, MCP and Slack always name the same session
 - **Session history**: Recently closed sessions shown in the new session dialog with last message preview. Choosing one reopens its conversation
 - **Reload session**: Restart Claude in place from the sidebar row or the terminal's right-click menu, keeping the tab, slug and conversation. Useful after changing `CLAUDE.md` or an MCP server
 - **Context display** — Live context window usage percentage and model name per session
 - **Approval detection** — Amber pulse on session icons when Claude is waiting for tool approval
 - **Clipboard support** — `Cmd+C` (plain + HTML), `Cmd+Shift+C` (Markdown), right-click context menu
+- **Search Web**: Right-click selected terminal text to search it in your default browser
+- **Redraw Terminal**: A right-click action that rebuilds a terminal whose text looks corrupt
 - **Keyboard shortcuts** — `Cmd+N` new session, `Cmd+W` close, `Cmd+1-9` switch
 - **Terminal search**: `Cmd+F` searches the terminal scrollback
 - **Git worktrees**: The session dialog can create a worktree on a new branch, so parallel sessions on one repo stay apart. The Worktrees module lists, opens and removes them. Closing a session offers to remove the worktree Koko created for it
@@ -53,14 +57,17 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 
 ### Awareness Panels
 - **GitHub PRs** — Live PR list from your repos with review status, approve/merge actions
+- **Tracked repos**: Choose the repos Koko watches for PRs in Settings > GitHub
 - **PR detail**: A full-screen overlay with the PR's files, diffs, reviews, commits and CI. You can read and reply to review threads and comments
 - **CI status**: GitHub Actions runs for the active branch, in the File Changes module
 - **GitHub Notifications** — Unread notifications with participating/all filter, mark-as-read
 - **File Changes** — Git diff for the active session's directory (staged/unstaged), click to view full diff
 - **Code Viewer** — GitHub-style split/unified diff with syntax highlighting
+- **Raw file view**: Read a whole file with syntax highlighting. Binary files are detected, and a very large file asks before it renders
 
 ### Remote Access
 - **HTTP API** — Control sessions, read output, and stream terminal data over REST/WebSocket on localhost
+- **Resume by id**: `GET /api/sessions` lists each session's `claudeSessionId`. Pass one to `POST /api/sessions` (or `claude_session_id` to the MCP `create_session` tool) to reopen that conversation. Without an id, a session starts a fresh conversation
 - **MCP Server** — Any Claude instance with the Koko MCP configured can list sessions, read output, send input, and list file changes. Works with Claude Code, Claude in custom apps, Telegram bots, or any MCP-compatible client. Auto-registered on startup (`koko mcp`)
 - **Slack Bot** — DM the bot: `sessions`, `status`, `prompt <slug> <text>`, `send <slug> <text>`, `files`, `output`, `help` — owner-only access. The Slack tab in Settings is hidden, so the bot runs only if `config.json` already holds a bot token. It stays idle otherwise
 - **CLI Companion** — `koko-cli sessions`, `koko-cli tail <slug>`, `koko-cli send <slug> <text>`

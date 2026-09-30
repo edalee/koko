@@ -1,5 +1,7 @@
 # Plan 020: Move GitHub & Notifications to Right Sidebar
 
+**Status:** Implemented. The PR icon now opens the full-screen `PRDetailOverlay` directly, so the sidebar PR list is gone.
+
 ## Changes
 
 ### 1. Remove from Toolbar

@@ -441,7 +441,7 @@
 ## ADR-036: Sessions stored by the backend, resumed by conversation id
 - **Date:** 2026-03-26
 - **Status:** Accepted (supersedes ADR-014)
-- **Decision:** Koko stores its tabs and closed-session history in `sessions.json`, through `ConfigService`. A session reopens its Claude conversation with `claude --resume <id>`. `--continue` is only a fallback, for a resume request with no id.
+- **Decision:** Koko stores its tabs and closed-session history in `sessions.json`, through `ConfigService`. A session reopens its Claude conversation with `claude --resume <id>`, using the tab's stored id or one chosen in the session dialog. There is no `--continue`: plan 028 step 8 removed it.
 - **Rationale:**
   - `SaveSessions` writes to `sessions.json.new`, moves the old file to `sessions.json.bak`, then renames. A crash mid-write never leaves a half-written file.
   - If `sessions.json` is missing or corrupt, `GetSessions` reads `sessions.json.bak`.
@@ -452,7 +452,7 @@
   - At startup, `app.go` seeds the slug counters from `sessions.json` before the frontend can create a session. A new session then never takes a saved tab's slug.
 - **Consequences:**
   - A disconnected tab opens the session dialog with its conversation preselected. It no longer reconnects silently.
-  - Plan 028 step 8 removes the `--continue` fallback.
+  - The API and MCP take a conversation id to resume, and refuse `resume` without one rather than start fresh behind the caller's back.
 - **Files:** `config_service.go`, `terminal_manager.go`, `app.go`, `frontend/src/hooks/useSessionTabs.ts`
 - **Tests:** `config_service_test.go`, `slug_test.go`, `terminal_manager_test.go`
 - **Plans:** `docs/plans/019-session-identity-and-recovery.md`, `docs/plans/028-session-recovery-and-picker.md`

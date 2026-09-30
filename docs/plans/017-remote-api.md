@@ -1,5 +1,7 @@
 # Plan 017: Remote Access — API Server, MCP, Slack Commands, CLI
 
+**Status:** Implemented
+
 ## Overview
 Exposes Koko's functionality via HTTP/WebSocket API, enabling remote access through Claude Code (MCP), Slack DMs, and a CLI companion.
 

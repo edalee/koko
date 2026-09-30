@@ -74,7 +74,7 @@ type session struct {
 	tailText        *ringBuffer // last 32KB of ANSI-stripped text for API ReadOutput
 	lastOutputAt    time.Time   // when PTY last produced output
 	subscribers     map[chan []byte]struct{}
-	waitingApproval bool   // set by PermissionRequest hook, cleared on next PTY output
+	waitingApproval bool   // set by PermissionRequest hook, cleared on the next input
 	approvalTool    string // tool name waiting for approval (e.g. "Bash", "Edit")
 }
 

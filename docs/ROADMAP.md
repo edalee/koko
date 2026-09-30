@@ -17,9 +17,10 @@ Features planned for future implementation, roughly prioritized.
 - [ ] **Blame view** — git blame overlay for file viewer
 
 ### Slack
+These wait on the old Slack DM bot decision (see "Old Slack DM bot" under Worker). If the bot is dropped, they go too.
 - [ ] **Channel mentions** — monitor specific channels for keywords/mentions (needs `channels:history` scope)
 - [ ] **Reaction support** — quick-react to messages from the bot DM
-- [ ] **Real unread tracking** — if Slack API ever exposes unread state for user tokens
+- ~~**Real unread tracking**~~: dropped. It served the user-token Slack panel, which Koko removed
 
 ### Sessions
 - [x] **Conversation picker**: choose a new conversation or one of those stored for a directory (plan 028, steps 1 to 4)

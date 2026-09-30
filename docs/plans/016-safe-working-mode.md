@@ -1,5 +1,7 @@
 # Plan 016: Safe Working Mode
 
+**Status:** Implemented
+
 ## Context
 
 Two wellbeing features to help users maintain healthy work habits:

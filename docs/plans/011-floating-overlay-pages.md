@@ -1,5 +1,7 @@
 # Plan 011: Floating Overlay Pages with Toolbar Notification Badges
 
+**Status:** Superseded by Plan 020. PRs and notifications moved to the right sidebar icon bar, the Mail module was removed, and `OverlayPage` now serves only Settings.
+
 ## Context
 
 The right sidebar panel approach (icon bar + sliding content) feels like a traditional IDE layout. The user wants a more modern, stylish UI where status icons live in the toolbar with colorful notification badges, and clicking them reveals floating glassmorphism overlay pages with smooth animations. This also adds a new Mail module (mock data).

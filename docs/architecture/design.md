@@ -146,24 +146,6 @@
 - Escape to close
 - Go backend: `GetFileDiff(dir, path, staged)` returns old/new content + hunks
 
-### GitHubPanel
-- Real PR data via Go backend `github_service.go`
-- PR cards use `.glass-card` + `.inset-highlight` + `rounded-xl`
-- Review badges: approved (green), changes (red), review needed (yellow)
-- Clickable cards open PR in browser
-
-### SlackPanel
-- Real Slack API via user token (`xoxp-`): DMs + mentions + thread replies
-- DMs: `conversations.list` + `conversations.history`, scoped to last hour, only where other person spoke last
-- Mentions/threads: `search.messages` with `<@selfID>` query (requires `search:read` scope)
-- DMs and mentions fetched in parallel goroutines
-- Props-based: receives messages, loading, configured state from `useSlack` hook
-- Unconfigured state: icon + "Connect Slack" message + "Open Settings" button
-- Message cards: `.glass-card`, DM icon (mint) vs @mention icon (blue), sender, channel, preview, time ago
-- Click opens `slack://` deep link to native Slack app
-- Polls every 60 seconds
-- Required scopes: `im:history`, `im:read`, `users:read`, `search:read`, `chat:write`
-
 ### SettingsPanel
 - Slack token input with show/hide toggle (Eye/EyeOff icons)
 - Save Token button with loading/saved feedback states

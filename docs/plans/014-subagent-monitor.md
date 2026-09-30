@@ -1,5 +1,7 @@
 # Plan 014: Subagent Process Monitor
 
+**Status:** Implemented. Running subagents now show in the Session context module, not a separate module.
+
 ## Context
 
 When Claude Code spawns subagents (via the Agent tool), they appear as child processes of the main `claude` process. The right sidebar has a placeholder "Subagents" module — this plan replaces it with a live process tree monitor.

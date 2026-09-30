@@ -1,5 +1,7 @@
 # Plan 008: Pre-commit Hooks, Linting, and CI
 
+**Status:** Implemented
+
 ## Context
 Koko has no pre-commit hooks, no frontend linting, and no CI. Adding quality gates before commits to catch issues early.
 

@@ -1,5 +1,7 @@
 # Plan 022: Fix /interact PTY input and output
 
+**Status:** Implemented
+
 ## Problem
 
 The `/interact` endpoint had two issues:
