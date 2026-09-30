@@ -46,16 +46,16 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `github_service.go` — PR fetching, file diffs, reviews, commits, comments, CI status (Wails-bound)
 - `git_service.go` — Branch name, file changes, file diffs, repo slug detection
 - `config_service.go` — Atomic writes, API key, hidden PRs
-- `claude_service.go` — Last message extraction
+- `claude_service.go` — Last message extraction, listing a directory's stored conversations
 - `slack_commands.go` — Slack bot DM command handler
 - `types.go` — Shared Go types with JSON tags
 - `cmd/koko-cli/` — CLI companion
 - `frontend/src/` — React app
-  - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, etc.
+  - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, etc.
   - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
-- `docs/plans/` — Implementation plans (001-024)
+- `docs/plans/` — Implementation plans (001-029)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
@@ -81,6 +81,6 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **`/design` command**: screenshots running app + analyzes against design system
 
 ## Design Docs
-- Implementation plans in `docs/plans/` (001-024)
+- Implementation plans in `docs/plans/` (001-029)
 - Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation

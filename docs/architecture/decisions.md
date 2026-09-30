@@ -317,3 +317,18 @@
   - Removed ~400 lines: `slack_service.go`, `SlackPanel.tsx`, `useSlack.ts`
 - **Setup:** `docs/references/slack-bot-setup.md`
 - **Plan:** `docs/plans/018-slack-bot-simplification.md`
+
+## ADR-028: One conversation, one owner
+- **Date:** 2026-09-27
+- **Status:** Accepted
+- **Decision:** A Claude conversation is held by at most one Koko session. `CreateSessionWithOpts` refuses with `ErrConversationBusy` when another session holds the requested conversation. Every path goes through `uuidClaimedLocked`: an explicit `--resume`, the `--continue` fallback, and the capture detector.
+- **Rationale:**
+  - Two Claude processes writing one conversation file corrupt it.
+  - A disabled row in the picker is not enforcement. The API and the MCP server reach the create path too.
+  - Failing to capture a conversation id is visible. Capturing the wrong one silently resumes someone else's conversation later. So capture refuses when ownership is unclear, rather than guessing.
+- **Consequences:**
+  - A dead session still owns its conversation, because reconnecting its tab resumes it. Only the session named in `Replaces` is exempt, and it is closed before its successor starts.
+  - A create reserves the conversation before its PTY starts, keyed by the create, so two racing creates cannot both pass the check.
+  - `--continue` resumes the newest conversation in a directory. When that is held, the session starts fresh instead. Plan 028 step 8 removes `--continue` altogether.
+  - The picker marks a held conversation with its tab's slug, and choosing it switches to that tab.
+- **Plan:** `docs/plans/028-session-recovery-and-picker.md`
