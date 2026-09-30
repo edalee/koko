@@ -11,8 +11,8 @@ export interface ConversationHolder {
 interface ConversationPickerProps {
   // null while loading. An empty list renders nothing at all.
   conversations: main.Conversation[] | null;
-  // "" means start a new conversation.
-  selected: string;
+  // "" means start a new conversation. null means nothing is chosen yet.
+  selected: string | null;
   onSelect: (uuid: string) => void;
   holders: Map<string, ConversationHolder>;
 }

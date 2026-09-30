@@ -39,10 +39,16 @@ export default function App() {
     createTab,
     closeTab,
     switchTab,
+    reconnectTab,
     renameTab,
     handleSessionExit,
     history,
   } = useSessionTabs();
+  // Plan 028 step 5: reconnecting a tab and opening a worktree both go
+  // through the session dialog, instead of acting silently.
+  const [reconnectFor, setReconnectFor] = useState<string | null>(null);
+  const [dialogDirectory, setDialogDirectory] = useState<string | undefined>(undefined);
+  const reconnectTarget = reconnectFor ? tabs.find((t) => t.id === reconnectFor) : undefined;
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [pendingWorktreeClose, setPendingWorktreeClose] = useState<{
@@ -109,13 +115,30 @@ export default function App() {
   } = useSafeWorking(!!activeTabId);
   const { update, dismiss: dismissUpdate } = useUpdateCheck();
 
+  // Select a tab. A disconnected one opens the session dialog to choose what
+  // to reconnect into, rather than reconnecting silently (plan 028 step 5).
+  const selectTab = useCallback(
+    (tabId: string) => {
+      switchTab(tabId);
+      const tab = tabs.find((t) => t.id === tabId);
+      if (tab && !tab.connected) setReconnectFor(tabId);
+    },
+    [tabs, switchTab],
+  );
+
+  const closeSessionDialog = useCallback(() => {
+    setShowNewSession(false);
+    setReconnectFor(null);
+    setDialogDirectory(undefined);
+  }, []);
+
   const handleSwitchByIndex = useCallback(
     (index: number) => {
       if (index < tabs.length) {
-        switchTab(tabs[index].id);
+        selectTab(tabs[index].id);
       }
     },
-    [tabs, switchTab],
+    [tabs, selectTab],
   );
 
   // When closing a session, intercept if Koko created a worktree for it
@@ -197,7 +220,7 @@ export default function App() {
               activeSessionId={activeTabId}
               sessionStates={sessionStates}
               sessionBranches={sessionBranches}
-              onSessionSelect={switchTab}
+              onSessionSelect={selectTab}
               onNewSession={() => setShowNewSession(true)}
               onDeleteSession={requestCloseTab}
               onRenameSession={renameTab}
@@ -229,7 +252,7 @@ export default function App() {
                         // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: reconnect overlay
                         <div
                           className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-base/60 backdrop-blur-sm cursor-pointer"
-                          onClick={() => switchTab(tab.id)}
+                          onClick={() => setReconnectFor(tab.id)}
                         >
                           <img
                             src={kokoBird}
@@ -325,10 +348,11 @@ export default function App() {
               onInjectCommand={handleInjectCommand}
               hasActiveSession={!!activeTabId}
               activeDirectory={activeTab?.directory ?? null}
-              onOpenWorktreeSession={(name, directory) => {
-                // The Worktrees module only opens sessions in worktrees that
-                // already exist; mark them so close-time cleanup is offered.
-                createTab(name, directory, directory);
+              onOpenWorktreeSession={(_name, directory) => {
+                // Open the dialog on this worktree, so the user can pick a
+                // conversation stored for it or start a new one.
+                setDialogDirectory(directory);
+                setShowNewSession(true);
               }}
               onFileClick={(path, staged) => {
                 if (activeTab?.directory) {
@@ -400,16 +424,30 @@ export default function App() {
         />
 
         <SessionDialog
-          open={showNewSession}
-          onClose={() => setShowNewSession(false)}
+          open={showNewSession || reconnectTarget !== undefined}
+          onClose={closeSessionDialog}
           onCreate={async (name, directory, worktreePath, resume) => {
+            // Opened from the worktrees module on an existing worktree: mark
+            // it, as before, so close-time cleanup is offered.
+            const worktree =
+              worktreePath ?? (directory === dialogDirectory ? dialogDirectory : undefined);
             // Let a failure reach the dialog, which shows it and stays open.
-            await createTab(name, directory, worktreePath, resume);
-            setShowNewSession(false);
+            await createTab(name, directory, worktree, resume);
+            closeSessionDialog();
           }}
+          reconnect={reconnectTarget}
+          onReconnect={async (tab, choice) => {
+            await reconnectTab(tab, choice);
+            closeSessionDialog();
+          }}
+          initialDirectory={dialogDirectory}
           onOpenHeld={(tabId) => {
+            closeSessionDialog();
             switchTab(tabId);
-            setShowNewSession(false);
+            // D2: the user chose this conversation, so a disconnected holder
+            // reconnects straight into it. A failure shows on its card.
+            const holder = tabs.find((t) => t.id === tabId);
+            if (holder && !holder.connected) reconnectTab(holder).catch(() => {});
           }}
           history={history}
           activeDirs={tabs.map((t) => t.directory)}

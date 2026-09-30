@@ -31,6 +31,12 @@ export interface ResumeTarget {
   slug?: string;
 }
 
+/** How to reconnect a tab: into a given conversation, or a fresh one. */
+export interface ReconnectChoice {
+  claudeSessionId?: string;
+  fresh?: boolean;
+}
+
 /** Payload of the session:claude-id event emitted by TerminalManager. */
 interface SessionClaudeIDEvent {
   sessionId: string;
@@ -250,18 +256,28 @@ export function useSessionTabs() {
   }, []);
 
   const reconnectingRef = useRef<Set<string>>(new Set());
+  /**
+   * Restart a tab's Claude process in the same tab, keeping its slug.
+   *
+   * With no choice it resumes the tab's own conversation. The picker passes a
+   * choice: a specific conversation, or a fresh one. Rejects on failure, after
+   * recording the reason on the tab's reconnect card, so the picker can show
+   * it too.
+   */
   const reconnectTab = useCallback(
-    async (tab: SessionTab) => {
+    async (tab: SessionTab, choice?: ReconnectChoice) => {
       if (reconnectingRef.current.has(tab.id)) return "";
       reconnectingRef.current.add(tab.id);
+      const fresh = choice?.fresh === true;
+      const claudeSessionId = fresh ? "" : choice?.claudeSessionId || tab.claudeSessionId || "";
       try {
         const sessionId = await CreateSessionWithOpts({
           name: tab.name,
           dir: tab.directory,
           cols: 80,
           rows: 24,
-          resume: true,
-          claudeSessionId: tab.claudeSessionId || "",
+          resume: !fresh,
+          claudeSessionId,
           // Keep the slug, so koko-1 still names this session after a restart.
           slug: tab.slug || "",
           // Name the session being taken over. Its entry lingers in the
@@ -272,7 +288,14 @@ export function useSessionTabs() {
         setTabs((prev) =>
           prev.map((t) =>
             t.id === tab.id
-              ? { ...t, id: sessionId, connected: true, reconnectError: undefined }
+              ? {
+                  ...t,
+                  id: sessionId,
+                  connected: true,
+                  reconnectError: undefined,
+                  // A fresh conversation's id arrives later, on the event.
+                  claudeSessionId: claudeSessionId || undefined,
+                }
               : t,
           ),
         );
@@ -287,7 +310,7 @@ export function useSessionTabs() {
         setTabs((prev) =>
           prev.map((t) => (t.id === tab.id ? { ...t, reconnectError: reconnectMessage(err) } : t)),
         );
-        return "";
+        throw err;
       } finally {
         reconnectingRef.current.delete(tab.id);
       }
@@ -350,18 +373,14 @@ export function useSessionTabs() {
     [activeTabId, tabs, saveCurrentState],
   );
 
+  // Only selects the tab. It used to reconnect a disconnected tab on the
+  // spot, silently, into whatever conversation it had or none. Reconnecting
+  // is now a choice made in the session dialog (plan 028, step 5).
   const switchTab = useCallback(
     (tabId: string) => {
-      const tab = tabs.find((t) => t.id === tabId);
-      if (!tab) return;
-
-      setActiveTabId(tabId);
-
-      if (!tab.connected) {
-        reconnectTab(tab);
-      }
+      if (tabs.some((t) => t.id === tabId)) setActiveTabId(tabId);
     },
-    [tabs, reconnectTab],
+    [tabs],
   );
 
   const renameTab = useCallback((tabId: string, newName: string) => {
@@ -402,6 +421,7 @@ export function useSessionTabs() {
     createTab,
     closeTab,
     switchTab,
+    reconnectTab,
     renameTab,
     handleSessionExit,
     history,

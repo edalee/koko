@@ -23,7 +23,7 @@ Features planned for future implementation, roughly prioritized.
 
 ### Sessions
 - [x] **Conversation picker** — choose a new conversation or one of those stored for a directory (plan 028, steps 1 to 4)
-- [ ] **Route every entry point through the picker** — worktrees module and disconnected tabs. A tab with no stored conversation preselects nothing (plan 028 step 5, D1)
+- [x] **Route every entry point through the picker** — worktrees module and disconnected tabs. A tab with no stored conversation preselects nothing (plan 028 step 5, D1)
 - [ ] **Reload session** — restart the Claude process in place, keeping the tab, slug and conversation (plan 028 step 6)
 - [ ] **Delete conversations** — TODO. Per-row delete in the picker, and "clear all conversations here". Deletes Claude's session file, so it confirms first and skips any conversation a tab holds (plan 028 step 7). Until then, delete `~/.claude/projects/<folder>/<id>.jsonl` by hand
 - [ ] **Clear session history** — TODO. Drops Koko's closed-session records only, from Settings (plan 028 step 7)
