@@ -1,5 +1,34 @@
 # Plan 028: Session Recovery and Conversation Picker
 
+## Progress
+
+| Step | Status | PR |
+|---|---|---|
+| 1. Backend lister | Done | #16 |
+| 2. Stable slugs | Done | #17 |
+| 3. Ownership guard | Done | #18 |
+| 4. Picker in the session dialog | Done | #19 |
+| 5. Route the other entry points | Next | |
+| 6. Reload session | Planned | |
+| 7. Deletion | TODO, deferred | |
+| 8. Drop `--continue` | Planned, must be last | |
+
+Step 7 is recorded as a TODO in `docs/ROADMAP.md`. Until it lands, delete a
+conversation by removing `~/.claude/projects/<folder>/<id>.jsonl`. The
+filename is the conversation id the picker uses.
+
+Two things surfaced while building that the plan did not foresee:
+
+- `lastAssistantText` read one fixed 64KB window from the end of a file. A
+  single attachment record can be larger, so most previews were empty,
+  including the sidebar's last-message snippets. It now walks backwards in
+  chunks. Fixed in step 1.
+- The session dialog re-seeded its worktree defaults on every App render,
+  about once a second, because App passes `activeDirs` as a new array each
+  time. It overwrote a typed branch name. Fixed in step 4.
+
+The ownership rule is recorded as ADR-028 in `docs/architecture/decisions.md`.
+
 ## Problem
 
 Koko has no way to choose between recovering work and starting fresh.

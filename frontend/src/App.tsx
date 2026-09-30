@@ -5,12 +5,12 @@ import { Write } from "../wailsjs/go/main/TerminalManager";
 import kokoBird from "./assets/koko_bird.svg";
 import ClaudeModeSwitcher from "./components/ClaudeModeSwitcher";
 import CodeViewer from "./components/CodeViewer";
-import NewSessionDialog from "./components/NewSessionDialog";
 import OverlayPage from "./components/OverlayPage";
 import PRDetailOverlay from "./components/PRDetailOverlay";
 import QuickTerminal from "./components/QuickTerminal";
 import RightSidebar from "./components/RightSidebar";
 import SafeWorkingOverlay from "./components/SafeWorkingOverlay";
+import SessionDialog from "./components/SessionDialog";
 import SessionSidebar from "./components/SessionSidebar";
 import SettingsPanel from "./components/SettingsPanel";
 import TerminalPane from "./components/TerminalPane";
@@ -399,15 +399,21 @@ export default function App() {
           }}
         />
 
-        <NewSessionDialog
+        <SessionDialog
           open={showNewSession}
           onClose={() => setShowNewSession(false)}
-          onCreate={(name, directory, worktreePath) => {
-            createTab(name, directory, worktreePath);
+          onCreate={async (name, directory, worktreePath, resume) => {
+            // Let a failure reach the dialog, which shows it and stays open.
+            await createTab(name, directory, worktreePath, resume);
+            setShowNewSession(false);
+          }}
+          onOpenHeld={(tabId) => {
+            switchTab(tabId);
             setShowNewSession(false);
           }}
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
+          tabs={tabs}
         />
 
         <WorktreeRemovalDialog

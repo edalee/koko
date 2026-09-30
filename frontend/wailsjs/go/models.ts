@@ -174,6 +174,26 @@ export namespace main {
 	        this.model = source["model"];
 	    }
 	}
+	export class Conversation {
+	    uuid: string;
+	    title: string;
+	    preview: string;
+	    modifiedAt: number;
+	    sizeBytes: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Conversation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uuid = source["uuid"];
+	        this.title = source["title"];
+	        this.preview = source["preview"];
+	        this.modifiedAt = source["modifiedAt"];
+	        this.sizeBytes = source["sizeBytes"];
+	    }
+	}
 	export class CreateSessionOpts {
 	    name: string;
 	    dir: string;
@@ -183,7 +203,7 @@ export namespace main {
 	    claudeSessionId: string;
 	    slug: string;
 	    replaces: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CreateSessionOpts(source);
 	    }
@@ -633,6 +653,7 @@ export namespace main {
 	    closedAt?: number;
 	    status: string;
 	    lastMsg?: string;
+	    worktreePath?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionRecord(source);
@@ -648,6 +669,7 @@ export namespace main {
 	        this.closedAt = source["closedAt"];
 	        this.status = source["status"];
 	        this.lastMsg = source["lastMsg"];
+	        this.worktreePath = source["worktreePath"];
 	    }
 	}
 	export class SessionsData {

@@ -22,16 +22,16 @@ export function GetClaudeSessionID(arg1) {
   return window['go']['main']['TerminalManager']['GetClaudeSessionID'](arg1);
 }
 
-export function GetSessionSlug(arg1) {
-  return window['go']['main']['TerminalManager']['GetSessionSlug'](arg1);
-}
-
 export function GetSessionBySlug(arg1) {
   return window['go']['main']['TerminalManager']['GetSessionBySlug'](arg1);
 }
 
 export function GetSessionPID(arg1) {
   return window['go']['main']['TerminalManager']['GetSessionPID'](arg1);
+}
+
+export function GetSessionSlug(arg1) {
+  return window['go']['main']['TerminalManager']['GetSessionSlug'](arg1);
 }
 
 export function GetSessionState(arg1) {
@@ -56,6 +56,10 @@ export function Resize(arg1, arg2, arg3) {
 
 export function ResolveSession(arg1) {
   return window['go']['main']['TerminalManager']['ResolveSession'](arg1);
+}
+
+export function SeedSlugs(arg1) {
+  return window['go']['main']['TerminalManager']['SeedSlugs'](arg1);
 }
 
 export function SetApprovalState(arg1, arg2) {

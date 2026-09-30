@@ -34,8 +34,9 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 ### Claude Code Sessions
 - **Named sessions** — Each session defaults to the directory name, or give it a custom name
 - **Full interactive TUI** — Claude Code renders natively in xterm.js v6 with WebGL
-- **Session persistence** — Sessions survive app restarts; reconnect with `claude --continue`
-- **Session history** — Recently closed sessions shown in the new session dialog with last message preview
+- **Session persistence** — Sessions survive app restarts. Reconnecting resumes the exact conversation with `claude --resume <id>`, and keeps the session's slug
+- **Conversation picker** — After choosing a directory, pick a new conversation or reopen one Claude has stored for it, newest first, with its title and last reply. A conversation already open in another tab switches to that tab rather than opening twice
+- **Session history** — Recently closed sessions shown in the new session dialog with last message preview. Choosing one reopens its conversation
 - **Context display** — Live context window usage percentage and model name per session
 - **Approval detection** — Amber pulse on session icons when Claude is waiting for tool approval
 - **Clipboard support** — `Cmd+C` (plain + HTML), `Cmd+Shift+C` (Markdown), right-click context menu
@@ -255,7 +256,8 @@ frontend/src/
     CodeViewer.tsx         GitHub-style split/unified diff overlay
     GitHubPanel.tsx        PR cards with approve/merge actions
     NotificationsPanel.tsx GitHub notifications with filter + mark-read
-    NewSessionDialog.tsx   Session creation with history + directory picker
+    SessionDialog.tsx      Start or recover a session: directory, history, worktree
+    ConversationPicker.tsx New conversation or one of those stored for a directory
     SettingsPanel.tsx      Slack bot, safe working, remote API config
     SafeWorkingOverlay.tsx Quiet hours + break reminder overlays
     OverlayPage.tsx        Glassmorphism floating overlay wrapper
@@ -279,7 +281,7 @@ frontend/src/
     session-activity.test.ts        Activity tracking tests
 
 docs/
-  plans/                   Implementation plans (001-018)
+  plans/                   Implementation plans (001-029)
   architecture/            ADRs and design system
   references/              Setup guides (Slack bot)
 ```

@@ -24,6 +24,13 @@ export function reconnectMessage(err: unknown): string {
   return `Could not reconnect: ${text}`;
 }
 
+/** A stored conversation to reopen, instead of starting a fresh one. */
+export interface ResumeTarget {
+  claudeSessionId: string;
+  // The slug the conversation had when its tab was closed, if known.
+  slug?: string;
+}
+
 /** Payload of the session:claude-id event emitted by TerminalManager. */
 interface SessionClaudeIDEvent {
   sessionId: string;
@@ -191,16 +198,19 @@ export function useSessionTabs() {
   }, []);
 
   const createTab = useCallback(
-    async (name: string, directory: string, worktreePath?: string) => {
+    async (name: string, directory: string, worktreePath?: string, resume?: ResumeTarget) => {
+      // Rejects with ErrConversationBusy if another session holds the
+      // conversation. The caller shows that, rather than it vanishing.
       const sessionId = await CreateSessionWithOpts({
         name,
         dir: directory,
         cols: 80,
         rows: 24,
-        resume: false,
-        claudeSessionId: "",
-        slug: "", // a new session gets the next free slug from the backend
-        replaces: "", // a new session takes over from nothing
+        resume: !!resume,
+        claudeSessionId: resume?.claudeSessionId ?? "",
+        // Reuse the slug a closed session had, so koko-1 keeps naming it.
+        slug: resume?.slug ?? "",
+        replaces: "", // a new tab takes over from nothing
       });
       const newTab: SessionTab = {
         id: sessionId,
@@ -210,6 +220,8 @@ export function useSessionTabs() {
         createdAt: Date.now(),
         connected: true,
         worktreePath,
+        // Known up front when resuming, so the picker marks it held at once.
+        claudeSessionId: resume?.claudeSessionId,
       };
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(sessionId);

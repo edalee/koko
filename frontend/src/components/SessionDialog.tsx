@@ -10,9 +10,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PickDirectory } from "../../wailsjs/go/main/App";
+import { ListConversations } from "../../wailsjs/go/main/ClaudeService";
 import { GetSessions } from "../../wailsjs/go/main/ConfigService";
 import { CreateWorktree, GetBranchName } from "../../wailsjs/go/main/GitService";
-import type { SessionHistoryEntry } from "../types";
+import type { main } from "../../wailsjs/go/models";
+import { type ResumeTarget, reconnectMessage } from "../hooks/useSessionTabs";
+import type { SessionHistoryEntry, SessionTab } from "../types";
+import ConversationPicker, { type ConversationHolder, holderAction } from "./ConversationPicker";
 
 function timeAgo(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -31,12 +35,34 @@ function shortenPath(path: string): string {
   return path;
 }
 
-interface NewSessionDialogProps {
+interface SessionDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (name: string, directory: string, worktreePath?: string) => void;
+  // Rejects when the session cannot start, for example when the conversation
+  // is already open elsewhere. The dialog shows the reason and stays open.
+  onCreate: (
+    name: string,
+    directory: string,
+    worktreePath?: string,
+    resume?: ResumeTarget,
+  ) => Promise<void>;
+  // Switch to the tab that already holds a conversation, reconnecting it if
+  // it is disconnected. One conversation, one tab.
+  onOpenHeld: (tabId: string) => void;
   history: SessionHistoryEntry[];
   activeDirs: string[];
+  tabs: SessionTab[];
+}
+
+/** A closed session's conversation, shaped like a listed one. */
+function historyConversation(entry: SessionHistoryEntry): main.Conversation {
+  return {
+    uuid: entry.claudeSessionId ?? "",
+    title: entry.name,
+    preview: entry.lastMessage ?? "",
+    modifiedAt: entry.closedAt,
+    sizeBytes: 0,
+  };
 }
 
 type AnimState = "closed" | "open" | "closing";
@@ -52,6 +78,22 @@ function dirParent(path: string): string {
   return idx === -1 ? stripped : stripped.slice(0, idx);
 }
 
+/** The main button's label, which says what pressing it will do. */
+export function submitLabel(s: {
+  creatingWorktree: boolean;
+  holder?: ConversationHolder;
+  selected: string;
+  useWorktree: boolean;
+}): string {
+  if (s.creatingWorktree) return "Creating worktree...";
+  if (s.holder) {
+    const action = holderAction(s.holder);
+    return action.charAt(0).toUpperCase() + action.slice(1);
+  }
+  if (s.selected) return "Resume Conversation";
+  return s.useWorktree ? "Create Worktree + Session" : "Create Session";
+}
+
 function branchSlug(branch: string): string {
   return branch.replace(/[^a-zA-Z0-9-_]/g, "-").toLowerCase();
 }
@@ -60,17 +102,45 @@ function randomSlug(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
-export default function NewSessionDialog({
+export default function SessionDialog({
   open,
   onClose,
   onCreate,
+  onOpenHeld,
   history,
   activeDirs,
-}: NewSessionDialogProps) {
+  tabs,
+}: SessionDialogProps) {
   const [state, setState] = useState<AnimState>("closed");
   const [name, setName] = useState("");
   const [directory, setDirectory] = useState("");
   const [recentDirs, setRecentDirs] = useState<string[]>([]);
+
+  // Step 2: which conversation to open. "" means start a new one.
+  const [conversations, setConversations] = useState<main.Conversation[] | null>([]);
+  const [selected, setSelected] = useState("");
+  // A closed session chosen from Recent Sessions, applied once its
+  // directory's conversations have loaded.
+  const [preselect, setPreselect] = useState<SessionHistoryEntry | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Every tab that has a conversation open, dead or alive. A dead session
+  // still owns its conversation, because reconnecting it resumes it.
+  const holders = useMemo(() => {
+    const m = new Map<string, ConversationHolder>();
+    for (const t of tabs) {
+      if (t.claudeSessionId) {
+        m.set(t.claudeSessionId, {
+          tabId: t.id,
+          label: t.slug || t.name,
+          connected: t.connected,
+        });
+      }
+    }
+    return m;
+  }, [tabs]);
+  const holder = selected ? holders.get(selected) : undefined;
 
   // Worktree state
   const [useWorktree, setUseWorktree] = useState(false);
@@ -95,10 +165,18 @@ export default function NewSessionDialog({
     }
   }, [open]);
 
+  // Read through a ref so the effect below runs on a directory change only.
+  // App passes a fresh array on every render, and the polling hooks re-render
+  // it every second or so, which re-seeded these defaults each time: a new
+  // random branch name, any typed name overwritten, and the toggle reset.
+  const activeDirsRef = useRef(activeDirs);
+  activeDirsRef.current = activeDirs;
+
   // When a directory is picked, look up its current branch and seed worktree
   // defaults. If the dir collides with another active session, auto-enable
   // the worktree toggle.
   useEffect(() => {
+    const activeDirs = activeDirsRef.current;
     if (!directory) {
       setCurrentBranch(null);
       setWorktreeBranch("");
@@ -123,7 +201,38 @@ export default function NewSessionDialog({
         setWorktreeBranch(`wt-${suffix}`);
         setWorktreePath(`${dirParent(directory)}/${dirBasename(directory)}-${suffix}`);
       });
-  }, [directory, activeDirs]);
+  }, [directory]);
+
+  // Load the directory's conversations whenever it changes. A counter drops
+  // replies that arrive after the user has moved on to another directory.
+  const loadSeq = useRef(0);
+  useEffect(() => {
+    const seq = ++loadSeq.current;
+    setSelected("");
+    setCreateError(null);
+    if (!directory) {
+      setConversations([]);
+      return;
+    }
+    setConversations(null);
+    ListConversations(directory)
+      .catch(() => [] as main.Conversation[])
+      .then((list) => {
+        if (seq !== loadSeq.current) return;
+        let rows = list ?? [];
+        if (preselect?.claudeSessionId && preselect.directory === directory) {
+          // The closed session may be older than the newest 20 listed. Keep
+          // it reachable rather than silently dropping it, which is the bug
+          // Recent Sessions had.
+          if (!rows.some((c) => c.uuid === preselect.claudeSessionId)) {
+            rows = [historyConversation(preselect), ...rows];
+          }
+          setSelected(preselect.claudeSessionId);
+          setUseWorktree(false);
+        }
+        setConversations(rows);
+      });
+  }, [directory, preselect]);
 
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -132,6 +241,8 @@ export default function NewSessionDialog({
       setState("open");
       setName("");
       setDirectory("");
+      setPreselect(null);
+      setCreating(false);
       setTimeout(() => nameRef.current?.focus(), 50);
     } else if (!open && state === "open") {
       setState("closing");
@@ -150,11 +261,20 @@ export default function NewSessionDialog({
   }, []);
 
   const handleCreate = useCallback(async () => {
-    if (!directory) return;
+    if (!directory || creating) return;
     setWorktreeError(null);
+    setCreateError(null);
+
+    // D2: a conversation another tab holds is opened in that tab, never
+    // twice. Switching reconnects it if it is disconnected.
+    if (holder) {
+      onOpenHeld(holder.tabId);
+      return;
+    }
 
     let finalDir = directory;
-    if (useWorktree) {
+    // A new worktree has no conversations, so the two never combine.
+    if (useWorktree && !selected) {
       if (!worktreeBranch.trim() || !worktreePath.trim()) {
         setWorktreeError("Branch and worktree path are required");
         return;
@@ -178,10 +298,49 @@ export default function NewSessionDialog({
       setCreatingWorktree(false);
     }
 
+    const inWorktree = useWorktree && !selected;
     const sessionName =
-      name.trim() || (useWorktree ? branchSlug(worktreeBranch) : dirBasename(finalDir));
-    onCreate(sessionName, finalDir, useWorktree ? finalDir : undefined);
-  }, [name, directory, useWorktree, worktreeBranch, worktreePath, createNewBranch, onCreate]);
+      name.trim() || (inWorktree ? branchSlug(worktreeBranch) : dirBasename(finalDir));
+
+    let resume: ResumeTarget | undefined;
+    if (selected) {
+      // Reuse the slug the conversation had when its tab closed, so koko-1
+      // still names it.
+      const closed = history.find((h) => h.claudeSessionId === selected);
+      resume = { claudeSessionId: selected, slug: closed?.slug || undefined };
+    }
+
+    setCreating(true);
+    try {
+      await onCreate(sessionName, finalDir, inWorktree ? finalDir : undefined, resume);
+    } catch (err) {
+      // Most likely the conversation was opened elsewhere while the dialog
+      // was up. Say so and stay open, rather than failing silently.
+      setCreateError(reconnectMessage(err));
+    } finally {
+      setCreating(false);
+    }
+  }, [
+    name,
+    directory,
+    creating,
+    holder,
+    onOpenHeld,
+    selected,
+    history,
+    useWorktree,
+    worktreeBranch,
+    worktreePath,
+    createNewBranch,
+    onCreate,
+  ]);
+
+  // Picking a conversation and creating a worktree are mutually exclusive.
+  const selectConversation = useCallback((uuid: string) => {
+    setSelected(uuid);
+    setCreateError(null);
+    if (uuid) setUseWorktree(false);
+  }, []);
 
   useEffect(() => {
     if (state !== "open") return;
@@ -297,7 +456,11 @@ export default function NewSessionDialog({
                   <input
                     type="checkbox"
                     checked={useWorktree}
-                    onChange={(e) => setUseWorktree(e.target.checked)}
+                    onChange={(e) => {
+                      setUseWorktree(e.target.checked);
+                      // A new worktree has no conversations to reopen.
+                      if (e.target.checked) setSelected("");
+                    }}
                     className="accent-accent"
                   />
                   <GitBranch className="size-3.5 text-muted-foreground" />
@@ -360,6 +523,18 @@ export default function NewSessionDialog({
               </div>
             )}
 
+            {/* Step 2: new conversation, or one of those already stored */}
+            {directory && (
+              <div className="pt-2">
+                <ConversationPicker
+                  conversations={conversations}
+                  selected={selected}
+                  onSelect={selectConversation}
+                  holders={holders}
+                />
+              </div>
+            )}
+
             {/* Session history / Recent directories */}
             {!directory && (
               <div className="space-y-1 pt-1">
@@ -377,7 +552,13 @@ export default function NewSessionDialog({
                           type="button"
                           key={`${entry.directory}-${entry.closedAt}-${idx}`}
                           onClick={() => {
-                            onCreate(entry.name, entry.directory);
+                            // Select, don't create. This used to start a
+                            // fresh session and drop the stored
+                            // conversation. Now it opens the picker with
+                            // that conversation chosen, so Enter reopens it.
+                            setName(entry.name);
+                            setPreselect(entry);
+                            setDirectory(entry.directory);
                           }}
                           className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-md text-muted-foreground hover:text-white hover:bg-white/5 transition-colors text-left"
                         >
@@ -421,6 +602,16 @@ export default function NewSessionDialog({
           </div>
         </div>
 
+        {createError && (
+          <div
+            role="alert"
+            className="mx-5 mb-1 flex items-start gap-2 px-3 py-2 rounded bg-error/10 border border-error/20 text-[12px] text-error"
+          >
+            <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+            <span className="break-words">{createError}</span>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="px-5 py-4 border-t border-white/[0.08] flex justify-end gap-3">
           <button
@@ -433,7 +624,7 @@ export default function NewSessionDialog({
           <button
             type="button"
             onClick={handleCreate}
-            disabled={!directory || creatingWorktree}
+            disabled={!directory || creatingWorktree || creating}
             className="px-4 py-2 text-sm rounded-md font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed text-white relative overflow-hidden border-2 border-transparent flex items-center gap-2"
             style={{
               background: directory
@@ -441,12 +632,8 @@ export default function NewSessionDialog({
                 : undefined,
             }}
           >
-            {creatingWorktree && <Loader2 className="size-3.5 animate-spin" />}
-            {creatingWorktree
-              ? "Creating worktree..."
-              : useWorktree
-                ? "Create Worktree + Session"
-                : "Create Session"}
+            {(creatingWorktree || creating) && <Loader2 className="size-3.5 animate-spin" />}
+            {submitLabel({ creatingWorktree, holder, selected, useWorktree })}
           </button>
         </div>
       </div>
