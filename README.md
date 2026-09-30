@@ -37,6 +37,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **Session persistence**: Sessions survive app restarts. Clicking a disconnected tab opens the session dialog with its conversation preselected, so Enter resumes it exactly with `claude --resume <id>`. The tab keeps its slug
 - **Conversation picker**: After choosing a directory, pick a new conversation or reopen one Claude has stored for it, newest first, with its title and last reply. A conversation already open in another tab switches to that tab rather than opening twice
 - **Session history**: Recently closed sessions shown in the new session dialog with last message preview. Choosing one reopens its conversation
+- **Reload session**: Restart Claude in place from the sidebar row or the terminal's right-click menu, keeping the tab, slug and conversation. Useful after changing `CLAUDE.md` or an MCP server
 - **Context display** — Live context window usage percentage and model name per session
 - **Approval detection** — Amber pulse on session icons when Claude is waiting for tool approval
 - **Clipboard support** — `Cmd+C` (plain + HTML), `Cmd+Shift+C` (Markdown), right-click context menu

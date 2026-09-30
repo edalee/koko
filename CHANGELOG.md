@@ -9,6 +9,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Search Web**: Right-click selected terminal text to search it in the default browser
 - **Conversation ownership guard**: A conversation can be open in only one session. Resuming one another session holds is refused, including through the API and MCP (ADR-028)
 - **Stable slugs**: A session keeps its slug across restarts, so `koko-1` in the CLI, MCP and Slack always names the same session
+- **Reload session**: Restart a session's Claude process in the same tab, keeping its slug and conversation. On the sidebar row and in the terminal's right-click menu. Asks first if Claude is still working (plan 028)
 - **Remote API** — HTTP/WebSocket API server on localhost:19876 with Bearer token auth
 - **MCP Server** — `koko mcp` subcommand, 8 tools including `interact` (send+receive in one call with output settle detection)
 - **Slack Bot** — DM the bot to control sessions. Owner-only access via Slack member ID
