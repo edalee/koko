@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -370,8 +371,8 @@ type conversationHead struct {
 // belongsTo reports whether the session file belongs to dir. A file with no
 // recorded cwd is given the benefit of the doubt, as the picker lists it.
 //
-// Listing and deleting both go through this one test, so the two can never
-// disagree about which conversations a directory has.
+// Listing and the per-row delete share this test. Bulk delete is stricter:
+// see conversationsIn.
 func (h conversationHead) belongsTo(dir string) bool {
 	return h.cwd == "" || sameDir(h.cwd, dir)
 }
@@ -701,12 +702,20 @@ func conversationPath(dir, uuid string) (string, error) {
 	return path, nil
 }
 
+// conversationFile is a session file chosen for deletion, with what the
+// ownership check needs.
+type conversationFile struct {
+	uuid     string
+	path     string
+	modified time.Time
+}
+
 // conversationsIn returns every conversation stored for dir, with no cap.
 //
 // Files with no recorded cwd are left out and counted as unknown. In a
 // project folder that several directories share, such a file may belong to
 // a neighbour, and a bulk delete must not guess.
-func conversationsIn(dir string) (ids []string, unknown int) {
+func conversationsIn(dir string) (files []conversationFile, unknown int) {
 	sessionDir := claudeProjectDir(dir)
 	if sessionDir == "" {
 		return nil, 0
@@ -719,26 +728,35 @@ func conversationsIn(dir string) (ids []string, unknown int) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		head := readConversationHead(filepath.Join(sessionDir, e.Name()))
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		path := filepath.Join(sessionDir, e.Name())
+		head := readConversationHead(path)
 		switch {
 		case head.cwd == "":
 			unknown++
 		case sameDir(head.cwd, dir):
-			ids = append(ids, strings.TrimSuffix(e.Name(), ".jsonl"))
+			files = append(files, conversationFile{
+				uuid:     strings.TrimSuffix(e.Name(), ".jsonl"),
+				path:     path,
+				modified: info.ModTime(),
+			})
 		}
 	}
-	return ids, unknown
+	return files, unknown
 }
 
-// removeConversation deletes a conversation's session file, and the folder
-// Claude keeps beside it for subagent and tool output.
-func removeConversation(dir, uuid string) error {
-	path, err := conversationPath(dir, uuid)
-	if err != nil {
-		return err
-	}
+// deleteConversationFile deletes a session file, then the folder Claude keeps
+// beside it for subagent and tool output. Once the file is gone the
+// conversation is gone, so a folder that will not go is only logged.
+func deleteConversationFile(path string) error {
 	if err := os.Remove(path); err != nil {
 		return err
 	}
-	return os.RemoveAll(strings.TrimSuffix(path, ".jsonl"))
+	if err := os.RemoveAll(strings.TrimSuffix(path, ".jsonl")); err != nil {
+		log.Printf("[conversations] remove side folder of %s: %v", filepath.Base(path), err)
+	}
+	return nil
 }

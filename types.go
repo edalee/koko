@@ -196,7 +196,11 @@ type Conversation struct {
 // the frontend can drop them from closed-session records that point at them.
 type DeleteResult struct {
 	Deleted []string `json:"deleted"`
-	Skipped int      `json:"skipped"` // held by a session, or of unknown directory
+	// Skipped counts conversations in use (by a session, a saved tab or a
+	// pending create, or maybe by a running session with no id yet), and
+	// files of unknown directory.
+	Skipped int `json:"skipped"`
+	Failed  int `json:"failed"` // the delete itself failed, so the file is still there
 }
 
 // BranchCI represents CI status for a git branch.

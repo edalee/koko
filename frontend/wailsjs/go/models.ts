@@ -197,6 +197,7 @@ export namespace main {
 	export class DeleteResult {
 	    deleted: string[];
 	    skipped: number;
+	    failed: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeleteResult(source);
@@ -206,6 +207,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.deleted = source["deleted"];
 	        this.skipped = source["skipped"];
+	        this.failed = source["failed"];
 	    }
 	}
 	export class CreateSessionOpts {

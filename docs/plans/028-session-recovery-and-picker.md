@@ -24,6 +24,12 @@ Step 7a went further than the plan in four places:
 - **Saved tabs hold too.** After a restart a disconnected tab has no
   session, so the ownership guard cannot see it. Deletion also skips any
   conversation an open tab record in `sessions.json` holds.
+- **So may a running tab with no id.** Two new tabs in one directory never
+  capture an id. Deletion skips any conversation in the directory that
+  changed since such a session started, because it may be that session's.
+  A plain `claude` run outside Koko is not protected.
+- **A failed delete is counted,** and the rest carry on, so the frontend
+  still learns which conversations went.
 - **Bulk delete skips files with no recorded cwd.** In a project folder
   that two directories share, such a file may be a neighbour's. It counts
   as skipped. A per-row delete still allows it, because the user chose it.

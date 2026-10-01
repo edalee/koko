@@ -48,7 +48,8 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `git_service.go` — Branch name, file changes, file diffs, repo slug detection
 - `process_monitor.go`: child process tree scan for the subagent monitor
 - `config_service.go` — Atomic writes, API key, hidden PRs
-- `claude_service.go` — Last message extraction, listing a directory's stored conversations
+- `claude_service.go` — Last message extraction, listing a directory's stored conversations, and the file helpers for deleting them
+- `conversation_delete.go`: `App.DeleteConversation` and `DeleteConversations`, with the ownership checks (plan 028 step 7a)
 - `slack_commands.go` — Slack bot DM command handler
 - `types.go` — Shared Go types with JSON tags
 - `worker_service.go`: Wails-bound bridge to koko-worker. It edits `worker.json` and calls the binary. Methods pass JSON strings, so `models.ts` stays unchanged.

@@ -18,7 +18,7 @@ interface ConversationPickerProps {
   // Show the new-conversation row even when nothing is stored. Needed when
   // nothing is preselected, as for a D1 reconnect.
   showWhenEmpty?: boolean;
-  // Deletion (plan 028 step 7). A row that cannot be deleted gets no button:
+  // Deletion (plan 028 step 7a). A row that cannot be deleted gets no button:
   // a held conversation, or the one the dialog is reconnecting.
   canDelete?: (uuid: string) => boolean;
   onDelete?: (c: main.Conversation) => void;

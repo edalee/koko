@@ -454,21 +454,21 @@ export function useSessionTabs() {
   // Deleted conversations are gone for good, so closed-session records that
   // point at them drop the id. Choosing such a record then starts fresh in
   // its directory, rather than failing to resume a missing file.
-  const forgetConversations = useCallback(
-    (ids: string[]) => {
-      const gone = new Set(ids);
-      if (!historyRef.current.some((e) => e.claudeSessionId && gone.has(e.claudeSessionId))) {
-        return;
-      }
-      const newHistory = historyRef.current.map((e) =>
-        e.claudeSessionId && gone.has(e.claudeSessionId) ? { ...e, claudeSessionId: "" } : e,
-      );
-      historyRef.current = newHistory;
-      setHistory(newHistory);
-      saveCurrentState(tabs, newHistory);
-    },
-    [tabs, saveCurrentState],
-  );
+  const forgetConversations = useCallback((ids: string[]) => {
+    const gone = new Set(ids);
+    if (!historyRef.current.some((e) => e.claudeSessionId && gone.has(e.claudeSessionId))) {
+      return;
+    }
+    const newHistory = historyRef.current.map((e) =>
+      e.claudeSessionId && gone.has(e.claudeSessionId) ? { ...e, claudeSessionId: "" } : e,
+    );
+    historyRef.current = newHistory;
+    setHistory(newHistory);
+    // The dialog calls this after awaiting the delete, so its copy of tabs
+    // may be stale. A new tabs array makes the persist effect save the
+    // current tabs with the new history.
+    setTabs((prev) => [...prev]);
+  }, []);
 
   return {
     tabs,

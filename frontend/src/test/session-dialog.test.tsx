@@ -436,7 +436,7 @@ describe("SessionDialog routing from other entry points (step 5)", () => {
   });
 });
 
-describe("SessionDialog deleting conversations (step 7)", () => {
+describe("SessionDialog deleting conversations (step 7a)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockList.mockResolvedValue([]);
@@ -544,6 +544,44 @@ describe("SessionDialog deleting conversations (step 7)", () => {
     expect(screen.queryByText("One")).not.toBeInTheDocument();
     expect(screen.getByText("Held")).toBeInTheDocument();
     expect(onConversationsDeleted).toHaveBeenCalledWith(["a", "b"]);
+  });
+
+  it("presses the delete button on Enter, and creates no session", async () => {
+    mockList.mockResolvedValue([conv("a", "Old work")]);
+    const { onCreate } = renderDialog();
+    await chooseDirectory("/repo");
+    const del = await screen.findByRole("button", { name: "Delete Old work" });
+
+    del.focus();
+    fireEvent.keyDown(del, { key: "Enter" });
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  // The confirmation shows its props while it plays its closing animation.
+  it("keeps its wording while the confirmation closes", async () => {
+    mockList.mockResolvedValue([conv("a", "One")]);
+    renderDialog();
+    await chooseDirectory("/repo");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete all conversations here" }));
+    const confirm = screen.getByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Delete conversation?")).not.toBeInTheDocument();
+  });
+
+  it("says how many it could not delete", async () => {
+    mockList.mockResolvedValue([conv("a", "One"), conv("b", "Two")]);
+    mockDeleteAll.mockResolvedValue({ deleted: ["a"], skipped: 0, failed: 1 });
+    renderDialog();
+    await chooseDirectory("/repo");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete all conversations here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText("Deleted 1. Could not delete 1.")).toBeInTheDocument();
+    expect(screen.queryByText("One")).not.toBeInTheDocument();
   });
 
   it("shows why a delete failed", async () => {
