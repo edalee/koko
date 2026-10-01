@@ -213,6 +213,13 @@ export default function SessionDialog({
   // button for it, and for the conversation being reconnected (a saved tab
   // holds that too), keeps the refusal from ever showing.
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  // What the confirmation shows. Kept after the confirmation closes, because
+  // it shows its props during its closing animation.
+  const [shownDelete, setShownDelete] = useState<PendingDelete | null>(null);
+  const askDelete = useCallback((d: PendingDelete) => {
+    setPendingDelete(d);
+    setShownDelete(d);
+  }, []);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
   const canDelete = useCallback(
     (uuid: string) => !holders.has(uuid) && uuid !== reconnect?.claudeSessionId,
@@ -455,6 +462,9 @@ export default function SessionDialog({
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         onClose();
+      } else if (e.target instanceof HTMLButtonElement) {
+        // Enter on a focused button, such as a row's delete, presses that
+        // button. It must not also create a session.
       } else if (e.key === "Enter" && directory && !creatingWorktree) {
         handleCreate();
       }
@@ -476,11 +486,14 @@ export default function SessionDialog({
       } else {
         const result = await DeleteConversations(directory);
         ids = result.deleted ?? [];
+        const notes = [];
         if (result.skipped > 0) {
-          setDeleteNotice(
-            `Deleted ${ids.length}. Kept ${result.skipped}: open in a session, or not clearly from this directory.`,
+          notes.push(
+            `Kept ${result.skipped}: open in a session, or not clearly from this directory.`,
           );
         }
+        if (result.failed > 0) notes.push(`Could not delete ${result.failed}.`);
+        if (notes.length > 0) setDeleteNotice([`Deleted ${ids.length}.`, ...notes].join(" "));
       }
       if (ids.length === 0) return;
       const gone = new Set(ids);
@@ -701,8 +714,8 @@ export default function SessionDialog({
                   // could never be reconnected.
                   showWhenEmpty={!!reconnect}
                   canDelete={canDelete}
-                  onDelete={(conversation) => setPendingDelete({ kind: "one", conversation })}
-                  onDeleteAll={() => setPendingDelete({ kind: "all" })}
+                  onDelete={(conversation) => askDelete({ kind: "one", conversation })}
+                  onDeleteAll={() => askDelete({ kind: "all" })}
                 />
                 {deleteNotice && <p className="mt-1.5 text-[11px] text-warning">{deleteNotice}</p>}
               </div>
@@ -824,11 +837,11 @@ export default function SessionDialog({
       </div>
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={pendingDelete?.kind === "all" ? "Delete all conversations?" : "Delete conversation?"}
+        title={shownDelete?.kind === "all" ? "Delete all conversations?" : "Delete conversation?"}
         message={
-          pendingDelete?.kind === "all"
-            ? `This deletes every conversation Claude stored for ${shortenPath(directory)}, except any open in a session. They cannot be recovered.`
-            : `This deletes "${pendingDelete?.kind === "one" ? pendingDelete.conversation.title || "Untitled conversation" : ""}" from Claude's history. It cannot be recovered.`
+          shownDelete?.kind === "one"
+            ? `This deletes "${shownDelete.conversation.title || "Untitled conversation"}" from Claude's history. It cannot be recovered.`
+            : `This deletes every conversation Claude stored for ${shortenPath(directory)}, except any open in a session. They cannot be recovered.`
         }
         confirmLabel="Delete"
         destructive

@@ -331,6 +331,7 @@
   - A create reserves the conversation before its PTY starts, keyed by the create, so two racing creates cannot both pass the check.
   - There is no `--continue`. It resumed the newest conversation in a directory, which could be held by another tab, so plan 028 step 8 removed it. The API and MCP take a conversation id to resume, and refuse `resume` without one rather than start fresh behind the caller's back. `GET /api/sessions` lists each session's id so callers can find one.
   - The picker marks a held conversation with its tab's slug, and choosing it switches to that tab.
+  - Deleting a conversation follows the same rule, and adds two holders the create path does not need (plan 028 step 7a). A saved tab holds its conversation, though it has no session until it reconnects. A running session with no id yet may hold any conversation in its directory that changed since it started.
 - **Plan:** `docs/plans/028-session-recovery-and-picker.md`
 
 ## ADR-029: koko-worker as a separate binary under launchd

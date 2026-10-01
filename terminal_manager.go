@@ -782,26 +782,48 @@ func (tm *TerminalManager) uuidClaimedLocked(uuid, exceptID string) bool {
 	return false
 }
 
-// removeUnheld calls remove for each conversation that no session holds and
-// no create has reserved, and skips the rest. held adds the conversations of
-// saved tabs, which have no session until they reconnect.
+// deleteUnheld deletes each conversation file that nothing may be using, and
+// skips the rest. A file is in use when:
+//   - a session holds its id, dead or alive, or a create has reserved it
+//   - a saved tab holds it (held), since a saved tab has no session until it
+//     reconnects
+//   - a running session in dir has no id yet and the file changed since that
+//     session started, because it may be that session's conversation. Two new
+//     tabs sharing a directory never capture an id, so this is common
 //
-// The check and the removal share tm.mu, so a create cannot reserve a
-// conversation between the check and the delete.
-func (tm *TerminalManager) removeUnheld(uuids []string, held map[string]bool, remove func(string) error) (removed []string, skipped int, err error) {
+// The checks and the deletes share tm.mu, so a create cannot reserve a
+// conversation between them. Only cheap work runs under the lock: the files
+// were found and validated before the call. A failed delete is counted and
+// the rest carry on.
+func (tm *TerminalManager) deleteUnheld(dir string, files []conversationFile, held map[string]bool) (deleted []string, skipped, failed int) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	for _, uuid := range uuids {
-		if held[uuid] || tm.uuidClaimedLocked(uuid, "") {
+
+	var idlessSince time.Time // earliest start of a running session with no id
+	for _, s := range tm.sessions {
+		s.mu.Lock()
+		noID := s.claudeSessionID == ""
+		s.mu.Unlock()
+		if noID && s.alive() && sameDir(s.dir, dir) && (idlessSince.IsZero() || s.startedAt.Before(idlessSince)) {
+			idlessSince = s.startedAt
+		}
+	}
+
+	deleted = []string{}
+	for _, f := range files {
+		if held[f.uuid] || tm.uuidClaimedLocked(f.uuid, "") ||
+			(!idlessSince.IsZero() && !f.modified.Before(idlessSince)) {
 			skipped++
 			continue
 		}
-		if err := remove(uuid); err != nil {
-			return removed, skipped, err
+		if err := deleteConversationFile(f.path); err != nil {
+			log.Printf("[conversations] delete %s: %v", f.uuid, err)
+			failed++
+			continue
 		}
-		removed = append(removed, uuid)
+		deleted = append(deleted, f.uuid)
 	}
-	return removed, skipped, nil
+	return deleted, skipped, failed
 }
 
 // claimUUID records the UUID unless another session already holds it. The

@@ -16,7 +16,7 @@ const closed = (slug: string, claudeSessionId: string) => ({
   claudeSessionId,
 });
 
-describe("useSessionTabs forgetConversations (plan 028 step 7)", () => {
+describe("useSessionTabs forgetConversations (plan 028 step 7a)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetSessions.mockResolvedValue({

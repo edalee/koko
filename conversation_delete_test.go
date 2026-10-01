@@ -210,3 +210,73 @@ func TestDeleteConversations_EmptyDirectoryReportsNothing(t *testing.T) {
 		t.Errorf("unexpected result %+v", got)
 	}
 }
+
+// Two new tabs in one directory never capture an id, so a running session
+// with no id may be writing any conversation that changed since it started.
+func TestDeleteConversations_SparesWhatAnIDlessSessionMayBeWriting(t *testing.T) {
+	workDir := t.TempDir()
+	app, projectDir := newDeleteApp(t, workDir)
+	started := time.Now().Add(-time.Hour)
+	old := writeConv(t, projectDir, "old", started.Add(-time.Hour), userLine(workDir, "p"))
+	recent := writeConv(t, projectDir, "recent", started.Add(time.Minute), userLine(workDir, "p"))
+	s := addSession(app.tm, "koko-1", workDir, "")
+	s.startedAt = started
+
+	got, err := app.DeleteConversations(workDir)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(got.Deleted) != 1 || got.Deleted[0] != "old" || got.Skipped != 1 {
+		t.Fatalf("unexpected result %+v", got)
+	}
+	if !exists(recent) {
+		t.Error("a conversation the idless session may be writing was deleted")
+	}
+	if exists(old) {
+		t.Error("an older conversation was kept")
+	}
+	if err := app.DeleteConversation(workDir, "recent"); !errors.Is(err, ErrConversationHeld) {
+		t.Errorf("per-row delete of a possibly live conversation: %v", err)
+	}
+}
+
+// An idless session elsewhere, or one whose Claude has exited, holds nothing.
+func TestDeleteConversations_IgnoresIDlessSessionsElsewhereOrDead(t *testing.T) {
+	workDir := t.TempDir()
+	app, projectDir := newDeleteApp(t, workDir)
+	started := time.Now().Add(-time.Hour)
+	writeConv(t, projectDir, "recent", started.Add(time.Minute), userLine(workDir, "p"))
+	other := addSession(app.tm, "koko-1", t.TempDir(), "")
+	other.startedAt = started
+	dead := addSession(app.tm, "koko-2", workDir, "")
+	dead.startedAt = started
+	close(dead.done)
+
+	got, err := app.DeleteConversations(workDir)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(got.Deleted) != 1 {
+		t.Fatalf("unexpected result %+v", got)
+	}
+}
+
+// A failed delete is counted, not returned as an error, so the frontend
+// still learns which conversations went.
+func TestDeleteConversations_CountsAFailedDelete(t *testing.T) {
+	workDir := t.TempDir()
+	app, projectDir := newDeleteApp(t, workDir)
+	writeConv(t, projectDir, "a", time.Now(), userLine(workDir, "p"))
+	if err := os.Chmod(projectDir, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(projectDir, 0o755) })
+
+	got, err := app.DeleteConversations(workDir)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got.Failed != 1 || len(got.Deleted) != 0 {
+		t.Fatalf("unexpected result %+v", got)
+	}
+}
