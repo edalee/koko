@@ -192,6 +192,13 @@ type Conversation struct {
 	SizeBytes  int64  `json:"sizeBytes"`
 }
 
+// DeleteResult reports a bulk conversation delete. Deleted lists the ids, so
+// the frontend can drop them from closed-session records that point at them.
+type DeleteResult struct {
+	Deleted []string `json:"deleted"`
+	Skipped int      `json:"skipped"` // held by a session, or of unknown directory
+}
+
 // BranchCI represents CI status for a git branch.
 type BranchCI struct {
 	Branch string        `json:"branch"`

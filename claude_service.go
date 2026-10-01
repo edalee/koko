@@ -347,7 +347,7 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 			break
 		}
 		head := readConversationHead(c.path)
-		if head.cwd != "" && !sameDir(head.cwd, dir) {
+		if !head.belongsTo(dir) {
 			continue // another directory sharing this project folder
 		}
 		out = append(out, Conversation{
@@ -365,6 +365,15 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 type conversationHead struct {
 	title string
 	cwd   string
+}
+
+// belongsTo reports whether the session file belongs to dir. A file with no
+// recorded cwd is given the benefit of the doubt, as the picker lists it.
+//
+// Listing and deleting both go through this one test, so the two can never
+// disagree about which conversations a directory has.
+func (h conversationHead) belongsTo(dir string) bool {
+	return h.cwd == "" || sameDir(h.cwd, dir)
 }
 
 // readConversationHead reads the start of a session file for its title and
@@ -665,4 +674,71 @@ func firstLine(path string) string {
 		return line
 	}
 	return ""
+}
+
+// conversationPath returns the session file for a conversation the picker
+// lists for dir.
+//
+// The id comes from the webview and names a file to delete, so it must be a
+// bare file name, the file must exist in dir's project folder, and it must
+// pass the same directory test as the listing.
+func conversationPath(dir, uuid string) (string, error) {
+	if uuid == "" || uuid == "." || uuid == ".." || filepath.Base(uuid) != uuid {
+		return "", fmt.Errorf("invalid conversation id %q", uuid)
+	}
+	sessionDir := claudeProjectDir(dir)
+	if sessionDir == "" {
+		return "", fmt.Errorf("no Claude project folder for %s", dir)
+	}
+	path := filepath.Join(sessionDir, uuid+".jsonl")
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return "", fmt.Errorf("conversation %s not found for %s", uuid, dir)
+	}
+	if !readConversationHead(path).belongsTo(dir) {
+		return "", fmt.Errorf("conversation %s belongs to another directory", uuid)
+	}
+	return path, nil
+}
+
+// conversationsIn returns every conversation stored for dir, with no cap.
+//
+// Files with no recorded cwd are left out and counted as unknown. In a
+// project folder that several directories share, such a file may belong to
+// a neighbour, and a bulk delete must not guess.
+func conversationsIn(dir string) (ids []string, unknown int) {
+	sessionDir := claudeProjectDir(dir)
+	if sessionDir == "" {
+		return nil, 0
+	}
+	entries, err := os.ReadDir(sessionDir)
+	if err != nil {
+		return nil, 0
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		head := readConversationHead(filepath.Join(sessionDir, e.Name()))
+		switch {
+		case head.cwd == "":
+			unknown++
+		case sameDir(head.cwd, dir):
+			ids = append(ids, strings.TrimSuffix(e.Name(), ".jsonl"))
+		}
+	}
+	return ids, unknown
+}
+
+// removeConversation deletes a conversation's session file, and the folder
+// Claude keeps beside it for subagent and tool output.
+func removeConversation(dir, uuid string) error {
+	path, err := conversationPath(dir, uuid)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	return os.RemoveAll(strings.TrimSuffix(path, ".jsonl"))
 }

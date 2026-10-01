@@ -1,4 +1,4 @@
-import { Ban, Loader2, MessageSquare, Plus } from "lucide-react";
+import { Ban, Loader2, MessageSquare, Plus, Trash2 } from "lucide-react";
 import type { main } from "../../wailsjs/go/models";
 
 /** The tab that already has a conversation open. */
@@ -18,6 +18,11 @@ interface ConversationPickerProps {
   // Show the new-conversation row even when nothing is stored. Needed when
   // nothing is preselected, as for a D1 reconnect.
   showWhenEmpty?: boolean;
+  // Deletion (plan 028 step 7). A row that cannot be deleted gets no button:
+  // a held conversation, or the one the dialog is reconnecting.
+  canDelete?: (uuid: string) => boolean;
+  onDelete?: (c: main.Conversation) => void;
+  onDeleteAll?: () => void;
 }
 
 function timeAgo(ts: number): string {
@@ -57,6 +62,9 @@ export default function ConversationPicker({
   onSelect,
   holders,
   showWhenEmpty = false,
+  canDelete,
+  onDelete,
+  onDeleteAll,
 }: ConversationPickerProps) {
   if (conversations !== null && conversations.length === 0 && !showWhenEmpty) return null;
 
@@ -125,6 +133,23 @@ export default function ConversationPicker({
                       </span>
                     )}
                     {holder && <Ban className="size-3 shrink-0 text-warning" aria-hidden />}
+                    {onDelete && canDelete?.(c.uuid) && (
+                      <button
+                        type="button"
+                        // The row is a label, so a plain click would also
+                        // select its radio.
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDelete(c);
+                        }}
+                        className="shrink-0 self-center p-0.5 rounded text-tertiary hover:text-error hover:bg-white/10 transition-colors"
+                        title="Delete conversation"
+                        aria-label={`Delete ${c.title || "untitled conversation"}`}
+                      >
+                        <Trash2 className="size-3" />
+                      </button>
+                    )}
                   </span>
                   {holder ? (
                     <span className="block text-[11px] text-warning truncate">
@@ -143,6 +168,18 @@ export default function ConversationPicker({
           })
         )}
       </div>
+
+      {onDeleteAll && conversations !== null && conversations.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onDeleteAll}
+            className="text-[11px] text-tertiary hover:text-error transition-colors"
+          >
+            Delete all conversations here
+          </button>
+        </div>
+      )}
     </fieldset>
   );
 }

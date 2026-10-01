@@ -1,13 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import { PickDirectory } from "../../wailsjs/go/main/App";
+import { DeleteConversation, DeleteConversations, PickDirectory } from "../../wailsjs/go/main/App";
 import { ListConversations } from "../../wailsjs/go/main/ClaudeService";
 import SessionDialog, { submitLabel } from "../components/SessionDialog";
 import type { SessionHistoryEntry, SessionTab } from "../types";
 
 const mockPick = PickDirectory as ReturnType<typeof vi.fn>;
 const mockList = ListConversations as ReturnType<typeof vi.fn>;
+const mockDelete = DeleteConversation as ReturnType<typeof vi.fn>;
+const mockDeleteAll = DeleteConversations as ReturnType<typeof vi.fn>;
 
 const conv = (uuid: string, title: string, minutesAgo = 5) => ({
   uuid,
@@ -42,12 +44,14 @@ interface Opts {
   reconnect?: SessionTab;
   worktree?: string;
   activeDirs?: string[];
+  onConversationsDeleted?: Mock<(ids: string[]) => void>;
 }
 
 function renderDialog(o: Opts = {}) {
   const onCreate = o.onCreate ?? vi.fn<OnCreate>().mockResolvedValue(undefined);
   const onOpenHeld = o.onOpenHeld ?? vi.fn<OnOpenHeld>();
   const onReconnect = o.onReconnect ?? vi.fn<OnReconnect>().mockResolvedValue(undefined);
+  const onConversationsDeleted = o.onConversationsDeleted ?? vi.fn<(ids: string[]) => void>();
   render(
     <SessionDialog
       open
@@ -60,9 +64,10 @@ function renderDialog(o: Opts = {}) {
       history={o.history ?? []}
       activeDirs={o.activeDirs ?? []}
       tabs={o.tabs ?? []}
+      onConversationsDeleted={onConversationsDeleted}
     />,
   );
-  return { onCreate, onOpenHeld, onReconnect };
+  return { onCreate, onOpenHeld, onReconnect, onConversationsDeleted };
 }
 
 async function chooseDirectory(dir: string) {
@@ -428,6 +433,130 @@ describe("SessionDialog routing from other entry points (step 5)", () => {
     expect(screen.queryByLabelText("Session Name")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Create as a git worktree/)).not.toBeInTheDocument();
     expect(screen.queryByText("Browse...")).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionDialog deleting conversations (step 7)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockList.mockResolvedValue([]);
+  });
+
+  it("deletes a conversation after confirming, and reports the id", async () => {
+    mockList.mockResolvedValue([conv("a", "Old work"), conv("b", "Keep me")]);
+    const { onConversationsDeleted } = renderDialog();
+    await chooseDirectory("/repo");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete Old work" }));
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(screen.getByText(/cannot be recovered/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("/repo", "a"));
+    await waitFor(() => expect(screen.queryByText("Old work")).not.toBeInTheDocument());
+    expect(screen.getByText("Keep me")).toBeInTheDocument();
+    expect(onConversationsDeleted).toHaveBeenCalledWith(["a"]);
+  });
+
+  it("does not select the row when its delete button is clicked", async () => {
+    mockList.mockResolvedValue([conv("a", "Old work")]);
+    renderDialog();
+    await chooseDirectory("/repo");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete Old work" }));
+    const confirm = screen.getByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("button", { name: "Create Session" })).toBeInTheDocument();
+  });
+
+  it("offers no delete on a conversation another tab holds", async () => {
+    mockList.mockResolvedValue([conv("a", "Held"), conv("b", "Free")]);
+    renderDialog({ tabs: [tab({ id: "session-9", claudeSessionId: "a", connected: false })] });
+    await chooseDirectory("/repo");
+
+    expect(await screen.findByRole("button", { name: "Delete Free" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete Held" })).not.toBeInTheDocument();
+  });
+
+  it("offers no delete on the conversation being reconnected", async () => {
+    mockList.mockResolvedValue([conv("mine", "My conversation"), conv("b", "Other")]);
+    const t = tab({ id: "session-3", connected: false, claudeSessionId: "mine" });
+    renderDialog({ reconnect: t, tabs: [t] });
+
+    expect(await screen.findByRole("button", { name: "Delete Other" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delete My conversation" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the session dialog open when Escape cancels the confirmation", async () => {
+    mockList.mockResolvedValue([conv("a", "Old work")]);
+    const onClose = vi.fn();
+    render(
+      <SessionDialog
+        open
+        onClose={onClose}
+        onCreate={vi.fn()}
+        onOpenHeld={vi.fn()}
+        onReconnect={vi.fn()}
+        history={[]}
+        activeDirs={[]}
+        tabs={[]}
+        onConversationsDeleted={vi.fn()}
+      />,
+    );
+    await chooseDirectory("/repo");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete Old work" }));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it("returns to a new conversation when the selected row is deleted", async () => {
+    mockList.mockResolvedValue([conv("a", "Old work")]);
+    renderDialog();
+    await chooseDirectory("/repo");
+    fireEvent.click(await screen.findByText("Old work"));
+    expect(screen.getByRole("button", { name: "Resume Conversation" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Old work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("button", { name: "Create Session" })).toBeInTheDocument();
+  });
+
+  it("deletes all, and says how many it kept", async () => {
+    mockList.mockResolvedValue([conv("a", "One"), conv("b", "Two"), conv("c", "Held")]);
+    mockDeleteAll.mockResolvedValue({ deleted: ["a", "b"], skipped: 1 });
+    const { onConversationsDeleted } = renderDialog({
+      tabs: [tab({ id: "session-9", claudeSessionId: "c" })],
+    });
+    await chooseDirectory("/repo");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete all conversations here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(mockDeleteAll).toHaveBeenCalledWith("/repo"));
+    expect(await screen.findByText(/Deleted 2\. Kept 1/)).toBeInTheDocument();
+    expect(screen.queryByText("One")).not.toBeInTheDocument();
+    expect(screen.getByText("Held")).toBeInTheDocument();
+    expect(onConversationsDeleted).toHaveBeenCalledWith(["a", "b"]);
+  });
+
+  it("shows why a delete failed", async () => {
+    mockList.mockResolvedValue([conv("a", "Old work")]);
+    mockDelete.mockRejectedValueOnce("that conversation is open in a session");
+    renderDialog();
+    await chooseDirectory("/repo");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete Old work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText(/open in a session/)).toBeInTheDocument();
+    expect(screen.getByText("Old work")).toBeInTheDocument();
   });
 });
 

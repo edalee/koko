@@ -782,6 +782,28 @@ func (tm *TerminalManager) uuidClaimedLocked(uuid, exceptID string) bool {
 	return false
 }
 
+// removeUnheld calls remove for each conversation that no session holds and
+// no create has reserved, and skips the rest. held adds the conversations of
+// saved tabs, which have no session until they reconnect.
+//
+// The check and the removal share tm.mu, so a create cannot reserve a
+// conversation between the check and the delete.
+func (tm *TerminalManager) removeUnheld(uuids []string, held map[string]bool, remove func(string) error) (removed []string, skipped int, err error) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, uuid := range uuids {
+		if held[uuid] || tm.uuidClaimedLocked(uuid, "") {
+			skipped++
+			continue
+		}
+		if err := remove(uuid); err != nil {
+			return removed, skipped, err
+		}
+		removed = append(removed, uuid)
+	}
+	return removed, skipped, nil
+}
+
 // claimUUID records the UUID unless another session already holds it. The
 // check and the set share one lock, so two sessions racing on the same file
 // cannot both win.
