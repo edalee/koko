@@ -2,6 +2,9 @@
 
 WAILS := $(HOME)/go/bin/wails
 APP := build/bin/Koko.app
+# koko-worker reports this with `koko-worker version`: the tag, plus commits
+# since it and "-dirty" for a local build.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 # Koko finds koko-worker in build/bin during `make dev`, and next to its own
 # binary inside Koko.app after `make build`.
@@ -17,7 +20,7 @@ build-cli:
 	cd cmd/koko-cli && go build -o ../../build/bin/koko-cli .
 
 build-worker:
-	cd cmd/koko-worker && go build -o ../../build/bin/koko-worker .
+	cd cmd/koko-worker && go build -ldflags "-X main.version=$(VERSION)" -o ../../build/bin/koko-worker .
 
 # koko-worker is its own Go module, so the root `go test ./...` skips it.
 test: test-worker
