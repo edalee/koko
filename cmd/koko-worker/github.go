@@ -127,8 +127,17 @@ func gh(ctx context.Context, args ...string) ([]byte, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "gh", args...).Output()
 	if err != nil {
+		name := "gh " + strings.Join(args[:min(2, len(args))], " ")
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("%s: timed out after 2 minutes", name)
+		}
 		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("gh %s: %s", strings.Join(args[:min(2, len(args))], " "), truncate(strings.TrimSpace(string(ee.Stderr)), 300))
+			// A killed gh writes no stderr, so the exit status is the only clue.
+			why := strings.TrimSpace(string(ee.Stderr))
+			if why == "" {
+				why = err.Error()
+			}
+			return nil, fmt.Errorf("%s: %s", name, truncate(why, 300))
 		}
 		return nil, fmt.Errorf("gh: %w", err)
 	}
@@ -155,6 +164,14 @@ func myApprovedPRs(ctx context.Context) ([]SearchPR, error) {
 func myOpenPRs(ctx context.Context) ([]SearchPR, error) {
 	var prs []SearchPR
 	err := ghJSON(ctx, &prs, "search", "prs", "--author", "@me", "--state", "open", "--draft=false",
+		"--json", searchFields, "--limit", "50")
+	return prs, err
+}
+
+// myMergedPRs is your PRs merged since the given day.
+func myMergedPRs(ctx context.Context, since time.Time) ([]SearchPR, error) {
+	var prs []SearchPR
+	err := ghJSON(ctx, &prs, "search", "prs", "--author", "@me", "--merged", "--merged-at", ">="+since.Format("2006-01-02"),
 		"--json", searchFields, "--limit", "50")
 	return prs, err
 }

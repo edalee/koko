@@ -251,6 +251,16 @@ Done on 30 Sep:
   - The stand-up lists each reviewed PR with its verdict and a link to the review. The stand-up thread and the review DMs are gone. A failed review of your own PR still comes by DM.
   - "Test" prints the comments instead of posting them.
 
+Done on 1 Oct: the stand-up's Jira facts come from Go, not Claude.
+- A stand-up claimed that clarinet#14's ticket covered "all DRM services", and it named kalimba alert rules that neither the ticket nor the PR mentions. CON-119 has only a title.
+- Go picks each PR's ticket key: the first in the title, then the branch, then the body.
+- One Claude run only calls `getJiraIssue`. Go reads the summary, description, status, assignee and link from the tool's raw result. A moved ticket is matched under the key the PR names, and the line says "PDDI-778, now CON-166".
+- A second Claude run gets the ticket text and no tools. Every claim must quote the ticket. Go keeps a verdict only if its quotes are in the ticket, and a follow-up only if its quote is in the ticket or the PR. Anything else reads "unknown".
+- A ticket with no description reads "unknown", without asking Claude. A ticket Go could not read says so.
+- Each ticket links to Jira and shows its status and assignee.
+- A new section, "Stories you can close", lists tickets assigned to you that are not done. Each one is covered by a PR merged in the last 7 days ("Now") or a PR ready to merge ("After the merge"). "Yours" means the ticket's assignee matches the account the Jira connector runs as.
+- One approved PR that fails to load no longer hides the rest. Each failed PR is tried once more, then gets its own line with the reason. A `gh` call that times out says so, instead of an empty error.
+
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
 2. Turn off baldrick-work's launchd agent.

@@ -32,12 +32,6 @@ const (
 	toolCreateEvent = "mcp__claude_ai_Google_Calendar__create_event"
 )
 
-var jiraRead = []string{
-	"mcp__claude_ai_Atlassian__getAccessibleAtlassianResources",
-	"mcp__claude_ai_Atlassian__getJiraIssue",
-	"mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql",
-}
-
 // ToolCall is one tool use in a run and its raw result.
 type ToolCall struct {
 	Name    string
