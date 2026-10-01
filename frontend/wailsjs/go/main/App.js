@@ -6,6 +6,14 @@ export function CheckForUpdate() {
   return window['go']['main']['App']['CheckForUpdate']();
 }
 
+export function DeleteConversation(arg1, arg2) {
+  return window['go']['main']['App']['DeleteConversation'](arg1, arg2);
+}
+
+export function DeleteConversations(arg1) {
+  return window['go']['main']['App']['DeleteConversations'](arg1);
+}
+
 export function EnsureStatusLine() {
   return window['go']['main']['App']['EnsureStatusLine']();
 }

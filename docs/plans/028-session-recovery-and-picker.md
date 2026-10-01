@@ -10,14 +10,31 @@
 | 4. Picker in the session dialog | Done | #19 |
 | 5. Route the other entry points | Done | #21 |
 | 6. Reload session | Done | #22 |
-| 7. Deletion | TODO, deferred | |
+| 7a. Delete conversations | Done | |
+| 7b. Clear history, remove worktrees | TODO | |
 | 8. Drop `--continue` | Done | #24 |
 
 #21 and #22 were stacked PRs. They merged into their base branches, not `main`. #23 lands steps 5 and 6 on `main`.
 
-Step 7 is recorded as a TODO in `docs/ROADMAP.md`. Until it lands, delete a
-conversation by removing `~/.claude/projects/<folder>/<id>.jsonl`. The
-filename is the conversation id the picker uses.
+Step 7 is split in two. 7a deletes conversations from the picker. 7b adds
+the two Settings actions, and is a TODO in `docs/ROADMAP.md`.
+
+Step 7a went further than the plan in four places:
+
+- **Saved tabs hold too.** After a restart a disconnected tab has no
+  session, so the ownership guard cannot see it. Deletion also skips any
+  conversation an open tab record in `sessions.json` holds.
+- **Bulk delete skips files with no recorded cwd.** In a project folder
+  that two directories share, such a file may be a neighbour's. It counts
+  as skipped. A per-row delete still allows it, because the user chose it.
+- **Bulk delete has no cap.** The picker lists 20, but "delete all" means
+  every conversation stored for the directory.
+- **Closed records forget deleted ids.** Recent Sessions resumes a
+  record's conversation, so the result lists the deleted ids and the
+  frontend clears them from closed-session records.
+
+A conversation also has a folder beside its file, for subagent and tool
+output. Deleting the conversation removes it too.
 
 Two things surfaced while building that the plan did not foresee:
 

@@ -38,6 +38,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **Conversation picker**: After choosing a directory, pick a new conversation or reopen one Claude has stored for it, newest first, with its title and last reply. A conversation already open in another tab switches to that tab rather than opening twice
 - **One tab per conversation**: Koko refuses to open a conversation another session already holds, whether from the UI, the API or MCP
 - **Stable slugs**: A session keeps its slug (such as `koko-1`) across restarts, so the CLI, MCP and Slack always name the same session
+- **Delete conversations**: Delete one conversation from the picker, or all of a directory's. Both confirm first, and skip any conversation a tab holds. Deleted conversations cannot be recovered
 - **Session history**: Recently closed sessions shown in the new session dialog with last message preview. Choosing one reopens its conversation
 - **Reload session**: Restart Claude in place from the sidebar row or the terminal's right-click menu, keeping the tab, slug and conversation. Useful after changing `CLAUDE.md` or an MCP server
 - **Context display** — Live context window usage percentage and model name per session

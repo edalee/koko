@@ -44,6 +44,7 @@ export default function App() {
     renameTab,
     handleSessionExit,
     history,
+    forgetConversations,
   } = useSessionTabs();
   // Plan 028 step 5: reconnecting a tab and opening a worktree both go
   // through the session dialog, instead of acting silently.
@@ -521,6 +522,7 @@ export default function App() {
           history={history}
           activeDirs={tabs.map((t) => t.directory)}
           tabs={tabs}
+          onConversationsDeleted={forgetConversations}
         />
 
         {/* UX rule 6: reload never silently discards work in progress. */}

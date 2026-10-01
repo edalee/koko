@@ -9,13 +9,14 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PickDirectory } from "../../wailsjs/go/main/App";
+import { DeleteConversation, DeleteConversations, PickDirectory } from "../../wailsjs/go/main/App";
 import { ListConversations } from "../../wailsjs/go/main/ClaudeService";
 import { GetSessions } from "../../wailsjs/go/main/ConfigService";
 import { CreateWorktree, GetBranchName } from "../../wailsjs/go/main/GitService";
 import type { main } from "../../wailsjs/go/models";
 import { type ReconnectChoice, type ResumeTarget, reconnectMessage } from "../hooks/useSessionTabs";
 import type { SessionHistoryEntry, SessionTab } from "../types";
+import ConfirmDialog from "./ConfirmDialog";
 import ConversationPicker, { type ConversationHolder, holderAction } from "./ConversationPicker";
 
 function timeAgo(ts: number): string {
@@ -58,7 +59,13 @@ interface SessionDialogProps {
   history: SessionHistoryEntry[];
   activeDirs: string[];
   tabs: SessionTab[];
+  // Conversations deleted from the picker. Closed-session records that point
+  // at them must forget the id, or Recent Sessions would resume a deleted one.
+  onConversationsDeleted: (ids: string[]) => void;
 }
+
+/** A delete waiting for the user to confirm it. */
+type PendingDelete = { kind: "one"; conversation: main.Conversation } | { kind: "all" };
 
 /**
  * A selection to apply once a directory's conversations have loaded.
@@ -148,6 +155,7 @@ export default function SessionDialog({
   history,
   activeDirs,
   tabs,
+  onConversationsDeleted,
 }: SessionDialogProps) {
   // App remounts the dialog on every open (key), so everything below starts
   // from the props at that moment. Mode is frozen for the whole open: a tab
@@ -200,6 +208,16 @@ export default function SessionDialog({
     return m;
   }, [tabs, reconnect?.id]);
   const holder = selected ? holders.get(selected) : undefined;
+
+  // Deletion. The backend refuses a held conversation anyway. Hiding the
+  // button for it, and for the conversation being reconnected (a saved tab
+  // holds that too), keeps the refusal from ever showing.
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+  const canDelete = useCallback(
+    (uuid: string) => !holders.has(uuid) && uuid !== reconnect?.claudeSessionId,
+    [holders, reconnect?.claudeSessionId],
+  );
 
   // Worktree state
   const [useWorktree, setUseWorktree] = useState(false);
@@ -431,7 +449,9 @@ export default function SessionDialog({
   }, []);
 
   useEffect(() => {
-    if (state !== "open") return;
+    // The confirmation owns the keyboard while it is up. Otherwise one Escape
+    // would close both dialogs, and Enter would create a session.
+    if (state !== "open" || pendingDelete) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         onClose();
@@ -441,7 +461,36 @@ export default function SessionDialog({
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state, directory, creatingWorktree, onClose, handleCreate]);
+  }, [state, directory, creatingWorktree, onClose, handleCreate, pendingDelete]);
+
+  const confirmDelete = useCallback(async () => {
+    const target = pendingDelete;
+    setPendingDelete(null);
+    if (!target || !directory) return;
+    setDeleteNotice(null);
+    try {
+      let ids: string[];
+      if (target.kind === "one") {
+        await DeleteConversation(directory, target.conversation.uuid);
+        ids = [target.conversation.uuid];
+      } else {
+        const result = await DeleteConversations(directory);
+        ids = result.deleted ?? [];
+        if (result.skipped > 0) {
+          setDeleteNotice(
+            `Deleted ${ids.length}. Kept ${result.skipped}: open in a session, or not clearly from this directory.`,
+          );
+        }
+      }
+      if (ids.length === 0) return;
+      const gone = new Set(ids);
+      setConversations((prev) => prev?.filter((c) => !gone.has(c.uuid)) ?? prev);
+      setSelected((cur) => (cur && gone.has(cur) ? (reconnect ? null : "") : cur));
+      onConversationsDeleted(ids);
+    } catch (err) {
+      setDeleteNotice(String(err));
+    }
+  }, [pendingDelete, directory, reconnect, onConversationsDeleted]);
 
   if (state === "closed") return null;
 
@@ -651,7 +700,11 @@ export default function SessionDialog({
                   // must show even with no stored conversations, or the tab
                   // could never be reconnected.
                   showWhenEmpty={!!reconnect}
+                  canDelete={canDelete}
+                  onDelete={(conversation) => setPendingDelete({ kind: "one", conversation })}
+                  onDeleteAll={() => setPendingDelete({ kind: "all" })}
                 />
+                {deleteNotice && <p className="mt-1.5 text-[11px] text-warning">{deleteNotice}</p>}
               </div>
             )}
 
@@ -769,6 +822,19 @@ export default function SessionDialog({
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={pendingDelete?.kind === "all" ? "Delete all conversations?" : "Delete conversation?"}
+        message={
+          pendingDelete?.kind === "all"
+            ? `This deletes every conversation Claude stored for ${shortenPath(directory)}, except any open in a session. They cannot be recovered.`
+            : `This deletes "${pendingDelete?.kind === "one" ? pendingDelete.conversation.title || "Untitled conversation" : ""}" from Claude's history. It cannot be recovered.`
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

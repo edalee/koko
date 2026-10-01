@@ -4,6 +4,10 @@ import {main} from '../models';
 
 export function CheckForUpdate():Promise<main.UpdateInfo>;
 
+export function DeleteConversation(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteConversations(arg1:string):Promise<main.DeleteResult>;
+
 export function EnsureStatusLine():Promise<void>;
 
 export function GetContextInfo(arg1:string):Promise<main.ContextInfo>;

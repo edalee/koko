@@ -194,6 +194,20 @@ export namespace main {
 	        this.sizeBytes = source["sizeBytes"];
 	    }
 	}
+	export class DeleteResult {
+	    deleted: string[];
+	    skipped: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeleteResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.deleted = source["deleted"];
+	        this.skipped = source["skipped"];
+	    }
+	}
 	export class CreateSessionOpts {
 	    name: string;
 	    dir: string;

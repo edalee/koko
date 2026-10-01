@@ -66,6 +66,8 @@ vi.mock("../../wailsjs/go/main/App", () => ({
   GetVersion: vi.fn().mockResolvedValue("0.0.0"),
   CheckForUpdate: vi.fn().mockResolvedValue(null),
   EnsureStatusLine: vi.fn().mockResolvedValue(undefined),
+  DeleteConversation: vi.fn().mockResolvedValue(undefined),
+  DeleteConversations: vi.fn().mockResolvedValue({ deleted: [], skipped: 0 }),
 }));
 
 vi.mock("../../wailsjs/go/main/GitHubService", () => ({

@@ -26,9 +26,9 @@ These wait on the old Slack DM bot decision (see "Old Slack DM bot" under Worker
 - [x] **Conversation picker**: choose a new conversation or one of those stored for a directory (plan 028, steps 1 to 4)
 - [x] **Route every entry point through the picker**: worktrees module and disconnected tabs. A tab with no stored conversation preselects nothing (plan 028 step 5, D1)
 - [x] **Reload session**: restart the Claude process in place, keeping the tab, slug and conversation (plan 028 step 6)
-- [ ] **Delete conversations**: TODO. Per-row delete in the picker, and "clear all conversations here". Deletes Claude's session file, so it confirms first and skips any conversation a tab holds (plan 028 step 7). Until then, delete `~/.claude/projects/<folder>/<id>.jsonl` by hand
-- [ ] **Clear session history**: TODO. Drops Koko's closed-session records only, from Settings (plan 028 step 7)
-- [ ] **Remove Koko's worktrees**: TODO. From Settings, never forced, skipping any with uncommitted changes (plan 028 step 7)
+- [x] **Delete conversations**: per-row delete in the picker, and "Delete all conversations here". Confirms first, and skips any conversation a tab holds (plan 028 step 7)
+- [ ] **Clear session history**: TODO. Drops Koko's closed-session records only, from Settings (plan 028 step 7b)
+- [ ] **Remove Koko's worktrees**: TODO. From Settings, never forced, skipping any with uncommitted changes (plan 028 step 7b)
 - [x] **Drop `--continue`**: resume by explicit conversation id only, once the picker covers every entry point (plan 028 step 8)
 - [ ] **Session context polish** — MCP servers, agents, commands panel refinements
 - [x] **Session grouping** — group sessions by project/directory
