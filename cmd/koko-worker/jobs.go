@@ -22,7 +22,15 @@ type Env struct {
 	paths  Paths
 	claude claudeRunner
 	send   func(ctx context.Context, msg Message) error
-	test   bool   // print instead of DM, book nothing
+	// post adds a comment to a PR and returns the comment's URL.
+	post func(ctx context.Context, prURL, body string) (string, error)
+	// findComment looks on a PR for a comment whose first line is line.
+	findComment func(ctx context.Context, repo string, number int, line string) (url string, found bool, err error)
+	// prHead returns a PR's state (OPEN, MERGED or CLOSED) and head commit.
+	prHead func(ctx context.Context, prURL string) (state, sha string, err error)
+	// online is true if the internet answers.
+	online func(ctx context.Context) bool
+	test   bool   // print instead of DM or comment, book nothing
 	state  *State // read-only snapshot taken when the run started
 	now    time.Time
 	// persist changes the state on disk under a lock. It does nothing in test mode.
@@ -37,11 +45,7 @@ func (e Env) notify(ctx context.Context, text string) error {
 // printMessage is how test mode shows a DM: a line where Slack draws a divider.
 func printMessage(msg Message) string {
 	const divider = "\n────────────────────\n"
-	out := strings.Join(msg.Sections, divider)
-	for _, reply := range msg.Thread {
-		out += "\n\n    ↳ in the thread:\n" + strings.Join(reply, divider)
-	}
-	return out
+	return strings.Join(msg.Sections, divider)
 }
 
 // ---- Stand-up ----
@@ -189,32 +193,15 @@ func runStandup(ctx context.Context, env Env) error {
 		sections = append(sections, s)
 	}
 
-	if err := env.send(ctx, Message{Sections: sections, Thread: tally.thread}); err != nil {
-		return err
-	}
-	if len(tally.posted) > 0 {
-		// Each review goes in one stand-up thread only, once per commit.
-		return env.persist(func(st *State) {
-			for _, k := range tally.posted {
-				if r, ok := st.TonoResults[k]; ok {
-					r.Posted = true
-					st.TonoResults[k] = r
-				}
-			}
-		})
-	}
-	return nil
+	return env.send(ctx, Message{Sections: sections})
 }
 
-// reviewTally collects tono's reviews for the stand-up: the reviews not yet
-// posted, for the thread, and their keys. A PR keeps its review after new
-// commits, because tono reviews each PR once.
+// reviewTally reads tono's results for the stand-up's PR lines. A PR keeps
+// its review after new commits, because tono reviews each PR once.
 type reviewTally struct {
 	scope    tonoScope
 	scopeErr error
 	loaded   bool
-	thread   [][]string
-	posted   []string
 }
 
 func (t *reviewTally) loadScope(ctx context.Context, env Env) {
@@ -224,28 +211,37 @@ func (t *reviewTally) loadScope(ctx context.Context, env Env) {
 	}
 }
 
-// status is tono's status for one PR, counted in counts. A review not yet
-// posted goes in the thread.
+// status is tono's status for one PR, counted in counts. A posted review
+// links to its first PR comment.
 func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts map[string]int) string {
 	t.loadScope(ctx, env)
 	r, reviewed := latestResult(env.state, p.repo(), p.Number)
 	switch {
+	case reviewed && r.Failed != "" && len(r.Comments) > 0:
+		// Part of the review reached the PR before posting failed.
+		counts["failed"]++
+		return "tono posted part of its review (" + slackLink(r.Comments[0], "review") + ")"
 	case reviewed && r.Failed != "":
 		counts["failed"]++
 		return "tono could not review it"
+	case reviewed && len(r.Unposted) > 0:
+		// Not on GitHub yet, so no verdict to show.
+		counts["waiting"]++
+		return "reviewed, not posted yet"
 	case reviewed:
 		v := overallVerdict(r.Verdicts)
 		status := strings.ToLower(verdictLabel(v))
+		if r.LGTM {
+			// An LGTM review can have no verdict line at all, so it counts as ready.
+			v, status = verdictReady, "LGTM, ready to approve"
+		}
 		if d, err := prDetail(ctx, p.URL); err == nil && d.HeadRefOid != r.SHA {
 			status += " (reviewed at an earlier commit)"
 		}
 		counts[v]++
 		counts["reviewed"]++
-		if !r.Posted && r.Report != "" {
-			if report := loadReport(r.Report); len(report) > 0 {
-				t.thread = append(t.thread, report)
-				t.posted = append(t.posted, tonoKey(r.Repo, r.Number, r.SHA))
-			}
+		if len(r.Comments) > 0 {
+			status += " (" + slackLink(r.Comments[0], "review") + ")"
 		}
 		return status
 	case t.scopeErr == nil && t.scope.outside(p) != "":
@@ -258,7 +254,7 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 }
 
 // summary is the sentence after a section's count: what tono made of the PRs.
-func (t *reviewTally) summary(env Env, counts map[string]int, threadBefore int) string {
+func (t *reviewTally) summary(env Env, counts map[string]int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, " Tono has reviewed %d (code, docs and comments)", counts["reviewed"])
 	if counts["reviewed"] > 0 {
@@ -279,9 +275,6 @@ func (t *reviewTally) summary(env Env, counts map[string]int, threadBefore int) 
 	}
 	if t.scopeErr != nil {
 		fmt.Fprintf(&b, " _Could not load tono's scope: %s_", truncate(t.scopeErr.Error(), 150))
-	}
-	if len(t.thread) > threadBefore {
-		b.WriteString(" New reviews are in the thread.")
 	}
 	return b.String()
 }
@@ -304,14 +297,13 @@ func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []Sea
 		return b.String()
 	}
 
-	before := len(tally.thread)
 	counts := map[string]int{}
 	var lines []string
 	for _, p := range queue {
 		lines = append(lines, prLine(p, tally.status(ctx, env, p, counts)))
 	}
 	fmt.Fprintf(&b, "%d PRs wait for your review.", len(queue))
-	b.WriteString(tally.summary(env, counts, before))
+	b.WriteString(tally.summary(env, counts))
 	b.WriteString("\n\n" + strings.Join(lines, "\n"))
 	return b.String()
 }
@@ -335,7 +327,6 @@ func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchP
 		inQueue[p.URL] = true
 	}
 	tally.loadScope(ctx, env)
-	before := len(tally.thread)
 	counts := map[string]int{}
 	var lines []string
 	for _, p := range prs {
@@ -349,7 +340,7 @@ func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchP
 		return b.String()
 	}
 	fmt.Fprintf(&b, "%d open team PRs in %s.", len(lines), strings.Join(env.cfg.TonoRepos, ", "))
-	b.WriteString(tally.summary(env, counts, before))
+	b.WriteString(tally.summary(env, counts))
 	b.WriteString("\n\n" + strings.Join(lines, "\n"))
 	return b.String()
 }
@@ -649,6 +640,14 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	if err := os.WriteFile(env.paths.TonoWrap, []byte(tonoWrapper), 0o700); err != nil {
 		return err
 	}
+	var failures []string
+	if !env.test {
+		gaveUp, err := postUnposted(ctx, env)
+		if err != nil {
+			return err
+		}
+		failures = append(failures, gaveUp...)
+	}
 	targets, err := tonoTargets(ctx, env)
 	if err != nil {
 		return err
@@ -659,8 +658,8 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			return err
 		}
 	}
-	var failures []string
 	var netErr error
+	var broken []string // reviews where a tono pass broke, left unmarked
 	reviewed := 0
 	for _, t := range targets {
 		p := t.pr
@@ -690,7 +689,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			return err
 		}
 		key := tonoKey(p.repo(), p.Number, d.HeadRefOid)
-		sections, verdicts, err := tonoReview(ctx, env, p, d.HeadRefOid)
+		out, err := tonoReview(ctx, env, p, d.HeadRefOid)
 		link := slackLink(p.URL, p.short())
 		var skipped tonoSkippedError
 		switch {
@@ -700,60 +699,77 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			// drops out of the next search anyway.
 			log.Printf("tono: %s skipped: %v", p.short(), err)
 			continue
-		case err != nil && !online(ctx):
-			// Not marked, so the scheduler's retry reviews it once the internet is back.
+		case err != nil && !env.online(ctx):
+			// Not marked, so the scheduler's retry reviews it once the
+			// internet is back.
 			netErr = err
+			continue
+		case err == nil && len(out.broken) > 0:
+			// A pass that broke, offline or not, says nothing about the PR.
+			// It leaves an error line, such as "Not logged in" or "API
+			// Error: Can't reach the API server". The PR stays unmarked, so a
+			// later run reviews it.
+			bad := fmt.Errorf("%s: a tono pass broke: %s", p.short(), strings.Join(out.broken, "; "))
+			log.Printf("tono: %v", bad)
+			if !env.online(ctx) {
+				netErr = bad
+			} else {
+				broken = append(broken, bad.Error())
+			}
 			continue
 		}
 		reviewed++
 
 		result := TonoResult{
 			URL: p.URL, Title: p.Title, Repo: p.repo(), Number: p.Number, SHA: d.HeadRefOid,
-			Mine: t.mine, At: time.Now(), Verdicts: verdicts,
+			Mine: t.mine, At: time.Now(), Verdicts: out.verdicts,
 		}
-		header := fmt.Sprintf("*Tono: %s* %s", link, p.Title)
-		if v := overallVerdict(verdicts); v != "" {
-			header += "\n" + verdictLabel(v)
-		}
-		switch {
-		case err != nil:
+		var comments []string
+		if err != nil {
 			result.Failed = truncate(err.Error(), 400)
-			log.Printf("tono: %s failed: %v", p.short(), err)
+		} else {
+			comments, result.Failed = commentsFor(out, d.HeadRefOid)
+			result.LGTM = len(comments) == 1 && strings.HasPrefix(comments[0], lgtmMarker)
+		}
+		if result.Failed != "" {
+			log.Printf("tono: %s failed: %s", p.short(), result.Failed)
 			// Your own PRs get a warning now. A failed review of someone
 			// else's PR shows in the stand-up instead.
 			if t.mine {
-				failures = append(failures, fmt.Sprintf("%s: %v", p.short(), err))
+				failures = append(failures, fmt.Sprintf("%s: %s", p.short(), result.Failed))
 				if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not review %s: %s", link, result.Failed)); nerr != nil {
-					return nerr
-				}
-			}
-		default:
-			report := append([]string{header}, sections...)
-			if path, serr := saveReport(env.paths.Reviews, key, report); serr == nil {
-				result.Report = path
-			} else {
-				log.Printf("tono: saving the report: %v", serr)
-			}
-			// Your own PRs get their review now. Reviews of others' PRs go in
-			// the stand-up's thread, except in a test run, which prints them.
-			if t.mine || env.test {
-				if nerr := env.send(ctx, Message{Sections: report}); nerr != nil {
 					return nerr
 				}
 			}
 		}
 		// Each PR gets one review. A review that failed for a reason other
 		// than the network is marked too, so it is not re-reported at every
-		// tono slot.
+		// tono slot. The comments are saved as unposted first, so a kill
+		// during posting leaves them for the next run.
+		result.Unposted = comments
 		if err := env.persist(func(st *State) {
 			st.TonoReviewed[key] = time.Now()
 			st.TonoResults[key] = result
 		}); err != nil {
 			return err
 		}
+		gaveUp, err := postPending(ctx, env, key, result)
+		var offline offlineError
+		switch {
+		case errors.As(err, &offline):
+			netErr = err // the comments stay unposted for the retry
+		case err != nil:
+			return err
+		case gaveUp != "":
+			failures = append(failures, fmt.Sprintf("%s: %s", p.short(), gaveUp))
+		}
 	}
 	if netErr != nil {
 		return netErr
+	}
+	if len(broken) > 0 {
+		// Not a reportedError: no DM has said so yet, so the scheduler does.
+		return fmt.Errorf("tono: %s", strings.Join(append(broken, failures...), "; "))
 	}
 	if len(failures) > 0 {
 		return reportedError{fmt.Errorf("tono: %s", strings.Join(failures, "; "))}
@@ -761,30 +777,157 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	return nil
 }
 
-// saveReport writes a review's sections to dir, for the stand-up thread.
-func saveReport(dir, key string, sections []string) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	name := strings.Map(func(r rune) rune {
-		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
-			return r
+// commentsFor picks what to post for a review: each pass's draft, or an LGTM
+// when no pass had anything to say. It returns a failure and no comments
+// instead in four cases:
+//   - a pass did not finish, or left output that is not a review
+//   - a pass has a tono marker line but no draft the worker can read
+//   - a draft has no footer, so it may be cut short
+//   - the verdict is bad but no pass wrote it up
+//
+// A posted comment makes later runs skip the PR, so a review with a pass
+// missing must post nothing.
+func commentsFor(out tonoOutcome, sha string) (comments []string, failed string) {
+	if out.passes < len(tonoPasses) {
+		why := ""
+		if len(out.broken) > 0 {
+			why = " (" + strings.Join(out.broken, "; ") + ")"
 		}
-		return '_'
-	}, key) + ".json"
-	path := filepath.Join(dir, name)
-	data, _ := json.Marshal(sections)
-	return path, os.WriteFile(path, data, 0o600)
+		return nil, fmt.Sprintf("only %d of %d passes finished%s, see %s", out.passes, len(tonoPasses), why, out.log)
+	}
+	if out.unreadable > 0 {
+		return nil, "a pass wrote a PR comment the worker could not read, see " + out.log
+	}
+	for _, d := range out.drafts {
+		if !strings.HasSuffix(d, "</sub>") {
+			return nil, "a draft PR comment has no footer, so it may be cut short, see " + out.log
+		}
+	}
+	if len(out.drafts) > 0 {
+		return out.drafts, ""
+	}
+	if v := overallVerdict(out.verdicts); v == "" || v == verdictReady {
+		return []string{lgtmComment(sha)}, ""
+	}
+	return nil, fmt.Sprintf("tono wrote no PR comment (verdict %q), see %s", overallVerdict(out.verdicts), out.log)
 }
 
-func loadReport(path string) []string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
+// maxPostTries is the failed try that fails the review: the third failed try
+// to post its comments.
+const maxPostTries = 3
+
+// offlineError is a post that failed with the internet down. It does not
+// count as a try, and the comments wait for the scheduler's retry.
+type offlineError struct{ error }
+
+// postPending posts r's unposted comments on the PR, in order, and saves the
+// state after each one, so a kill between posts loses nothing. A failed post
+// stops the loop.
+//
+// It first checks that the PR is still open at the reviewed commit. A review
+// can take 45 minutes, and a retry can come days later. If the PR moved on,
+// the comments are dropped, a DM says so, and the PR may be reviewed again.
+// It then looks on the PR for each comment's marker line, so a post that
+// timed out after it went through, or a --pr run at the same commit, does
+// not post the same review twice.
+//
+// A failed post counts one try, unless the internet is down. The try that
+// reaches maxPostTries fails the review, drops the rest, and a DM says so.
+// gaveUp then holds the reason.
+func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp string, err error) {
+	save := func(change func(*State)) error {
+		return env.persist(func(st *State) {
+			st.TonoResults[key] = r
+			if change != nil {
+				change(st)
+			}
+		})
 	}
-	var sections []string
-	_ = json.Unmarshal(data, &sections)
-	return sections
+	link := slackLink(r.URL, fmt.Sprintf("%s#%d", shortRepo(r.Repo), r.Number))
+	if len(r.Unposted) > 0 {
+		state, head, err := env.prHead(ctx, r.URL)
+		if err == nil && (state != "OPEN" || (head != "" && head != r.SHA)) {
+			r.Failed = fmt.Sprintf("the PR changed before the review was posted (%s at %.7s)", strings.ToLower(state), head)
+			r.Unposted = nil
+			log.Printf("tono: %s#%d: %s", r.Repo, r.Number, r.Failed)
+			// The review is of an old commit or a closed PR. Forget it, so
+			// an open PR gets a fresh review at its new head.
+			prefix := fmt.Sprintf("%s#%d@", r.Repo, r.Number)
+			if err := save(func(st *State) {
+				for k := range st.TonoReviewed {
+					if strings.HasPrefix(k, prefix) {
+						delete(st.TonoReviewed, k)
+					}
+				}
+			}); err != nil {
+				return "", err
+			}
+			if len(r.Comments) > 0 {
+				// Part of the review is already on the PR, and its marker
+				// blocks a fresh review. Only a "Run now" with the URL gets one.
+				return "", env.notify(ctx, fmt.Sprintf(":warning: Tono posted part of its review of %s, then the PR changed (%s). To review it again, use Run now with its URL.", link, r.Failed))
+			}
+			return "", nil
+		}
+	}
+	for len(r.Unposted) > 0 {
+		body := r.Unposted[0]
+		url, found, err := env.findComment(ctx, r.Repo, r.Number, firstLine(body))
+		if err == nil && !found {
+			url, err = env.post(ctx, r.URL, body)
+		}
+		if err != nil {
+			if !env.online(ctx) {
+				return "", offlineError{err}
+			}
+			r.PostTries++
+			log.Printf("tono: posting on %s#%d (try %d): %v", r.Repo, r.Number, r.PostTries, err)
+			if r.PostTries < maxPostTries {
+				return "", save(nil)
+			}
+			r.Failed = truncate("could not post the review: "+err.Error(), 400)
+			r.Unposted = nil
+			if err := save(nil); err != nil {
+				return "", err
+			}
+			if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not post its review of %s after %d tries: %s", link, maxPostTries, r.Failed)); nerr != nil {
+				return "", nerr
+			}
+			return r.Failed, nil
+		}
+		if url != "" {
+			r.Comments = append(r.Comments, url)
+		}
+		r.Unposted = r.Unposted[1:]
+		if err := save(nil); err != nil {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+// postUnposted posts the comments earlier runs left unposted. It returns the
+// reviews it gave up on.
+func postUnposted(ctx context.Context, env Env) ([]string, error) {
+	var failures []string
+	for key, r := range env.state.TonoResults {
+		if len(r.Unposted) == 0 {
+			continue
+		}
+		gaveUp, err := postPending(ctx, env, key, r)
+		if err != nil {
+			return failures, err
+		}
+		if gaveUp != "" {
+			failures = append(failures, fmt.Sprintf("%s#%d: %s", shortRepo(r.Repo), r.Number, gaveUp))
+		}
+	}
+	return failures, nil
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 // Tono verdicts, from the verdict line of each pass's draft PR comment.
@@ -882,14 +1025,14 @@ type reportedError struct{ error }
 // tonoReview runs the tono CLI at the PR head in a cache clone. It never
 // touches your working clones. One review per cache clone at a time, so a
 // "Run now" cannot check out another PR under a review in progress.
-func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) ([]string, map[string]string, error) {
+func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (tonoOutcome, error) {
 	dir := filepath.Join(env.paths.Cache, strings.ReplaceAll(p.repo(), "/", "__"))
 	if err := os.MkdirAll(env.paths.Cache, 0o700); err != nil {
-		return nil, nil, err
+		return tonoOutcome{}, err
 	}
 	unlock, err := lockFile(dir + ".lock")
 	if err != nil {
-		return nil, nil, err
+		return tonoOutcome{}, err
 	}
 	defer unlock()
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -898,7 +1041,7 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) ([]str
 		cancel()
 		if err != nil {
 			_ = os.RemoveAll(dir) // a half-made clone would break every later review
-			return nil, nil, fmt.Errorf("clone %s: %v: %s", p.repo(), err, truncate(strings.TrimSpace(string(out)), 300))
+			return tonoOutcome{}, fmt.Errorf("clone %s: %v: %s", p.repo(), err, truncate(strings.TrimSpace(string(out)), 300))
 		}
 	}
 	for _, args := range [][]string{
@@ -906,7 +1049,7 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) ([]str
 		{"-C", dir, "checkout", "--quiet", "--force", "--detach", headSHA},
 	} {
 		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
-			return nil, nil, fmt.Errorf("git %s: %s", args[2], truncate(strings.TrimSpace(string(out)), 300))
+			return tonoOutcome{}, fmt.Errorf("git %s: %s", args[2], truncate(strings.TrimSpace(string(out)), 300))
 		}
 	}
 
@@ -916,10 +1059,11 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) ([]str
 	cmd.Dir = dir
 	shims, err := readOnlyShims(filepath.Join(env.paths.Dir, "tono-bin"))
 	if err != nil {
-		return nil, nil, err
+		return tonoOutcome{}, err
 	}
 	cmd.Env = append(os.Environ(), "TONO_CLAUDE="+env.paths.TonoWrap, "PATH="+shims+":"+os.Getenv("PATH"))
-	// stdout is the report. stderr has tono's progress lines, which go only to the log.
+	// stdout and stderr go only to the log. The review comes from tono's
+	// verified logs, read by tonoVerified.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -930,40 +1074,68 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) ([]str
 	_ = os.MkdirAll(env.paths.Logs, 0o700)
 	_ = os.WriteFile(logPath, append(stderr.Bytes(), stdout.Bytes()...), 0o600)
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, nil, fmt.Errorf("timed out after %s", tonoTimeout)
+		return tonoOutcome{}, fmt.Errorf("timed out after %s", tonoTimeout)
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == tonoSkipExit {
-		return nil, nil, tonoSkippedError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
+		return tonoOutcome{}, tonoSkippedError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))
+		return tonoOutcome{}, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))
 	}
-	sections, verdicts := tonoVerified(started, p.repo(), p.Number)
-	if len(sections) == 0 {
-		sections = []string{formatTonoReport(stdout.String())}
-	}
-	sections = append(sections, "_Full log: `"+logPath+"`_")
-	return sections, verdicts, nil
+	out := tonoVerified(started, p.repo(), p.Number)
+	out.log = logPath
+	return out, nil
 }
 
-var tonoPasses = []struct{ name, title string }{
-	{"review", "Code review"},
-	{"docs", "Docs and ticket"},
-	{"comments", "Code comments"},
+// tonoOutcome is what tono's verified passes left: the draft PR comment of
+// each pass that had something to say, and each pass's verdict.
+type tonoOutcome struct {
+	drafts   []string
+	verdicts map[string]string
+	passes   int // passes whose verified output reads as a review
+	// unreadable counts passes with a tono marker line but no draft that
+	// draftComment could read.
+	unreadable int
+	// broken holds the first line of each pass whose verified output is not
+	// a review, such as "API Error: Can't reach the API server".
+	broken []string
+	log    string // the worker's log of the run
 }
 
-// tonoVerified returns one section per pass from each pass's verified
-// output, and each pass's verdict. tono's stdout also holds the raw rounds,
-// whose findings the verify step may drop.
-func tonoVerified(since time.Time, repo string, number int) ([]string, map[string]string) {
+var tonoPasses = []struct{ name string }{{"review"}, {"docs"}, {"comments"}}
+
+// looksLikeReview is true when a pass's verified output reads as a review:
+// at least minReviewLines lines with text, and a Markdown heading or list. A
+// clean pass can write no verdict and no draft, so this is what tells it apart
+// from a run that broke, which leaves one error line or nothing.
+func looksLikeReview(verified string) bool {
+	lines, structured := 0, false
+	for _, line := range strings.Split(verified, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		lines++
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") {
+			structured = true
+		}
+	}
+	return lines >= minReviewLines && structured
+}
+
+const minReviewLines = 3
+
+// tonoVerified reads each pass's verified output from this run: its draft PR
+// comment, if it wrote one, and its verdict. tono's stdout also holds the raw
+// rounds, whose findings the verify step may drop.
+func tonoVerified(since time.Time, repo string, number int) tonoOutcome {
 	dir := os.Getenv("XDG_CACHE_HOME")
 	if dir == "" {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".cache")
 	}
-	var sections []string
-	verdicts := map[string]string{}
+	out := tonoOutcome{verdicts: map[string]string{}}
 	for _, pass := range tonoPasses {
 		matches, _ := filepath.Glob(filepath.Join(dir, "tono", "logs", "*-"+tonoLockKey(repo, number)+"-"+pass.name+"-merged.log"))
 		var newest string
@@ -980,12 +1152,109 @@ func tonoVerified(since time.Time, repo string, number int) ([]string, map[strin
 		if err != nil {
 			continue
 		}
-		if v := parseVerdict(string(data)); v != "" {
-			verdicts[pass.name] = v
+		if !looksLikeReview(string(data)) {
+			out.broken = append(out.broken, pass.name+": "+truncate(firstLine(strings.TrimSpace(string(data))), 120))
+			continue
 		}
-		sections = append(sections, fmt.Sprintf("*%s*\n%s", pass.title, truncate(formatTonoReport(string(data)), tonoPassMax)))
+		out.passes++
+		if v := parseVerdict(string(data)); v != "" {
+			out.verdicts[pass.name] = v
+		}
+		if d := draftComment(string(data)); d != "" {
+			out.drafts = append(out.drafts, d)
+		} else if hasMarkerLine(string(data)) {
+			out.unreadable++
+		}
 	}
-	return sections, verdicts
+	return out
+}
+
+// codeFence reads a Markdown fence line: ``` or ~~~, three or more, with any
+// indent. info is true when a language or other text follows the fence.
+func codeFence(line string) (indent int, fence string, info, ok bool) {
+	trimmed := strings.TrimLeft(line, " \t")
+	indent = len(line) - len(trimmed)
+	if len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return 0, "", false, false
+	}
+	n := 0
+	for n < len(trimmed) && trimmed[n] == trimmed[0] {
+		n++
+	}
+	if n < 3 {
+		return 0, "", false, false
+	}
+	return indent, trimmed[:n], strings.TrimSpace(trimmed[n:]) != "", true
+}
+
+// draftComment is the pass's draft PR comment: the fenced block that starts
+// with a tono marker. The heading above the block varies from run to run, so
+// the marker is what finds it. "" means the pass wrote no comment.
+//
+// A fence inside the draft that names a language (```go) opens an inner
+// block, and the next bare fence closes it. A bare inner fence at least as
+// long as the outer one closes the draft early, and the missing footer then
+// fails the review in commentsFor.
+func draftComment(verified string) string {
+	lines := strings.Split(verified, "\n")
+	for i := 0; i < len(lines); i++ {
+		indent, fence, _, ok := codeFence(lines[i])
+		if !ok {
+			continue
+		}
+		var body []string
+		depth, closed := 0, false
+		j := i + 1
+		for ; j < len(lines); j++ {
+			if _, f, info, ok := codeFence(lines[j]); ok && f[0] == fence[0] {
+				switch {
+				case info:
+					depth++
+				case depth > 0:
+					depth--
+				case len(f) >= len(fence):
+					closed = true
+				}
+				if closed {
+					break
+				}
+			}
+			line := lines[j]
+			if cut := min(indent, len(line)-len(strings.TrimLeft(line, " \t"))); cut > 0 {
+				line = line[cut:]
+			}
+			body = append(body, line)
+		}
+		if !closed {
+			return ""
+		}
+		if text := strings.TrimSpace(strings.Join(body, "\n")); strings.HasPrefix(text, "<!-- tono:") {
+			return text
+		}
+		i = j
+	}
+	return ""
+}
+
+// hasMarkerLine is true when a line starts with a tono marker. A pass with
+// one but no draft that draftComment can read must not count as clean.
+func hasMarkerLine(verified string) bool {
+	for _, line := range strings.Split(verified, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "<!-- tono:") {
+			return true
+		}
+	}
+	return false
+}
+
+// lgtmMarker starts every LGTM comment.
+const lgtmMarker = "<!-- tono:lgtm"
+
+// lgtmComment is the comment for a PR where no pass had anything to say. Its
+// tono marker makes hasTonoComment true, so later runs skip the PR.
+func lgtmComment(sha string) string {
+	short := sha[:min(7, len(sha))]
+	return fmt.Sprintf("%s sha=%s -->\nLGTM 😃⭐😸\n\n<sub>tono review of the code, docs and code comments at `%s`, run with Claude</sub>", lgtmMarker, short, short)
 }
 
 // tonoLockKey is tono's name for one review target: "owner/repo|n" with every
@@ -999,59 +1268,6 @@ func tonoLockKey(repo string, number int) string {
 		}
 		return '_'
 	}, raw)
-}
-
-// tonoPassMax keeps each pass short enough that the whole DM stays readable.
-const tonoPassMax = 3000
-
-var jsonFence = regexp.MustCompile("(?s)```json\\s*\\n(.*?)\\n```")
-
-// formatTonoReport turns each fenced JSON list of findings into Slack bullets
-// and keeps the prose around them.
-func formatTonoReport(report string) string {
-	out := jsonFence.ReplaceAllStringFunc(report, func(block string) string {
-		m := jsonFence.FindStringSubmatch(block)
-		var findings []struct {
-			File    string `json:"file"`
-			Line    int    `json:"line"`
-			Summary string `json:"summary"`
-			Verdict string `json:"verdict"`
-		}
-		if json.Unmarshal([]byte(m[1]), &findings) != nil || len(findings) == 0 {
-			return block
-		}
-		var b strings.Builder
-		for _, f := range findings {
-			if f.Summary == "" {
-				return block
-			}
-			where := f.File
-			if f.Line > 0 {
-				where = fmt.Sprintf("%s:%d", f.File, f.Line)
-			}
-			b.WriteString("• ")
-			if where != "" {
-				b.WriteString("`" + where + "` ")
-			}
-			if f.Verdict != "" {
-				b.WriteString("_" + f.Verdict + "_ ")
-			}
-			b.WriteString(f.Summary + "\n")
-		}
-		return strings.TrimRight(b.String(), "\n")
-	})
-	return strings.TrimSpace(toSlackMarkdown(out))
-}
-
-var (
-	mdHeading = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
-	mdBold    = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
-)
-
-// toSlackMarkdown turns Markdown headings and **bold** into Slack's *bold*.
-func toSlackMarkdown(s string) string {
-	s = mdBold.ReplaceAllString(s, "*$1*")
-	return mdHeading.ReplaceAllString(s, "*$1*")
 }
 
 func lastLines(s string, n int) string {

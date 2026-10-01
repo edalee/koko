@@ -82,8 +82,12 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 	slack := newSlack(cfg.Slack)
 	env := Env{
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
-		claude: claudeRunner{settingsPath: paths.Settings},
-		send:   slack.post,
+		claude:      claudeRunner{settingsPath: paths.Settings},
+		send:        slack.post,
+		post:        postComment,
+		findComment: findComment,
+		prHead:      prHead,
+		online:      online,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
@@ -92,6 +96,13 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 		env.send = func(_ context.Context, msg Message) error {
 			fmt.Println(printMessage(msg))
 			return nil
+		}
+		// A test run prints every comment, whatever is already on the PR.
+		env.findComment = func(context.Context, string, int, string) (string, bool, error) { return "", false, nil }
+		env.prHead = func(context.Context, string) (string, string, error) { return "OPEN", "", nil }
+		env.post = func(_ context.Context, prURL, body string) (string, error) {
+			fmt.Printf("── Comment for %s (not posted) ──\n%s\n\n", prURL, body)
+			return "", nil
 		}
 		env.persist = func(func(*State)) error { return nil }
 	}
@@ -130,23 +141,25 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	if err != nil {
 		return err
 	}
-	env := newEnv(cfg, paths, *test)
-	if *date != "" {
-		if !*test {
-			return fmt.Errorf("--date only works with --test")
-		}
-		day, err := time.ParseInLocation("2006-01-02", *date, cfg.location())
-		if err != nil {
-			return fmt.Errorf("bad --date %q, want YYYY-MM-DD", *date)
-		}
-		env.now = day.Add(7 * time.Hour)
+	if *date != "" && !*test {
+		return fmt.Errorf("--date only works with --test")
 	}
+	// The lock comes before newEnv reads the state, so a run that waited
+	// for a scheduled one sees what that run reviewed and posted.
 	if !*test {
 		unlock, err := lockFile(jobLockPath(paths, job))
 		if err != nil {
 			return err
 		}
 		defer unlock()
+	}
+	env := newEnv(cfg, paths, *test)
+	if *date != "" {
+		day, err := time.ParseInLocation("2006-01-02", *date, cfg.location())
+		if err != nil {
+			return fmt.Errorf("bad --date %q, want YYYY-MM-DD", *date)
+		}
+		env.now = day.Add(7 * time.Hour)
 	}
 	runErr := runJob(ctx, env, job, *pr)
 	if !*test && runErr == nil && *pr == "" {
@@ -287,8 +300,9 @@ func stillDue(cfg Config, st State, run DueRun) bool {
 	return false
 }
 
-// online is true if Slack answers. Every job ends in a Slack DM, so without
-// it there is no point in starting.
+// online is true if Slack's API answers, as a test of the internet. A job
+// that fails while offline waits for the internet and retries, instead of
+// counting as failed.
 func online(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

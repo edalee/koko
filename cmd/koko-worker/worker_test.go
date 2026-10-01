@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -349,27 +350,6 @@ func TestSudoersRuleIsNarrow(t *testing.T) {
 	}
 }
 
-func TestFormatTonoReport(t *testing.T) {
-	report := "Six findings.\n\n```json\n[\n  {\"file\": \"requirements.txt\", \"line\": 7, \"summary\": \"The ceiling lands in prod.\", \"failure_scenario\": \"long\"},\n  {\"file\": \"ci.yaml\", \"summary\": \"No pin.\"}\n]\n```\n\nDone."
-	got := formatTonoReport(report)
-	want := "Six findings.\n\n• `requirements.txt:7` The ceiling lands in prod.\n• `ci.yaml` No pin.\n\nDone."
-	if got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
-	}
-	odd := "```json\n{\"not\": \"a list\"}\n```"
-	if formatTonoReport(odd) != odd {
-		t.Error("a block that is not a findings list must stay as it is")
-	}
-}
-
-func TestToSlackMarkdown(t *testing.T) {
-	in := "## Surviving findings\n\n1. **MED, confirmed:** the reason is void."
-	want := "*Surviving findings*\n\n1. *MED, confirmed:* the reason is void."
-	if got := toSlackMarkdown(in); got != want {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestTonoLockKey(t *testing.T) {
 	if got := tonoLockKey("epidemicsound/kalimba", 28); got != "epidemicsound_kalimba_28" {
 		t.Errorf("got %q", got)
@@ -643,14 +623,232 @@ func TestParseVerdict(t *testing.T) {
 	}
 }
 
-func TestReportRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path, err := saveReport(dir, "epidemicsound/kalimba#28@abc", []string{"*Tono*", "*Code review*\nfine"})
-	if err != nil {
+func TestDraftComment(t *testing.T) {
+	// The shape of a real verified log: the heading above the block varies.
+	verified := "## Findings\n\n- one\n\n## Draft comment (not posted)\n\n```\n<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>\n```\n\nTwo MCP servers failed.\n"
+	want := "<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>"
+	if got := draftComment(verified); got != want {
+		t.Errorf("got %q", got)
+	}
+	// A fenced block without a marker is not a draft.
+	if got := draftComment("## Checked\n\n```json\n[]\n```\n"); got != "" {
+		t.Errorf("want no draft, got %q", got)
+	}
+	lgtm := lgtmComment("55d37455abcdef")
+	if !strings.HasPrefix(lgtm, "<!-- tono:lgtm sha=55d3745 -->\nLGTM 😃⭐😸") {
+		t.Errorf("lgtm = %q", lgtm)
+	}
+}
+
+func TestCommentsFor(t *testing.T) {
+	draft := "<!-- tono:review n=1 sha=abc1234 -->\n## Code Review #1\n\n<sub>tono code review</sub>"
+	cases := []struct {
+		name string
+		out  tonoOutcome
+		want string // "draft", "lgtm" or "failed"
+	}{
+		{"drafts are posted", tonoOutcome{drafts: []string{draft}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
+		{"clean, no verdicts", tonoOutcome{passes: 3, verdicts: map[string]string{}}, "lgtm"},
+		{"clean, ready", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
+		{"a pass did not finish", tonoOutcome{passes: 2, verdicts: map[string]string{}}, "failed"},
+		{"drafts, but a pass did not finish", tonoOutcome{drafts: []string{draft}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"follow-ups but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"not mergeable but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
+		// overallVerdict needs a clean code review for "ready", so a lone docs
+		// "mergeable" reads as follow-ups: no LGTM without a code verdict.
+		{"docs mergeable, no code verdict", tonoOutcome{passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
+		{"cut-short draft", tonoOutcome{drafts: []string{"<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}, passes: 3}, "failed"},
+	}
+	for _, c := range cases {
+		comments, failed := commentsFor(c.out, "abc1234def")
+		got := "failed"
+		switch {
+		case failed != "" && len(comments) > 0:
+			t.Errorf("%s: both comments and a failure", c.name)
+		case failed != "":
+		case len(comments) == 1 && strings.HasPrefix(comments[0], "<!-- tono:lgtm"):
+			got = "lgtm"
+		case len(comments) > 0:
+			got = "draft"
+		}
+		if got != c.want {
+			t.Errorf("%s: got %s, want %s (failed %q)", c.name, got, c.want, failed)
+		}
+	}
+}
+
+// fakePostEnv posts every body but "fails", saves results in st and records
+// DMs. The PR is open at commit "abc" unless head says otherwise.
+type fakePostEnv struct {
+	st       *State
+	posted   []string
+	dms      []string
+	onGitHub map[string]string
+	head     string
+	offline  bool
+}
+
+func (f *fakePostEnv) env() Env {
+	return Env{
+		post: func(_ context.Context, _, body string) (string, error) {
+			if body == "fails" {
+				return "", fmt.Errorf("network")
+			}
+			f.posted = append(f.posted, body)
+			return "https://github.com/o/r/pull/1#" + firstLine(body), nil
+		},
+		findComment: func(_ context.Context, _ string, _ int, line string) (string, bool, error) {
+			url, ok := f.onGitHub[line]
+			return url, ok, nil
+		},
+		prHead: func(context.Context, string) (string, string, error) {
+			if f.head != "" {
+				return "OPEN", f.head, nil
+			}
+			return "OPEN", "abc", nil
+		},
+		online:  func(context.Context) bool { return !f.offline },
+		send:    func(_ context.Context, m Message) error { f.dms = append(f.dms, m.Sections...); return nil },
+		persist: func(change func(*State)) error { change(f.st); return nil },
+	}
+}
+
+func TestPostPending(t *testing.T) {
+	const key = "o/r#1@abc"
+	ctx := context.Background()
+	newFake := func() *fakePostEnv {
+		return &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{key: time.Now()}}}
+	}
+	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc"}
+
+	// A failed post stops the loop, keeps the rest and counts one try.
+	f := newFake()
+	r.Unposted = []string{"a", "fails", "b"}
+	if gaveUp, err := postPending(ctx, f.env(), key, r); err != nil || gaveUp != "" {
+		t.Fatal(gaveUp, err)
+	}
+	got := f.st.TonoResults[key]
+	if strings.Join(f.posted, ",") != "a" || strings.Join(got.Unposted, ",") != "fails,b" || got.PostTries != 1 {
+		t.Errorf("after one failure: posted %v, result %+v", f.posted, got)
+	}
+
+	// Offline, a failed post does not count a try.
+	f.offline = true
+	var offline offlineError
+	if _, err := postPending(ctx, f.env(), key, got); !errors.As(err, &offline) || f.st.TonoResults[key].PostTries != 1 {
+		t.Errorf("offline: err %v, tries %d", err, f.st.TonoResults[key].PostTries)
+	}
+	f.offline = false
+
+	// The last try fails the review, drops the rest and sends a DM.
+	got.PostTries = maxPostTries - 1
+	gaveUp, err := postPending(ctx, f.env(), key, got)
+	if got = f.st.TonoResults[key]; err != nil || gaveUp == "" || got.Failed == "" || len(got.Unposted) != 0 || len(f.dms) != 1 {
+		t.Errorf("after the last try: gaveUp %q, err %v, result %+v, dms %v", gaveUp, err, got, f.dms)
+	}
+
+	// A comment already on the PR, from a post that timed out or a --pr run
+	// at the same commit, is not posted twice.
+	f = newFake()
+	r.Unposted = []string{"<!-- tono:review n=1 sha=abc -->\nbody", "b"}
+	f.onGitHub = map[string]string{"<!-- tono:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
-	if got := loadReport(path); len(got) != 2 || got[1] != "*Code review*\nfine" {
-		t.Errorf("got %v", got)
+	if got = f.st.TonoResults[key]; strings.Join(f.posted, ",") != "b" || len(got.Comments) != 2 || got.Comments[0] != "https://github.com/o/r/pull/1#old" {
+		t.Errorf("retry: posted %v, comments %v", f.posted, got.Comments)
+	}
+
+	// A retry on a PR with new commits posts nothing and frees it for a new review.
+	f = newFake()
+	f.head = "def"
+	r.Unposted = []string{"a"}
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
+		t.Fatal(err)
+	}
+	if got = f.st.TonoResults[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.TonoReviewed) != 0 || len(f.dms) != 0 {
+		t.Errorf("changed PR: posted %v, result %+v, reviewed %v, dms %v", f.posted, got, f.st.TonoReviewed, f.dms)
+	}
+
+	// The same, with part of the review already posted: a DM says how to
+	// review it again, because the posted marker blocks a fresh review.
+	f = newFake()
+	f.head = "def"
+	r.Comments = []string{"https://github.com/o/r/pull/1#first"}
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.dms) != 1 || !strings.Contains(f.dms[0], "Run now") {
+		t.Errorf("partly posted: dms %v", f.dms)
+	}
+}
+
+func TestStandupStatusForPostingStates(t *testing.T) {
+	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
+	p.Repository.NameWithOwner = "o/r"
+	status := func(r TonoResult) (string, map[string]int) {
+		st := &State{TonoResults: map[string]TonoResult{"o/r#1@abc": r}}
+		tally := &reviewTally{loaded: true}
+		counts := map[string]int{}
+		// prDetail is not reached for these states, or fails harmlessly offline.
+		return tally.status(context.Background(), Env{state: st}, p, counts), counts
+	}
+	base := TonoResult{Repo: "o/r", Number: 1, SHA: "abc", Verdicts: map[string]string{"review": verdictReady}}
+
+	unposted := base
+	unposted.Unposted = []string{"a"}
+	if s, c := status(unposted); s != "reviewed, not posted yet" || c["waiting"] != 1 || c["reviewed"] != 0 {
+		t.Errorf("unposted: %q %v", s, c)
+	}
+	partial := base
+	partial.Failed, partial.Comments = "could not post the review: boom", []string{"https://github.com/o/r/pull/1#c1"}
+	if s, _ := status(partial); !strings.HasPrefix(s, "tono posted part of its review") {
+		t.Errorf("partial: %q", s)
+	}
+}
+
+func TestLooksLikeReview(t *testing.T) {
+	for _, broken := range []string{
+		"API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)\n",
+		"Not logged in · Please run /login\n",
+		"stub: ok\n",
+		"",
+	} {
+		if looksLikeReview(broken) {
+			t.Errorf("%q reads as a review", broken)
+		}
+	}
+	clean := "## What I checked\n\n- Every comment in the diff.\n\n## PR comment\n\nNone. The pass found nothing.\n"
+	if !looksLikeReview(clean) {
+		t.Error("a clean pass must read as a review")
+	}
+	// Two clean passes and one that broke: no LGTM.
+	out := tonoOutcome{passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
+	if c, failed := commentsFor(out, "abc"); c != nil || !strings.Contains(failed, "API Error") {
+		t.Errorf("broken pass: comments %v, failed %q", c, failed)
+	}
+}
+
+func TestDraftCommentFences(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"tildes", "## Draft\n\n~~~\n<!-- tono:docs-check n=1 -->\nBody\n<sub>f</sub>\n~~~\n", "<!-- tono:docs-check n=1 -->\nBody\n<sub>f</sub>"},
+		{"indented", "1. Draft:\n\n   ```\n   <!-- tono:review n=1 -->\n   Body\n   <sub>f</sub>\n   ```\n", "<!-- tono:review n=1 -->\nBody\n<sub>f</sub>"},
+		{"inner code block", "```\n<!-- tono:review n=1 -->\nFix:\n```go\nx := 1\n```\n<sub>f</sub>\n```\n", "<!-- tono:review n=1 -->\nFix:\n```go\nx := 1\n```\n<sub>f</sub>"},
+		{"longer outer fence", "````\n<!-- tono:review n=1 -->\n```\ncode\n```\n<sub>f</sub>\n````\n", "<!-- tono:review n=1 -->\n```\ncode\n```\n<sub>f</sub>"},
+		{"marker only quoted in prose", "- The docs quote `<!-- tono:... -->` as an example.\n", ""},
+	}
+	for _, c := range cases {
+		if got := draftComment(c.in); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+	// A marker line outside any fence the finder can read is not clean.
+	if !hasMarkerLine("## Draft\n\n<!-- tono:review n=1 -->\nBody\n") || hasMarkerLine("- quoted `<!-- tono:x -->`") {
+		t.Error("hasMarkerLine")
+	}
+	out := tonoOutcome{passes: 3, unreadable: 1, verdicts: map[string]string{}}
+	if c, failed := commentsFor(out, "abc"); failed == "" || c != nil {
+		t.Error("an unreadable draft must fail, not post LGTM")
 	}
 }
 

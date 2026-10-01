@@ -34,15 +34,15 @@ Koko already has a Slack connection, a settings panel and a Claude session model
 
 - No new jobs beyond the three below.
 - No cloud hosting. Everything runs on the Mac.
-- No posting to GitHub or Jira. Jobs only read, except for booking focus blocks.
+- No changes to Jira. On GitHub, the only write is tono's review comments on the PRs it reviews, posted as you. Otherwise jobs only read, except for booking focus blocks.
 
 ## Jobs
 
 | Job | Time (Mon to Fri) | What it does |
 |---|---|---|
-| Stand-up | 07:00 | DMs today's meetings, your approved PRs ready to merge with a Jira check, follow-up steps, and PRs waiting for your review. |
+| Stand-up | 07:00 | DMs today's meetings, your approved PRs ready to merge with a Jira check, follow-up steps, PRs waiting for your review, and team PRs. |
 | Focus | 09:15 | Books "Focus" blocks in free gaps of 30 minutes or more, 09:15 to 17:00. |
-| Tono | 09:30, 12:00, 14:00 | Reviews each new commit on your open PRs and DMs the report. |
+| Tono | 09:30, 12:00, 14:00 | Reviews each PR once: your own, and the team's (see "Tono"). It posts the review on the PR, or "LGTM 😃⭐😸" when there is nothing to report. |
 
 The times are defaults. The UI can change them.
 
@@ -54,9 +54,9 @@ The times are defaults. The UI can change them.
 4. **Needs your review:** open, non-draft PRs that request your review, oldest first. Your own PRs and bot PRs (Dependabot, Renovate) are hidden.
    - It opens with a summary: how many PRs wait, how many tono has reviewed at their current commit (code, docs and comments), and of those how many look ready to approve, have follow-ups, or are not mergeable.
    - Each PR shows its tono verdict, "not reviewed yet", or "outside tono's scope" with the reason. "Not reviewed yet" counts only PRs in scope.
-   - Each full review of a PR in this list goes in the stand-up's thread, once per commit.
+   - A reviewed PR links to tono's comment on the PR.
 
-**Layout:** the DM uses Slack blocks, with a divider between sections. Long sections are split at line breaks under Slack's 3,000-character limit per block, and a message that needs more than 50 blocks continues in a second message. Tono DMs use the same layout.
+**Layout:** the DM uses Slack blocks, with a divider between sections. Long sections are split at line breaks under Slack's 3,000-character limit per block, and a message that needs more than 50 blocks continues in a second message.
 
 Go fetches the PR lists with `gh`, so the links are exact. Claude only does the judgement: ticket coverage and follow-up steps. (In the baldrick-work test, Claude built the list and gave one PR the wrong link.)
 
@@ -75,16 +75,19 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 
 - **Scope:** tono reviews only PRs opened by a member of `epidemicsound/content-protection` in the last 4 days (`tonoTeam`, `tonoMaxAgeDays`). The members come from GitHub at every run.
 - **One review per PR:** a PR tono has reviewed, at any commit, is not reviewed again. Neither is a PR that already carries a tono comment, for example from a teammate who ran tono with `-c`.
-- **Sources:** your own open PRs, then the PRs waiting for your review (people, not bots), oldest first. Others' PRs get no DM of their own: the stand-up summarises them and posts each review in its thread.
+- **Sources:** your own open PRs, then the PRs waiting for your review (people, not bots), oldest first. The stand-up summarises the reviews and links each one.
 - **"Run now" with a PR URL** reviews that PR whatever the scope says.
 - The verdict comes from the draft PR comment in each verified pass: mergeable, mergeable with follow-ups, or not mergeable. "Ready to approve" means every pass says mergeable or mergeable with follow-ups, and the code review says mergeable.
 - Results are keyed `repo#number@sha`, so the stand-up can say when a PR has new commits since its review.
 - The review runs in a cache clone at the PR head, never in your working clones.
 - It calls the tono CLI directly: `tono <number> --all -l high`. The CLI posts nothing to GitHub without `-c`.
 - The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its `TONO_CLAUDE` wrapper denies the posting commands as a second guard.
-- The DM holds each pass's verified output (tono's `*-merged.log` files), not the raw rounds. The verify step can drop round findings, so the raw output would mislead.
-- Findings lists become Slack bullets. Each pass is cut at 3,000 characters, and the DM links the full log.
-- One DM per review. A review that fails for a reason other than the network sends one warning and is not retried for the same commit.
+- **Posting:** the worker's Go code posts the review, not tono's Claude. It takes the draft PR comment from each pass's verified output (tono's `*-merged.log` files), found by its `<!-- tono:` marker, and posts each draft as its own comment with `gh pr comment`.
+  - If all three passes ran and none wrote a draft, it posts "LGTM 😃⭐😸" behind `<!-- tono:lgtm sha=… -->`.
+  - A pass counts as finished only if its output reads as a review: three or more lines, with a heading or a list. A broken run leaves one error line, such as "API Error: Can't reach the API server". It posts nothing, not even the drafts, if a pass did not finish. It also posts nothing if a draft has no footer, if a marker line has no draft it can read, or if the verdict is bad and no draft exists. Each of these counts as a failed review. A pass that broke, offline or not, marks nothing: the run reports it, and a later run reviews the PR again.
+  - Comments are saved as unposted before the first post, and each post is saved as it lands, so a kill between posts loses nothing. The next tono run posts what is left. Before every post, first or retry, it checks that the PR is still open at the reviewed commit. If not, it drops the comments and lets the PR be reviewed again. It then checks the PR for each comment's marker line, so a post that timed out after it went through, or a `--pr` run at the same commit, is not posted twice. If part of a review was posted before the PR changed, a DM says to use "Run now" with its URL. A failed post counts one try, unless the internet is down. After 3 tries the review counts as failed, and a DM says so.
+  - The comments post as you. Each one says in its footer that tono and Claude wrote it.
+- A review of your own PR that fails for a reason other than the network sends one DM warning. It is not retried for the same commit.
 - A network failure marks nothing, so the scheduler's retry reviews that commit once the internet is back.
 - If another tono run holds the PR's lock, the PR is left for the next slot.
 - One review per cache clone at a time, so a "Run now" never checks out another PR under a review in progress.
@@ -172,7 +175,7 @@ koko-worker is a nested Go module, like `koko-cli`. All worker logic lives there
 | `cmd/koko-worker/main.go` | Subcommands: `serve` (scheduler loop), `run <job> [--test [--date]]`, `check [name]`, `status`, `install`, `uninstall`. |
 | `cmd/koko-worker/config.go` | `worker.json`, defaults and paths. |
 | `cmd/koko-worker/calendar.go` | Google events, gap finder, list and create through the connector. |
-| `cmd/koko-worker/github.go` | PR lists, readiness, bot filter. |
+| `cmd/koko-worker/github.go` | PR lists, readiness, bot filter, and posting tono's PR comments: the worker's only GitHub write. |
 | `cmd/koko-worker/launchd.go` | Agent install and removal, Mac wake booking. |
 | `cmd/koko-worker/check.go` | Connection checks for the UI. |
 | `cmd/koko-worker/scheduler.go` | Due and catch-up logic, per-job per-day run record on disk, wake booking. |
@@ -240,7 +243,13 @@ Done on 30 Sep:
   - **My PRs** (`tonoMine`): every open PR you opened, whatever the team or age.
   - **Team PRs** (`tonoTeamPRs`): PRs opened by `tonoTeam` members in the last `tonoMaxAgeDays` days. It covers PRs that ask for your review, plus every open PR in `tonoRepos`. You add and remove those repos in Settings.
   - The old `tonoOwnPRsOnly: true` reads as Team PRs off.
-- The stand-up has a "Team PRs" section for team PRs in `tonoRepos` that do not ask for your review. Their reviews go in the stand-up thread.
+- The stand-up has a "Team PRs" section for team PRs in `tonoRepos` that do not ask for your review.
+- Tono's reviews go on the PR, not to Slack:
+  - The worker posts each pass's draft comment on the PR, through your `gh` auth. Tono's own Claude stays read-only.
+  - If every pass ran and none wrote a draft, the worker posts "LGTM 😃⭐😸" behind a `<!-- tono:lgtm -->` marker. Every posted comment carries a `<!-- tono:` marker, so later runs skip the PR.
+  - Comments that fail to post are retried at the next tono run, up to 3 tries. Then the review counts as failed.
+  - The stand-up lists each reviewed PR with its verdict and a link to the review. The stand-up thread and the review DMs are gone. A failed review of your own PR still comes by DM.
+  - "Test" prints the comments instead of posting them.
 
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.

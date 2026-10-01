@@ -81,8 +81,17 @@ type TonoResult struct {
 	At       time.Time         `json:"at"`
 	Verdicts map[string]string `json:"verdicts,omitempty"` // pass -> verdictReady, verdictFollowUps or verdictNotMergeable
 	Failed   string            `json:"failed,omitempty"`
-	Report   string            `json:"report,omitempty"` // saved sections, for the stand-up thread
-	Posted   bool              `json:"posted,omitempty"` // shown in a stand-up thread
+	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
+	LGTM     bool              `json:"lgtm,omitempty"`     // no pass had anything to say
+	// Unposted are comments not yet posted. The next tono run posts them.
+	Unposted []string `json:"unposted,omitempty"`
+	// PostTries counts failed tries to post. At maxPostTries the review
+	// counts as failed, and its unposted comments are dropped.
+	PostTries int `json:"postTries,omitempty"`
+	// Report and Posted belong to the old stand-up thread. Pruning still
+	// removes report files that old results point to.
+	Report string `json:"report,omitempty"`
+	Posted bool   `json:"posted,omitempty"`
 }
 
 func timeKey(job, clock string) string { return job + "@" + clock }

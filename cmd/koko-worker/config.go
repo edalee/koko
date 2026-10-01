@@ -93,7 +93,6 @@ type Paths struct {
 	Logs     string // worker/logs/
 	Settings string // worker/claude-settings.json
 	TonoWrap string // worker/tono-claude.sh
-	Reviews  string // worker/reviews/, tono reports for the stand-up thread
 	Cache    string // ~/.cache/koko-worker/repos, cache clones for tono
 }
 
@@ -109,7 +108,6 @@ func workerPaths() Paths {
 		Logs:     filepath.Join(dir, "logs"),
 		Settings: filepath.Join(dir, "claude-settings.json"),
 		TonoWrap: filepath.Join(dir, "tono-claude.sh"),
-		Reviews:  filepath.Join(dir, "reviews"),
 		Cache:    filepath.Join(home, ".cache", "koko-worker", "repos"),
 	}
 }

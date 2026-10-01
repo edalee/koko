@@ -103,7 +103,7 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
     key: "tono",
     name: "Tono reviews",
     about:
-      "Reviews each PR once and posts nothing to GitHub. Reviews of your PRs come by DM. Reviews of team PRs go in the stand-up.",
+      "Reviews each PR once and posts the review as comments on the PR, as you. If there is nothing to report, it posts LGTM 😃⭐😸. Test prints the comments instead.",
     multi: true,
   },
 ];
@@ -320,7 +320,13 @@ export default function WorkerSettings() {
       const text = await RunNow(job, test);
       setOutput({
         job,
-        text: text.trim() || (test ? "(no output)" : "Done. Check your Slack DMs."),
+        text:
+          text.trim() ||
+          (test
+            ? "(no output)"
+            : job === "tono"
+              ? "Done. The reviews are on the PRs."
+              : "Done. Check your Slack DMs."),
       });
       refreshStatus();
     } catch (e) {
