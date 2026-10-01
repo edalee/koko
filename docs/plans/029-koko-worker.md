@@ -71,8 +71,8 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 - The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its `TONO_CLAUDE` wrapper denies the posting commands as a second guard.
 - **Posting:** the worker's Go code posts the review, not tono's Claude. It takes the draft PR comment from each pass's verified output (tono's `*-merged.log` files), found by its `<!-- tono:` marker, and posts each draft as its own comment with `gh pr comment`.
   - If all three passes ran and none wrote a draft, it posts "LGTM 😃⭐😸" behind `<!-- tono:lgtm sha=… -->`.
-  - It posts nothing, not even the drafts, if a pass did not finish. It also posts nothing if a draft has no footer, if a marker line has no draft it can read, or if the verdict is bad and no draft exists. Each of these counts as a failed review.
-  - Comments are saved as unposted before the first post, and each post is saved as it lands, so a kill between posts loses nothing. The next tono run posts what is left. It first checks the PR for each comment's marker line, so a post that timed out after it went through is not posted twice. After 3 failed tries the review counts as failed, and the stand-up shows it.
+  - A pass counts as finished only if its output reads as a review: three or more lines, with a heading or a list. A broken run leaves one error line, such as "API Error: Can't reach the API server". It posts nothing, not even the drafts, if a pass did not finish. It also posts nothing if a draft has no footer, if a marker line has no draft it can read, or if the verdict is bad and no draft exists. Each of these counts as a failed review. A pass that broke while offline marks nothing, so the review is retried.
+  - Comments are saved as unposted before the first post, and each post is saved as it lands, so a kill between posts loses nothing. The next tono run posts what is left. It first checks that the PR is still open at the reviewed commit. If not, it drops the comments and lets the PR be reviewed again. It then checks the PR for each comment's marker line, so a post that timed out after it went through is not posted twice. A failed post counts one try, unless the internet is down. After 3 tries the review counts as failed, and a DM says so.
   - The comments post as you. Each one says in its footer that tono and Claude wrote it.
 - A review of your own PR that fails for a reason other than the network sends one DM warning. It is not retried for the same commit.
 - A network failure marks nothing, so the scheduler's retry reviews that commit once the internet is back.
@@ -162,7 +162,7 @@ koko-worker is a nested Go module, like `koko-cli`. All worker logic lives there
 | `cmd/koko-worker/main.go` | Subcommands: `serve` (scheduler loop), `run <job> [--test [--date]]`, `check [name]`, `status`, `install`, `uninstall`. |
 | `cmd/koko-worker/config.go` | `worker.json`, defaults and paths. |
 | `cmd/koko-worker/calendar.go` | Google events, gap finder, list and create through the connector. |
-| `cmd/koko-worker/github.go` | PR lists, readiness, bot filter. |
+| `cmd/koko-worker/github.go` | PR lists, readiness, bot filter, and posting tono's PR comments: the worker's only GitHub write. |
 | `cmd/koko-worker/launchd.go` | Agent install and removal, Mac wake booking. |
 | `cmd/koko-worker/check.go` | Connection checks for the UI. |
 | `cmd/koko-worker/scheduler.go` | Due and catch-up logic, per-job per-day run record on disk, wake booking. |

@@ -205,6 +205,16 @@ func findComment(ctx context.Context, repo string, number int, line string) (str
 	return "", false, nil
 }
 
+// prHead returns the PR's state (OPEN, MERGED or CLOSED) and head commit.
+func prHead(ctx context.Context, prURL string) (string, string, error) {
+	var d struct {
+		State      string `json:"state"`
+		HeadRefOid string `json:"headRefOid"`
+	}
+	err := ghJSON(ctx, &d, "pr", "view", prURL, "--json", "state,headRefOid")
+	return d.State, d.HeadRefOid, err
+}
+
 // repoPRs is every open, non-draft PR in the repos, by anyone.
 func repoPRs(ctx context.Context, repos []string) ([]SearchPR, error) {
 	if len(repos) == 0 {

@@ -86,6 +86,8 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 		send:        slack.post,
 		post:        postComment,
 		findComment: findComment,
+		prHead:      prHead,
+		online:      online,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
@@ -295,8 +297,9 @@ func stillDue(cfg Config, st State, run DueRun) bool {
 	return false
 }
 
-// online is true if Slack answers. Every job ends in a Slack DM, so without
-// it there is no point in starting.
+// online is true if Slack's API answers, as a test of the internet. A job
+// that fails while offline waits for the internet and retries, instead of
+// counting as failed.
 func online(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

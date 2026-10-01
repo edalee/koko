@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -676,60 +677,118 @@ func TestCommentsFor(t *testing.T) {
 	}
 }
 
+// fakePostEnv posts every body but "fails", saves results in st and records
+// DMs. The PR is open at commit "abc" unless head says otherwise.
+type fakePostEnv struct {
+	st       *State
+	posted   []string
+	dms      []string
+	onGitHub map[string]string
+	head     string
+	offline  bool
+}
+
+func (f *fakePostEnv) env() Env {
+	return Env{
+		post: func(_ context.Context, _, body string) (string, error) {
+			if body == "fails" {
+				return "", fmt.Errorf("network")
+			}
+			f.posted = append(f.posted, body)
+			return "https://github.com/o/r/pull/1#" + firstLine(body), nil
+		},
+		findComment: func(_ context.Context, _ string, _ int, line string) (string, bool, error) {
+			url, ok := f.onGitHub[line]
+			return url, ok, nil
+		},
+		prHead: func(context.Context, string) (string, string, error) {
+			if f.head != "" {
+				return "OPEN", f.head, nil
+			}
+			return "OPEN", "abc", nil
+		},
+		online:  func(context.Context) bool { return !f.offline },
+		send:    func(_ context.Context, m Message) error { f.dms = append(f.dms, m.Sections...); return nil },
+		persist: func(change func(*State)) error { change(f.st); return nil },
+	}
+}
+
 func TestPostPending(t *testing.T) {
 	const key = "o/r#1@abc"
-	// fakeEnv posts every body but "fails", and saves results in st.
-	fakeEnv := func(st *State, posted *[]string, onGitHub map[string]string) Env {
-		return Env{
-			post: func(_ context.Context, _, body string) (string, error) {
-				if body == "fails" {
-					return "", fmt.Errorf("network")
-				}
-				*posted = append(*posted, body)
-				return "https://github.com/o/r/pull/1#" + body, nil
-			},
-			findComment: func(_ context.Context, _ string, _ int, line string) (string, bool, error) {
-				url, ok := onGitHub[line]
-				return url, ok, nil
-			},
-			persist: func(change func(*State)) error { change(st); return nil },
-		}
+	ctx := context.Background()
+	newFake := func() *fakePostEnv {
+		return &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{key: time.Now()}}}
 	}
-	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1}
+	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc"}
 
 	// A failed post stops the loop, keeps the rest and counts one try.
-	st := &State{TonoResults: map[string]TonoResult{}}
-	var posted []string
+	f := newFake()
 	r.Unposted = []string{"a", "fails", "b"}
-	if err := postPending(context.Background(), fakeEnv(st, &posted, nil), key, r, false); err != nil {
-		t.Fatal(err)
+	if gaveUp, err := postPending(ctx, f.env(), key, r, false); err != nil || gaveUp != "" {
+		t.Fatal(gaveUp, err)
 	}
-	got := st.TonoResults[key]
-	if strings.Join(posted, ",") != "a" || strings.Join(got.Unposted, ",") != "fails,b" || got.PostTries != 1 || len(got.Comments) != 1 {
-		t.Errorf("after one failure: posted %v, result %+v", posted, got)
+	got := f.st.TonoResults[key]
+	if strings.Join(f.posted, ",") != "a" || strings.Join(got.Unposted, ",") != "fails,b" || got.PostTries != 1 {
+		t.Errorf("after one failure: posted %v, result %+v", f.posted, got)
 	}
 
-	// The third failed try fails the review and drops what is left.
-	got.PostTries = maxPostTries - 1
-	posted = nil
-	if err := postPending(context.Background(), fakeEnv(st, &posted, nil), key, got, true); err != nil {
-		t.Fatal(err)
+	// Offline, a failed post does not count a try.
+	f.offline = true
+	var offline offlineError
+	if _, err := postPending(ctx, f.env(), key, got, true); !errors.As(err, &offline) || f.st.TonoResults[key].PostTries != 1 {
+		t.Errorf("offline: err %v, tries %d", err, f.st.TonoResults[key].PostTries)
 	}
-	if got = st.TonoResults[key]; got.Failed == "" || len(got.Unposted) != 0 {
-		t.Errorf("after the last try: %+v", got)
+	f.offline = false
+
+	// The last try fails the review, drops the rest and sends a DM.
+	got.PostTries = maxPostTries - 1
+	gaveUp, err := postPending(ctx, f.env(), key, got, true)
+	if got = f.st.TonoResults[key]; err != nil || gaveUp == "" || got.Failed == "" || len(got.Unposted) != 0 || len(f.dms) != 1 {
+		t.Errorf("after the last try: gaveUp %q, err %v, result %+v, dms %v", gaveUp, err, got, f.dms)
 	}
 
 	// A retry finds a comment that went through and does not post it twice.
-	st = &State{TonoResults: map[string]TonoResult{}}
-	posted = nil
+	f = newFake()
 	r.Unposted = []string{"<!-- tono:review n=1 sha=abc -->\nbody", "b"}
-	onGitHub := map[string]string{"<!-- tono:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
-	if err := postPending(context.Background(), fakeEnv(st, &posted, onGitHub), key, r, true); err != nil {
+	f.onGitHub = map[string]string{"<!-- tono:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
+	if _, err := postPending(ctx, f.env(), key, r, true); err != nil {
 		t.Fatal(err)
 	}
-	got = st.TonoResults[key]
-	if strings.Join(posted, ",") != "b" || strings.Join(got.Comments, ",") != "https://github.com/o/r/pull/1#old,https://github.com/o/r/pull/1#b" {
-		t.Errorf("retry: posted %v, comments %v", posted, got.Comments)
+	if got = f.st.TonoResults[key]; strings.Join(f.posted, ",") != "b" || len(got.Comments) != 2 || got.Comments[0] != "https://github.com/o/r/pull/1#old" {
+		t.Errorf("retry: posted %v, comments %v", f.posted, got.Comments)
+	}
+
+	// A retry on a PR with new commits posts nothing and frees it for a new review.
+	f = newFake()
+	f.head = "def"
+	r.Unposted = []string{"a"}
+	if _, err := postPending(ctx, f.env(), key, r, true); err != nil {
+		t.Fatal(err)
+	}
+	if got = f.st.TonoResults[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.TonoReviewed) != 0 {
+		t.Errorf("changed PR: posted %v, result %+v, reviewed %v", f.posted, got, f.st.TonoReviewed)
+	}
+}
+
+func TestLooksLikeReview(t *testing.T) {
+	for _, broken := range []string{
+		"API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)\n",
+		"Not logged in · Please run /login\n",
+		"stub: ok\n",
+		"",
+	} {
+		if looksLikeReview(broken) {
+			t.Errorf("%q reads as a review", broken)
+		}
+	}
+	clean := "## What I checked\n\n- Every comment in the diff.\n\n## PR comment\n\nNone. The pass found nothing.\n"
+	if !looksLikeReview(clean) {
+		t.Error("a clean pass must read as a review")
+	}
+	// Two clean passes and one that broke: no LGTM.
+	out := tonoOutcome{passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
+	if c, failed := commentsFor(out, "abc"); c != nil || !strings.Contains(failed, "API Error") {
+		t.Errorf("broken pass: comments %v, failed %q", c, failed)
 	}
 }
 

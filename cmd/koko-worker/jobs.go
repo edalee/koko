@@ -26,9 +26,13 @@ type Env struct {
 	post func(ctx context.Context, prURL, body string) (string, error)
 	// findComment looks on a PR for a comment whose first line is line.
 	findComment func(ctx context.Context, repo string, number int, line string) (url string, found bool, err error)
-	test        bool   // print instead of DM or comment, book nothing
-	state       *State // read-only snapshot taken when the run started
-	now         time.Time
+	// prHead returns a PR's state (OPEN, MERGED or CLOSED) and head commit.
+	prHead func(ctx context.Context, prURL string) (state, sha string, err error)
+	// online is true if the internet answers.
+	online func(ctx context.Context) bool
+	test   bool   // print instead of DM or comment, book nothing
+	state  *State // read-only snapshot taken when the run started
+	now    time.Time
 	// persist changes the state on disk under a lock. It does nothing in test mode.
 	persist func(change func(*State)) error
 }
@@ -219,6 +223,10 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 	case reviewed:
 		v := overallVerdict(r.Verdicts)
 		status := strings.ToLower(verdictLabel(v))
+		if r.LGTM {
+			// A clean pass writes no verdict, so an LGTM has none to read.
+			v, status = verdictReady, "LGTM, ready to approve"
+		}
 		if d, err := prDetail(ctx, p.URL); err == nil && d.HeadRefOid != r.SHA {
 			status += " (reviewed at an earlier commit)"
 		}
@@ -624,10 +632,13 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	if err := os.WriteFile(env.paths.TonoWrap, []byte(tonoWrapper), 0o700); err != nil {
 		return err
 	}
+	var failures []string
 	if !env.test {
-		if err := postUnposted(ctx, env); err != nil {
+		gaveUp, err := postUnposted(ctx, env)
+		if err != nil {
 			return err
 		}
+		failures = append(failures, gaveUp...)
 	}
 	targets, err := tonoTargets(ctx, env)
 	if err != nil {
@@ -639,7 +650,6 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			return err
 		}
 	}
-	var failures []string
 	var netErr error
 	reviewed := 0
 	for _, t := range targets {
@@ -680,8 +690,13 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			// drops out of the next search anyway.
 			log.Printf("tono: %s skipped: %v", p.short(), err)
 			continue
-		case err != nil && !online(ctx):
-			// Not marked, so the scheduler's retry reviews it once the internet is back.
+		case err != nil && !online(ctx), err == nil && len(out.broken) > 0 && !online(ctx):
+			// Not marked, so the scheduler's retry reviews it once the
+			// internet is back. A pass that broke offline leaves an error line,
+			// such as "API Error: Can't reach the API server".
+			if err == nil {
+				err = fmt.Errorf("tono: %s", strings.Join(out.broken, "; "))
+			}
 			netErr = err
 			continue
 		}
@@ -696,6 +711,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			result.Failed = truncate(err.Error(), 400)
 		} else {
 			comments, result.Failed = commentsFor(out, d.HeadRefOid)
+			result.LGTM = len(comments) == 1 && strings.HasPrefix(comments[0], lgtmMarker)
 		}
 		if result.Failed != "" {
 			log.Printf("tono: %s failed: %s", p.short(), result.Failed)
@@ -719,8 +735,15 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		}); err != nil {
 			return err
 		}
-		if err := postPending(ctx, env, key, result, false); err != nil {
+		gaveUp, err := postPending(ctx, env, key, result, false)
+		var offline offlineError
+		switch {
+		case errors.As(err, &offline):
+			netErr = err // the comments stay unposted for the retry
+		case err != nil:
 			return err
+		case gaveUp != "":
+			failures = append(failures, fmt.Sprintf("%s: %s", p.short(), gaveUp))
 		}
 	}
 	if netErr != nil {
@@ -734,12 +757,21 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 
 // commentsFor picks what to post for a review: each pass's draft, or an LGTM
 // when no pass had anything to say. It returns a failure instead, and posts
-// nothing, when a pass did not finish, when a draft looks cut short, or when
-// the verdict is bad but no pass wrote it up. A posted comment makes later
-// runs skip the PR, so a review with a pass missing must post nothing.
+// nothing, in four cases:
+//   - a pass did not finish, or left output that is not a review
+//   - a pass has a tono marker line but no draft the worker can read
+//   - a draft has no footer, so it may be cut short
+//   - the verdict is bad but no pass wrote it up
+//
+// A posted comment makes later runs skip the PR, so a review with a pass
+// missing must post nothing.
 func commentsFor(out tonoOutcome, sha string) (comments []string, failed string) {
 	if out.passes < len(tonoPasses) {
-		return nil, fmt.Sprintf("only %d of %d passes finished, see %s", out.passes, len(tonoPasses), out.log)
+		why := ""
+		if len(out.broken) > 0 {
+			why = " (" + strings.Join(out.broken, "; ") + ")"
+		}
+		return nil, fmt.Sprintf("only %d of %d passes finished%s, see %s", out.passes, len(tonoPasses), why, out.log)
 	}
 	if out.unreadable > 0 {
 		return nil, "a pass wrote a PR comment the worker could not read, see " + out.log
@@ -762,15 +794,47 @@ func commentsFor(out tonoOutcome, sha string) (comments []string, failed string)
 // allowed before the review counts as failed.
 const maxPostTries = 3
 
+// offlineError is a post that failed with the internet down. It does not
+// count as a try, and the comments wait for the scheduler's retry.
+type offlineError struct{ error }
+
 // postPending posts r's unposted comments on the PR, in order, and saves the
-// state after each one, so a kill between posts loses nothing. On a retry it
-// first looks on the PR for the comment's marker line, because a post that
-// timed out may have gone through. A failed post stops the loop and counts
-// one try. At maxPostTries the review counts as failed and the rest are
-// dropped, so the stand-up shows it.
-func postPending(ctx context.Context, env Env, key string, r TonoResult, retry bool) error {
-	save := func() error {
-		return env.persist(func(st *State) { st.TonoResults[key] = r })
+// state after each one, so a kill between posts loses nothing. A failed post
+// stops the loop.
+//
+// On a retry it first checks that the PR is still open at the reviewed
+// commit. If not, the comments are dropped and the PR may be reviewed again.
+// It then looks on the PR for each comment's marker line, because a post that
+// timed out may have gone through.
+//
+// A failed post counts one try, unless the internet is down. At maxPostTries
+// the review counts as failed, the rest are dropped and a DM says so. gaveUp
+// then holds the reason.
+func postPending(ctx context.Context, env Env, key string, r TonoResult, retry bool) (gaveUp string, err error) {
+	save := func(change func(*State)) error {
+		return env.persist(func(st *State) {
+			st.TonoResults[key] = r
+			if change != nil {
+				change(st)
+			}
+		})
+	}
+	if retry && len(r.Unposted) > 0 {
+		state, head, err := env.prHead(ctx, r.URL)
+		if err == nil && (state != "OPEN" || head != r.SHA) {
+			r.Failed = fmt.Sprintf("the PR changed before the review was posted (%s at %.7s)", strings.ToLower(state), head)
+			r.Unposted = nil
+			// The review is of an old commit or a closed PR. Forget it, so
+			// an open PR gets a fresh review at its new head.
+			prefix := fmt.Sprintf("%s#%d@", r.Repo, r.Number)
+			return "", save(func(st *State) {
+				for k := range st.TonoReviewed {
+					if strings.HasPrefix(k, prefix) {
+						delete(st.TonoReviewed, k)
+					}
+				}
+			})
+		}
 	}
 	for len(r.Unposted) > 0 {
 		body := r.Unposted[0]
@@ -783,35 +847,53 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult, retry b
 			url, err = env.post(ctx, r.URL, body)
 		}
 		if err != nil {
+			if !env.online(ctx) {
+				return "", offlineError{err}
+			}
 			r.PostTries++
 			log.Printf("tono: posting on %s#%d (try %d): %v", r.Repo, r.Number, r.PostTries, err)
-			if r.PostTries >= maxPostTries {
-				r.Failed = truncate("could not post the review: "+err.Error(), 400)
-				r.Unposted = nil
+			if r.PostTries < maxPostTries {
+				return "", save(nil)
 			}
-			return save()
+			r.Failed = truncate("could not post the review: "+err.Error(), 400)
+			r.Unposted = nil
+			if err := save(nil); err != nil {
+				return "", err
+			}
+			link := slackLink(r.URL, fmt.Sprintf("%s#%d", shortRepo(r.Repo), r.Number))
+			if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not post its review of %s after %d tries: %s", link, maxPostTries, r.Failed)); nerr != nil {
+				return "", nerr
+			}
+			return r.Failed, nil
 		}
 		if url != "" {
 			r.Comments = append(r.Comments, url)
 		}
 		r.Unposted = r.Unposted[1:]
-		if err := save(); err != nil {
-			return err
+		if err := save(nil); err != nil {
+			return "", err
 		}
 	}
-	return nil
+	return "", nil
 }
 
-// postUnposted posts the comments an earlier run left unposted.
-func postUnposted(ctx context.Context, env Env) error {
+// postUnposted posts the comments earlier runs left unposted. It returns the
+// reviews it gave up on.
+func postUnposted(ctx context.Context, env Env) ([]string, error) {
+	var failures []string
 	for key, r := range env.state.TonoResults {
-		if len(r.Unposted) > 0 {
-			if err := postPending(ctx, env, key, r, true); err != nil {
-				return err
-			}
+		if len(r.Unposted) == 0 {
+			continue
+		}
+		gaveUp, err := postPending(ctx, env, key, r, true)
+		if err != nil {
+			return failures, err
+		}
+		if gaveUp != "" {
+			failures = append(failures, fmt.Sprintf("%s#%d: %s", shortRepo(r.Repo), r.Number, gaveUp))
 		}
 	}
-	return nil
+	return failures, nil
 }
 
 func firstLine(s string) string {
@@ -951,7 +1033,8 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (tonoO
 		return tonoOutcome{}, err
 	}
 	cmd.Env = append(os.Environ(), "TONO_CLAUDE="+env.paths.TonoWrap, "PATH="+shims+":"+os.Getenv("PATH"))
-	// stdout is the report. stderr has tono's progress lines, which go only to the log.
+	// stdout and stderr go only to the log. The review comes from tono's
+	// verified logs, read by tonoVerified.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -981,18 +1064,38 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (tonoO
 type tonoOutcome struct {
 	drafts   []string
 	verdicts map[string]string
-	passes   int // passes that left a verified output
+	passes   int // passes whose verified output reads as a review
 	// unreadable counts passes with a tono marker line but no draft that
 	// draftComment could read.
 	unreadable int
-	log        string // the worker's log of the run
+	// broken holds the first line of each pass whose verified output is not
+	// a review, such as "API Error: Can't reach the API server".
+	broken []string
+	log    string // the worker's log of the run
 }
 
-var tonoPasses = []struct{ name, title string }{
-	{"review", "Code review"},
-	{"docs", "Docs and ticket"},
-	{"comments", "Code comments"},
+var tonoPasses = []struct{ name string }{{"review"}, {"docs"}, {"comments"}}
+
+// looksLikeReview is true when a pass's verified output reads as a review:
+// at least minReviewLines lines with text, and a Markdown heading or list. A
+// clean pass writes no verdict and no draft, so this is what tells it apart
+// from a run that broke, which leaves one error line or nothing.
+func looksLikeReview(verified string) bool {
+	lines, structured := 0, false
+	for _, line := range strings.Split(verified, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		lines++
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") {
+			structured = true
+		}
+	}
+	return lines >= minReviewLines && structured
 }
+
+const minReviewLines = 3
 
 // tonoVerified reads each pass's verified output from this run: its draft PR
 // comment, if it wrote one, and its verdict. tono's stdout also holds the raw
@@ -1020,7 +1123,8 @@ func tonoVerified(since time.Time, repo string, number int) tonoOutcome {
 		if err != nil {
 			continue
 		}
-		if len(bytes.TrimSpace(data)) == 0 {
+		if !looksLikeReview(string(data)) {
+			out.broken = append(out.broken, pass.name+": "+truncate(firstLine(strings.TrimSpace(string(data))), 120))
 			continue
 		}
 		out.passes++
@@ -1113,11 +1217,14 @@ func hasMarkerLine(verified string) bool {
 	return false
 }
 
+// lgtmMarker starts every LGTM comment.
+const lgtmMarker = "<!-- tono:lgtm"
+
 // lgtmComment is the comment for a PR where no pass had anything to say. Its
 // tono marker makes hasTonoComment true, so later runs skip the PR.
 func lgtmComment(sha string) string {
 	short := sha[:min(7, len(sha))]
-	return fmt.Sprintf("<!-- tono:lgtm sha=%s -->\nLGTM 😃⭐😸\n\n<sub>tono review of the code, docs and code comments at `%s`, run with Claude</sub>", short, short)
+	return fmt.Sprintf("%s sha=%s -->\nLGTM 😃⭐😸\n\n<sub>tono review of the code, docs and code comments at `%s`, run with Claude</sub>", lgtmMarker, short, short)
 }
 
 // tonoLockKey is tono's name for one review target: "owner/repo|n" with every

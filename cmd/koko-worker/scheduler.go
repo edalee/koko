@@ -82,6 +82,7 @@ type TonoResult struct {
 	Verdicts map[string]string `json:"verdicts,omitempty"` // pass -> verdictReady, verdictFollowUps or verdictNotMergeable
 	Failed   string            `json:"failed,omitempty"`
 	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
+	LGTM     bool              `json:"lgtm,omitempty"`     // no pass had anything to say
 	// Unposted are comments not yet posted. The next tono run posts them.
 	Unposted []string `json:"unposted,omitempty"`
 	// PostTries counts failed attempts to post. At maxPostTries the review
