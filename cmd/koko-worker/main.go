@@ -97,6 +97,9 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 			fmt.Println(printMessage(msg))
 			return nil
 		}
+		// A test run prints every comment, whatever is already on the PR.
+		env.findComment = func(context.Context, string, int, string) (string, bool, error) { return "", false, nil }
+		env.prHead = func(context.Context, string) (string, string, error) { return "OPEN", "", nil }
 		env.post = func(_ context.Context, prURL, body string) (string, error) {
 			fmt.Printf("── Comment for %s (not posted) ──\n%s\n\n", prURL, body)
 			return "", nil

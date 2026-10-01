@@ -724,7 +724,7 @@ func TestPostPending(t *testing.T) {
 	// A failed post stops the loop, keeps the rest and counts one try.
 	f := newFake()
 	r.Unposted = []string{"a", "fails", "b"}
-	if gaveUp, err := postPending(ctx, f.env(), key, r, false); err != nil || gaveUp != "" {
+	if gaveUp, err := postPending(ctx, f.env(), key, r); err != nil || gaveUp != "" {
 		t.Fatal(gaveUp, err)
 	}
 	got := f.st.TonoResults[key]
@@ -735,23 +735,24 @@ func TestPostPending(t *testing.T) {
 	// Offline, a failed post does not count a try.
 	f.offline = true
 	var offline offlineError
-	if _, err := postPending(ctx, f.env(), key, got, true); !errors.As(err, &offline) || f.st.TonoResults[key].PostTries != 1 {
+	if _, err := postPending(ctx, f.env(), key, got); !errors.As(err, &offline) || f.st.TonoResults[key].PostTries != 1 {
 		t.Errorf("offline: err %v, tries %d", err, f.st.TonoResults[key].PostTries)
 	}
 	f.offline = false
 
 	// The last try fails the review, drops the rest and sends a DM.
 	got.PostTries = maxPostTries - 1
-	gaveUp, err := postPending(ctx, f.env(), key, got, true)
+	gaveUp, err := postPending(ctx, f.env(), key, got)
 	if got = f.st.TonoResults[key]; err != nil || gaveUp == "" || got.Failed == "" || len(got.Unposted) != 0 || len(f.dms) != 1 {
 		t.Errorf("after the last try: gaveUp %q, err %v, result %+v, dms %v", gaveUp, err, got, f.dms)
 	}
 
-	// A retry finds a comment that went through and does not post it twice.
+	// A comment already on the PR, from a post that timed out or a --pr run
+	// at the same commit, is not posted twice.
 	f = newFake()
 	r.Unposted = []string{"<!-- tono:review n=1 sha=abc -->\nbody", "b"}
 	f.onGitHub = map[string]string{"<!-- tono:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
-	if _, err := postPending(ctx, f.env(), key, r, true); err != nil {
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
 	if got = f.st.TonoResults[key]; strings.Join(f.posted, ",") != "b" || len(got.Comments) != 2 || got.Comments[0] != "https://github.com/o/r/pull/1#old" {
@@ -762,11 +763,47 @@ func TestPostPending(t *testing.T) {
 	f = newFake()
 	f.head = "def"
 	r.Unposted = []string{"a"}
-	if _, err := postPending(ctx, f.env(), key, r, true); err != nil {
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
-	if got = f.st.TonoResults[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.TonoReviewed) != 0 {
-		t.Errorf("changed PR: posted %v, result %+v, reviewed %v", f.posted, got, f.st.TonoReviewed)
+	if got = f.st.TonoResults[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.TonoReviewed) != 0 || len(f.dms) != 0 {
+		t.Errorf("changed PR: posted %v, result %+v, reviewed %v, dms %v", f.posted, got, f.st.TonoReviewed, f.dms)
+	}
+
+	// The same, with part of the review already posted: a DM says how to
+	// review it again, because the posted marker blocks a fresh review.
+	f = newFake()
+	f.head = "def"
+	r.Comments = []string{"https://github.com/o/r/pull/1#first"}
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.dms) != 1 || !strings.Contains(f.dms[0], "Run now") {
+		t.Errorf("partly posted: dms %v", f.dms)
+	}
+}
+
+func TestStandupStatusForPostingStates(t *testing.T) {
+	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
+	p.Repository.NameWithOwner = "o/r"
+	status := func(r TonoResult) (string, map[string]int) {
+		st := &State{TonoResults: map[string]TonoResult{"o/r#1@abc": r}}
+		tally := &reviewTally{loaded: true}
+		counts := map[string]int{}
+		// prDetail is not reached for these states, or fails harmlessly offline.
+		return tally.status(context.Background(), Env{state: st}, p, counts), counts
+	}
+	base := TonoResult{Repo: "o/r", Number: 1, SHA: "abc", Verdicts: map[string]string{"review": verdictReady}}
+
+	unposted := base
+	unposted.Unposted = []string{"a"}
+	if s, c := status(unposted); s != "reviewed, not posted yet" || c["waiting"] != 1 || c["reviewed"] != 0 {
+		t.Errorf("unposted: %q %v", s, c)
+	}
+	partial := base
+	partial.Failed, partial.Comments = "could not post the review: boom", []string{"https://github.com/o/r/pull/1#c1"}
+	if s, _ := status(partial); !strings.HasPrefix(s, "tono posted part of its review") {
+		t.Errorf("partial: %q", s)
 	}
 }
 

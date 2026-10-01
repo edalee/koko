@@ -85,7 +85,7 @@ type TonoResult struct {
 	LGTM     bool              `json:"lgtm,omitempty"`     // no pass had anything to say
 	// Unposted are comments not yet posted. The next tono run posts them.
 	Unposted []string `json:"unposted,omitempty"`
-	// PostTries counts failed attempts to post. At maxPostTries the review
+	// PostTries counts failed tries to post. At maxPostTries the review
 	// counts as failed, and its unposted comments are dropped.
 	PostTries int `json:"postTries,omitempty"`
 	// Report and Posted belong to the old stand-up thread. Pruning still
