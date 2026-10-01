@@ -21,11 +21,19 @@ import (
 
 const tick = 30 * time.Second
 
+// version is set at build time with -ldflags "-X main.version=v0.5.0". The
+// Makefile and the release workflow set it from the git tag.
+var version = "dev"
+
 func main() {
 	log.SetFlags(log.LstdFlags)
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
+	}
+	if os.Args[1] == "version" {
+		fmt.Println(version)
+		return
 	}
 	_ = os.Setenv("PATH", workerPATH(os.Getenv("PATH")))
 	paths := workerPaths()
@@ -69,6 +77,7 @@ func usage() {
   koko-worker status                     JSON status for the Koko app
   koko-worker install [--if-idle]        switch the launchd agent on. --if-idle skips it while a job runs
   koko-worker uninstall                  switch the launchd agent off
+  koko-worker version                    print the version this binary was built as
 `)
 }
 
@@ -174,7 +183,7 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 // serve is the scheduler loop. It reloads worker.json on every tick, so
 // changes in the Koko UI apply within half a minute.
 func serve(ctx context.Context, paths Paths) error {
-	log.Printf("koko-worker started")
+	log.Printf("koko-worker %s started", version)
 	var lastConfigErr string
 	for {
 		cfg, err := loadConfig(paths.Config)
@@ -331,6 +340,7 @@ func cmdStatus(paths Paths) error {
 		"agentLoaded": agentLoaded(),
 		"configPath":  paths.Config,
 		"logPath":     agentLogPath(paths),
+		"version":     version,
 	}
 	if cfgErr != nil {
 		out["configError"] = cfgErr.Error()

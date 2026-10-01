@@ -33,8 +33,22 @@ jobs:
       - name: Build macOS app
         run: wails build -platform darwin/universal
 
+      # koko-worker is its own Go module, so wails does not build it. Koko
+      # finds it next to its own binary inside Koko.app.
+      - name: Build koko-worker into Koko.app
+        run: |
+          cd cmd/koko-worker
+          for arch in arm64 amd64; do
+            GOOS=darwin GOARCH=$arch go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o "../../build/koko-worker-$arch" .
+          done
+          cd ../..
+          lipo -create -output build/bin/Koko.app/Contents/MacOS/koko-worker build/koko-worker-arm64 build/koko-worker-amd64
+          build/bin/Koko.app/Contents/MacOS/koko-worker version
+
       - name: Ad-hoc codesign
-        run: codesign -s - --force build/bin/Koko.app
+        run: |
+          codesign -s - --force build/bin/Koko.app/Contents/MacOS/koko-worker
+          codesign -s - --force build/bin/Koko.app
 
       - name: Create tar.gz (for Homebrew formula)
         run: |
