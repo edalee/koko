@@ -21,10 +21,11 @@ type App struct {
 	tm  *TerminalManager
 	cfg *ConfigService
 	api *APIServer
+	git *GitService
 }
 
-func NewApp(tm *TerminalManager, cfg *ConfigService, api *APIServer) *App {
-	return &App{tm: tm, cfg: cfg, api: api}
+func NewApp(tm *TerminalManager, cfg *ConfigService, api *APIServer, git *GitService) *App {
+	return &App{tm: tm, cfg: cfg, api: api, git: git}
 }
 
 func (a *App) startup(ctx context.Context) {

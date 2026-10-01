@@ -99,9 +99,12 @@ export interface SessionTab {
   connected: boolean;
   claudeSessionId?: string;
   lastMsg?: string;
-  // Path of a worktree Koko created when spawning this session.
-  // Used on session close to offer to clean it up.
+  // The session's worktree: one Koko created, or one opened from the
+  // Worktrees module. Used on session close to offer to clean it up.
   worktreePath?: string;
+  // True only when Koko created the worktree. Settings removes only these in
+  // bulk, never a worktree the user made by hand.
+  worktreeCreated?: boolean;
   // Why the last reconnect failed, shown on the reconnect card. Not persisted.
   reconnectError?: string;
 }
@@ -114,4 +117,8 @@ export interface SessionHistoryEntry {
   closedAt: number;
   lastMessage?: string;
   claudeSessionId?: string;
+  // A worktree Koko created for the session and the user kept at close.
+  // Settings > General can remove these later (plan 028 step 7b). The folder
+  // may since have gone, if the user deleted it by hand.
+  worktreePath?: string;
 }

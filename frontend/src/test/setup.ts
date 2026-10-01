@@ -68,6 +68,7 @@ vi.mock("../../wailsjs/go/main/App", () => ({
   EnsureStatusLine: vi.fn().mockResolvedValue(undefined),
   DeleteConversation: vi.fn().mockResolvedValue(undefined),
   DeleteConversations: vi.fn().mockResolvedValue({ deleted: [], skipped: 0 }),
+  RemoveWorktrees: vi.fn().mockResolvedValue({ removed: [], skipped: [] }),
 }));
 
 vi.mock("../../wailsjs/go/main/GitHubService", () => ({
@@ -80,6 +81,7 @@ vi.mock("../../wailsjs/go/main/GitHubService", () => ({
 
 vi.mock("../../wailsjs/go/main/GitService", () => ({
   GetBranchName: vi.fn().mockResolvedValue("main"),
+  CreateWorktree: vi.fn().mockResolvedValue({ path: "", branch: "" }),
   GetFileChanges: vi.fn().mockResolvedValue([]),
 }));
 

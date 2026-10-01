@@ -12,6 +12,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Conversation ownership guard**: A conversation can be open in only one session. Resuming one another session holds is refused, including through the API and MCP (ADR-028)
 - **Stable slugs**: A session keeps its slug across restarts, so `koko-1` in the CLI, MCP and Slack always names the same session
 - **Delete conversations**: Each row in the conversation picker has a delete button, and "Delete all conversations here" clears a directory. Both confirm first. A conversation a Koko tab holds, or may be writing, cannot be deleted (plan 028 step 7a)
+- **Housekeeping in Settings > General**: "Clear history" forgets Koko's closed sessions, and leaves Claude's conversations alone. "Remove worktrees" removes worktrees Koko created for closed sessions. It never forces, and keeps any with uncommitted or ignored files, or still in use (plan 028 step 7b)
 - **Reload session**: Restart a session's Claude process in the same tab, keeping its slug and conversation. On the sidebar row and in the terminal's right-click menu. Asks first if Claude is still working (plan 028)
 - **koko-worker**: a separate binary (`cmd/koko-worker/`) that a launchd agent keeps running. It runs scheduled work jobs on weekdays, with Koko open or closed. macOS only
 - **Stand-up job**: a 07:00 Slack DM with today's meetings, your PRs ready to merge with a Jira check, follow-up steps, PRs waiting for your review, and team PRs

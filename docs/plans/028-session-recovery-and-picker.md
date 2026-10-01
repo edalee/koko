@@ -10,16 +10,16 @@
 | 4. Picker in the session dialog | Done | #19 |
 | 5. Route the other entry points | Done | #21 |
 | 6. Reload session | Done | #22 |
-| 7a. Delete conversations | Done | |
-| 7b. Clear history, remove worktrees | TODO | |
+| 7a. Delete conversations | Done | #27, #31 |
+| 7b. Clear history, remove worktrees | Done | |
 | 8. Drop `--continue` | Done | #24 |
 
 #21 and #22 were stacked PRs. They merged into their base branches, not `main`. #23 lands steps 5 and 6 on `main`.
 
 Step 7 is split in two. 7a deletes conversations from the picker. 7b adds
-the two Settings actions, and is a TODO in `docs/ROADMAP.md`.
+the two Settings actions.
 
-Step 7a went further than the plan in four places:
+Step 7a went further than the plan:
 
 - **Saved tabs hold too.** After a restart a disconnected tab has no
   session, so the ownership guard cannot see it. Deletion also skips any
@@ -41,6 +41,33 @@ Step 7a went further than the plan in four places:
 
 A conversation also has a folder beside its file, for subagent and tool
 output. Deleting the conversation removes it too.
+
+Step 7b narrows "each tab's `worktreePath`" to closed sessions:
+
+- **Open tabs are left alone.** Removing the worktree of an open tab, even a
+  disconnected one, would strand it. The backend skips any path a live
+  session or a saved open tab uses.
+- **Only worktrees Koko created.** Opening an existing worktree from the
+  Worktrees module also sets a tab's `worktreePath`, and that worktree may be
+  one the user made by hand. A `worktreeCreated` flag marks the ones the
+  dialog made, and only those reach a closed-session record.
+- **Closed sessions now keep their worktree path.** A closed-session record
+  had no `worktreePath`, so a worktree kept at close was forgotten. Records
+  now store it, unless the user removed it in the close dialog.
+- **Ignored files block removal.** A plain `git worktree remove` deletes
+  ignored files, often a local `.env`. The check uses `--ignored`, so such a
+  worktree is skipped.
+- **A dead session does not hold its directory.** Closing a disconnected tab
+  leaves its dead entry in the TerminalManager.
+- **Only linked worktrees.** The backend refuses a path that is not the top
+  of a linked worktree, such as a repo's main checkout.
+- **A missing path is reported as gone,** with a hint to run
+  `git worktree prune`, and the record forgets it.
+- **Clearing history forgets kept worktrees.** They are listed from closed
+  sessions. The confirmation says so, and suggests removing them first. The
+  50-record history cap drops the oldest the same way.
+- `saveCurrentState` dropped `worktreePath` from tabs. It now keeps it.
+- `clearHistoryEntry` was wired to nothing. `clearHistory` replaces it.
 
 Two things surfaced while building that the plan did not foresee:
 

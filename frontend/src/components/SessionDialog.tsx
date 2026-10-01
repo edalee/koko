@@ -46,6 +46,8 @@ interface SessionDialogProps {
     directory: string,
     worktreePath?: string,
     resume?: ResumeTarget,
+    // True when the dialog created the worktree, rather than opening one.
+    worktreeCreated?: boolean,
   ) => Promise<void>;
   // Switch to the tab that already holds a conversation, reconnecting it if
   // it is disconnected. One conversation, one tab.
@@ -421,7 +423,11 @@ export default function SessionDialog({
 
     setCreating(true);
     try {
-      await onCreate(sessionName, finalDir, inWorktree ? finalDir : worktree, resume);
+      if (inWorktree) {
+        await onCreate(sessionName, finalDir, finalDir, resume, true);
+      } else {
+        await onCreate(sessionName, finalDir, worktree, resume);
+      }
     } catch (err) {
       // Most likely the conversation was opened elsewhere while the dialog
       // was up. Say so and stay open, rather than failing silently.

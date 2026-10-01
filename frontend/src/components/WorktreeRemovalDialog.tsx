@@ -12,7 +12,9 @@ interface WorktreeRemovalDialogProps {
   open: boolean;
   worktreePath: string;
   sessionName: string;
-  onResolved: () => void; // called after the user makes a decision (close proceeds)
+  // Called after the user decides, and the close proceeds. removed says
+  // whether the worktree is gone.
+  onResolved: (removed: boolean) => void;
 }
 
 type AnimState = "closed" | "open" | "closing";
@@ -53,7 +55,7 @@ export default function WorktreeRemovalDialog({
     setError(null);
     try {
       await RemoveWorktree(worktreePath, force);
-      onResolved();
+      onResolved(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
@@ -66,7 +68,7 @@ export default function WorktreeRemovalDialog({
   }
 
   function handleKeep() {
-    onResolved();
+    onResolved(false);
   }
 
   if (state === "closed") return null;

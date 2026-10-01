@@ -15,3 +15,5 @@ export function GetContextInfo(arg1:string):Promise<main.ContextInfo>;
 export function GetVersion():Promise<string>;
 
 export function PickDirectory():Promise<string>;
+
+export function RemoveWorktrees(arg1:Array<string>):Promise<main.WorktreeCleanup>;
