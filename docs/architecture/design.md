@@ -193,7 +193,7 @@
 
 | Tab | Contents |
 |-----|----------|
-| General | Remote API: on/off, port, API key with copy button |
+| General | Remote API: on/off, port, API key with copy button. Housekeeping: clear session history, remove Koko's worktrees |
 | Safe working | Quiet hours, break cycle and presets (90/15, 60/10, 45/5) |
 | GitHub | Tracked repos, hidden PRs |
 | Worker | `WorkerSettings.tsx`: on/off, job times, Test and Run now, connection checks, log |

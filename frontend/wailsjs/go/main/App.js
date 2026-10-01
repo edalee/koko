@@ -29,3 +29,7 @@ export function GetVersion() {
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }
+
+export function RemoveWorktrees(arg1) {
+  return window['go']['main']['App']['RemoveWorktrees'](arg1);
+}

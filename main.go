@@ -39,7 +39,7 @@ func main() {
 	claude := NewClaudeService()
 	worker := NewWorkerService()
 	api := NewAPIServer(tm, git, cfg)
-	app := NewApp(tm, cfg, api)
+	app := NewApp(tm, cfg, api, git)
 	slackCmd := NewSlackCommandHandler(cfg, tm, git, api)
 
 	// Start Slack bot command listener if configured

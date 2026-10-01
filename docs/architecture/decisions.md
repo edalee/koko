@@ -482,7 +482,8 @@
   - The session dialog proposes a new branch and a sibling directory, both with the same random suffix. The toggle starts on when another tab already uses the directory.
   - The sidebar shows each session's branch, and an amber dot when two sessions share a directory.
   - The Worktrees module lists the repo's worktrees and flags uncommitted changes. Opening one goes through the session dialog.
-  - A tab records the worktree Koko created for it (`worktreePath`). Closing that tab asks whether to remove it.
+  - A tab records its worktree (`worktreePath`), and whether Koko created it (`worktreeCreated`). Closing that tab asks whether to remove it.
+  - A closed session keeps the path of a worktree Koko created and the user kept. Settings > General removes these in bulk, never forced. It skips any with uncommitted or ignored files, any a session or saved tab uses, and any path that is not a linked worktree (plan 028 step 7b).
   - Removal tries without `--force` first. Only when git refuses does the dialog offer a forced removal. This protects uncommitted work.
-- **Files:** `git_service.go`, `frontend/src/components/SessionDialog.tsx`, `frontend/src/components/WorktreesModule.tsx`, `frontend/src/components/WorktreeRemovalDialog.tsx`, `frontend/src/hooks/useWorktrees.ts`, `frontend/src/hooks/useSessionBranches.ts`
+- **Files:** `git_service.go`, `frontend/src/components/SessionDialog.tsx`, `frontend/src/components/WorktreesModule.tsx`, `frontend/src/components/WorktreeRemovalDialog.tsx`, `frontend/src/hooks/useWorktrees.ts`, `frontend/src/hooks/useSessionBranches.ts`, `worktree_cleanup.go`, `frontend/src/components/HousekeepingSettings.tsx`
 - **Plan:** `docs/plans/027-git-worktrees-for-session-isolation.md`

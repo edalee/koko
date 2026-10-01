@@ -23,12 +23,14 @@ import {
 } from "../../wailsjs/go/main/ConfigService";
 import type { SafeWorkingConfig } from "../hooks/useSafeWorking";
 import { cn } from "../lib/utils";
+import HousekeepingSettings, { type HousekeepingProps } from "./HousekeepingSettings";
 import WorkerSettings from "./WorkerSettings";
 
 interface SettingsPanelProps {
   safeWorkingConfig: SafeWorkingConfig;
   onSafeWorkingChange: (config: SafeWorkingConfig) => void;
   onReposChanged?: () => void;
+  housekeeping?: HousekeepingProps;
 }
 
 const BREAK_PRESETS = [
@@ -52,6 +54,7 @@ export default function SettingsPanel({
   safeWorkingConfig,
   onSafeWorkingChange,
   onReposChanged,
+  housekeeping,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<Tab>("general");
   const [slackToken, setSlackToken] = useState("");
@@ -501,6 +504,8 @@ export default function SettingsPanel({
                 </div>
               </>
             )}
+
+            {housekeeping && <HousekeepingSettings {...housekeeping} />}
 
             <div className="pt-3 border-t border-white/[0.06]">
               <p className="text-[10px] text-tertiary">

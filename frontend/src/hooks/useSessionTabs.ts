@@ -96,6 +96,7 @@ export function useSessionTabs() {
               claudeSessionId?: string;
               lastMsg?: string;
               worktreePath?: string;
+              worktreeCreated?: boolean;
             }) => ({
               id: `saved-${++nextPlaceholder}`,
               slug: r.slug || "",
@@ -106,6 +107,7 @@ export function useSessionTabs() {
               claudeSessionId: r.claudeSessionId || "",
               lastMsg: r.lastMsg || "",
               worktreePath: r.worktreePath || undefined,
+              worktreeCreated: r.worktreeCreated || undefined,
             }),
           );
 
@@ -119,6 +121,7 @@ export function useSessionTabs() {
             closedAt: r.closedAt || 0,
             lastMessage: r.lastMsg || "",
             claudeSessionId: r.claudeSessionId || "",
+            worktreePath: r.worktreePath || undefined,
           }));
 
         setTabs(savedTabs);
@@ -147,6 +150,7 @@ export function useSessionTabs() {
         status: t.connected ? "active" : "disconnected",
         lastMsg: t.lastMsg || "",
         worktreePath: t.worktreePath || "",
+        worktreeCreated: t.worktreeCreated || false,
       })),
       ...historyRef.current.map((h) => ({
         slug: h.slug,
@@ -157,6 +161,7 @@ export function useSessionTabs() {
         closedAt: h.closedAt,
         status: "closed",
         lastMsg: h.lastMessage || "",
+        worktreePath: h.worktreePath || "",
       })),
     ];
     SaveSessions({
@@ -177,6 +182,8 @@ export function useSessionTabs() {
           createdAt: t.createdAt,
           status: t.connected ? "active" : "disconnected",
           lastMsg: t.lastMsg || "",
+          worktreePath: t.worktreePath || "",
+          worktreeCreated: t.worktreeCreated || false,
         })),
         ...newHistory.map((h) => ({
           slug: h.slug,
@@ -187,6 +194,7 @@ export function useSessionTabs() {
           closedAt: h.closedAt,
           status: "closed",
           lastMsg: h.lastMessage || "",
+          worktreePath: h.worktreePath || "",
         })),
       ];
       SaveSessions({
@@ -213,7 +221,13 @@ export function useSessionTabs() {
   }, []);
 
   const createTab = useCallback(
-    async (name: string, directory: string, worktreePath?: string, resume?: ResumeTarget) => {
+    async (
+      name: string,
+      directory: string,
+      worktreePath?: string,
+      resume?: ResumeTarget,
+      worktreeCreated?: boolean,
+    ) => {
       // Rejects with ErrConversationBusy if another session holds the
       // conversation. The caller shows that, rather than it vanishing.
       const sessionId = await CreateSessionWithOpts({
@@ -234,6 +248,7 @@ export function useSessionTabs() {
         createdAt: Date.now(),
         connected: true,
         worktreePath,
+        worktreeCreated: worktreePath ? worktreeCreated : undefined,
         // Known up front when resuming, so the picker marks it held at once.
         claudeSessionId: resume?.claudeSessionId,
       };
@@ -350,7 +365,8 @@ export function useSessionTabs() {
   );
 
   const closeTab = useCallback(
-    async (tabId: string) => {
+    // worktreeRemoved: the user removed the tab's worktree in the close dialog.
+    async (tabId: string, worktreeRemoved = false) => {
       const tab = tabs.find((t) => t.id === tabId);
       if (tab) {
         let lastMessage = "";
@@ -378,6 +394,10 @@ export function useSessionTabs() {
           closedAt: Date.now(),
           lastMessage,
           claudeSessionId: claudeId,
+          // Only a worktree Koko created and the user kept. One removed in
+          // the close dialog is gone, and one made by hand is not Koko's to
+          // remove later.
+          worktreePath: tab.worktreeCreated && !worktreeRemoved ? tab.worktreePath : undefined,
         };
 
         const newHistory = [newEntry, ...historyRef.current].slice(0, MAX_HISTORY);
@@ -441,15 +461,29 @@ export function useSessionTabs() {
     [tabs],
   );
 
-  const clearHistoryEntry = useCallback(
-    (directory: string) => {
-      const newHistory = historyRef.current.filter((e) => e.directory !== directory);
-      historyRef.current = newHistory;
-      setHistory(newHistory);
-      saveCurrentState(tabs, newHistory);
-    },
-    [tabs, saveCurrentState],
-  );
+  // Forgets every closed session. Claude's conversations and any worktrees
+  // stay where they are: the picker reads Claude's files, not this list.
+  const clearHistory = useCallback(() => {
+    historyRef.current = [];
+    setHistory([]);
+    saveCurrentState(tabs, []);
+  }, [tabs, saveCurrentState]);
+
+  // Drops worktree paths that were removed, or found already gone, from
+  // closed-session records.
+  const forgetWorktrees = useCallback((paths: string[]) => {
+    const gone = new Set(paths);
+    if (!historyRef.current.some((e) => e.worktreePath && gone.has(e.worktreePath))) return;
+    const newHistory = historyRef.current.map((e) =>
+      e.worktreePath && gone.has(e.worktreePath) ? { ...e, worktreePath: undefined } : e,
+    );
+    historyRef.current = newHistory;
+    setHistory(newHistory);
+    // Settings calls this after awaiting the removal, so its copy of tabs
+    // may be stale. A new tabs array makes the persist effect save the
+    // current tabs with the new history.
+    setTabs((prev) => [...prev]);
+  }, []);
 
   // Deleted conversations are gone for good, so closed-session records that
   // point at them drop the id. Choosing such a record then starts fresh in
@@ -480,7 +514,8 @@ export function useSessionTabs() {
     renameTab,
     handleSessionExit,
     history,
-    clearHistoryEntry,
+    clearHistory,
     forgetConversations,
+    forgetWorktrees,
   };
 }

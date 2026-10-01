@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { DeleteConversation, DeleteConversations, PickDirectory } from "../../wailsjs/go/main/App";
 import { ListConversations } from "../../wailsjs/go/main/ClaudeService";
+import { CreateWorktree } from "../../wailsjs/go/main/GitService";
 import SessionDialog, { submitLabel } from "../components/SessionDialog";
 import type { SessionHistoryEntry, SessionTab } from "../types";
 
@@ -10,6 +11,7 @@ const mockPick = PickDirectory as ReturnType<typeof vi.fn>;
 const mockList = ListConversations as ReturnType<typeof vi.fn>;
 const mockDelete = DeleteConversation as ReturnType<typeof vi.fn>;
 const mockDeleteAll = DeleteConversations as ReturnType<typeof vi.fn>;
+const mockCreateWorktree = CreateWorktree as ReturnType<typeof vi.fn>;
 
 const conv = (uuid: string, title: string, minutesAgo = 5) => ({
   uuid,
@@ -201,6 +203,21 @@ describe("SessionDialog conversation picker", () => {
     expect(screen.getByRole("button", { name: "Create Worktree + Session" })).toBeInTheDocument();
   });
 
+  // Settings removes in bulk only worktrees Koko created, so the dialog must
+  // say when it made one.
+  it("marks a worktree it creates as Koko's", async () => {
+    mockCreateWorktree.mockResolvedValueOnce({ path: "/repo-abc", branch: "main-abc" });
+    const { onCreate } = renderDialog();
+    await chooseDirectory("/repo");
+
+    fireEvent.click(screen.getByLabelText(/Create as a git worktree/));
+    fireEvent.click(screen.getByRole("button", { name: "Create Worktree + Session" }));
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalled());
+    expect(onCreate.mock.calls[0][2]).toBe("/repo-abc");
+    expect(onCreate.mock.calls[0][4]).toBe(true);
+  });
+
   it("shows why a resume failed and stays open", async () => {
     mockList.mockResolvedValue([conv("a", "Fix the resize bug")]);
     const onCreate = vi
@@ -264,6 +281,8 @@ describe("SessionDialog routing from other entry points (step 5)", () => {
     // still offered. App used to guess this by comparing directories.
     expect(onCreate.mock.calls[0][2]).toBe("/repo-wt");
     expect(onCreate.mock.calls[0][3]).toBeUndefined();
+    // Opened, not created, so Settings never removes it in bulk.
+    expect(onCreate.mock.calls[0][4]).toBeUndefined();
   });
 
   // Opening a worktree another tab already uses must not tick "Create as a

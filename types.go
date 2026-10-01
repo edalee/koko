@@ -22,7 +22,10 @@ type SessionRecord struct {
 	ClosedAt        int64  `json:"closedAt,omitempty"`
 	Status          string `json:"status"`            // "active", "disconnected", "closed"
 	LastMsg         string `json:"lastMsg,omitempty"` // last assistant message snippet
-	WorktreePath    string `json:"worktreePath,omitempty"` // set when Koko created a worktree for this session
+	WorktreePath    string `json:"worktreePath,omitempty"` // the session's worktree, created by Koko or opened from the Worktrees module
+	// WorktreeCreated is true only when Koko created the worktree. Settings
+	// removes only these in bulk, never one the user made by hand.
+	WorktreeCreated bool `json:"worktreeCreated,omitempty"`
 }
 
 // SessionsData holds all persisted session state.
@@ -201,6 +204,20 @@ type DeleteResult struct {
 	// files of unknown directory.
 	Skipped int `json:"skipped"`
 	Failed  int `json:"failed"` // the delete itself failed, so the file is still there
+}
+
+// WorktreeCleanup reports a bulk removal of Koko's worktrees. The frontend
+// forgets the Removed and Gone paths.
+type WorktreeCleanup struct {
+	Removed []string          `json:"removed"`
+	Gone    []string          `json:"gone"` // folder already deleted, so nothing to remove
+	Skipped []SkippedWorktree `json:"skipped"`
+}
+
+// SkippedWorktree is a worktree the cleanup left alone, and why.
+type SkippedWorktree struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 // BranchCI represents CI status for a git branch.

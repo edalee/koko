@@ -1,5 +1,5 @@
 import { Settings } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { GetHiddenPRs } from "../wailsjs/go/main/ConfigService";
 import { Write } from "../wailsjs/go/main/TerminalManager";
 import kokoBird from "./assets/koko_bird.svg";
@@ -45,6 +45,8 @@ export default function App() {
     handleSessionExit,
     history,
     forgetConversations,
+    clearHistory,
+    forgetWorktrees,
   } = useSessionTabs();
   // Plan 028 step 5: reconnecting a tab and opening a worktree both go
   // through the session dialog, instead of acting silently.
@@ -53,6 +55,13 @@ export default function App() {
   // Remounts the dialog on each open, so it starts from that open's props.
   const [dialogKey, setDialogKey] = useState(0);
   const reconnectTarget = reconnectFor ? tabs.find((t) => t.id === reconnectFor) : undefined;
+  // Worktrees Koko created for closed sessions, minus any an open tab uses.
+  // The backend checks again before it removes anything.
+  const keptWorktrees = useMemo(() => {
+    const open = new Set(tabs.flatMap((t) => [t.directory, t.worktreePath ?? ""]));
+    const paths = history.map((h) => h.worktreePath ?? "").filter((p) => p && !open.has(p));
+    return [...new Set(paths)];
+  }, [history, tabs]);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(true);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [pendingWorktreeClose, setPendingWorktreeClose] = useState<{
@@ -467,6 +476,12 @@ export default function App() {
             safeWorkingConfig={safeWorkingConfig}
             onSafeWorkingChange={updateSafeWorking}
             onReposChanged={refresh}
+            housekeeping={{
+              historyCount: history.length,
+              onClearHistory: clearHistory,
+              worktrees: keptWorktrees,
+              onWorktreesRemoved: forgetWorktrees,
+            }}
           />
         </OverlayPage>
 
@@ -498,11 +513,11 @@ export default function App() {
           key={dialogKey}
           open={dialogOpen}
           onClose={closeSessionDialog}
-          onCreate={async (name, directory, worktreePath, resume) => {
+          onCreate={async (name, directory, worktreePath, resume, worktreeCreated) => {
             // Let a failure reach the dialog, which shows it and stays open.
             // The dialog reports the worktree itself, including an existing
             // one opened from the worktrees module.
-            await createTab(name, directory, worktreePath, resume);
+            await createTab(name, directory, worktreePath, resume, worktreeCreated);
             closeSessionDialog();
           }}
           reconnect={reconnectTarget}
@@ -546,10 +561,10 @@ export default function App() {
           open={pendingWorktreeClose !== null}
           worktreePath={pendingWorktreeClose?.worktreePath ?? ""}
           sessionName={pendingWorktreeClose?.sessionName ?? ""}
-          onResolved={() => {
+          onResolved={(removed) => {
             const tabId = pendingWorktreeClose?.tabId;
             setPendingWorktreeClose(null);
-            if (tabId) closeTab(tabId);
+            if (tabId) closeTab(tabId, removed);
           }}
         />
 
