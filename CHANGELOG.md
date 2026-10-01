@@ -4,6 +4,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-02
+
 ### Added
 - **Conversation picker**: The session dialog lists the conversations Claude has stored for the chosen directory, newest first, with title and last reply. Pick one to reopen it, or start fresh. A conversation open in another tab switches to that tab instead (plan 028)
 - **Search Web**: Right-click selected terminal text to search it in the default browser
@@ -12,9 +14,12 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Delete conversations**: Each row in the conversation picker has a delete button, and "Delete all conversations here" clears a directory. Both confirm first. A conversation a tab holds cannot be deleted (plan 028 step 7)
 - **Reload session**: Restart a session's Claude process in the same tab, keeping its slug and conversation. On the sidebar row and in the terminal's right-click menu. Asks first if Claude is still working (plan 028)
 - **koko-worker**: a separate binary (`cmd/koko-worker/`) that a launchd agent keeps running. It runs scheduled work jobs on weekdays, with Koko open or closed. macOS only
-- **Stand-up job**: a 07:00 Slack DM with today's meetings, your PRs ready to merge with a Jira check, follow-up steps, and PRs waiting for your review
+- **Stand-up job**: a 07:00 Slack DM with today's meetings, your PRs ready to merge with a Jira check, follow-up steps, PRs waiting for your review, and team PRs
+- **Stories you can close**: a stand-up section listing your Jira stories, not done, that a PR merged this week or a PR ready to merge covers
 - **Focus time job**: at 09:15, books "Focus" blocks in free calendar gaps of 30 minutes or more, through the Google Calendar connector
-- **Tono review job**: at 09:30, 12:00 and 14:00, reviews new PRs in scope with the tono CLI and DMs the report. It never posts to GitHub
+- **Tono review job**: at 09:30, 12:00 and 14:00, reviews each PR once with the tono CLI, and posts the review as comments on the PR, as you. A PR with nothing to report gets "LGTM 😃⭐😸". Nothing posts for a review that did not finish
+- **Tono settings**: "My PRs" reviews every open PR you opened. "Team PRs" reviews the team's recent PRs: those that ask for your review, and every open PR in a repo list you edit in Settings
+- **`koko-worker version`**: prints the version the binary was built as. The scheduler logs it at start
 - **Worker scheduler**: runs jobs missed while the Mac slept, waits for the internet, and retries other failures 3 times. It books the next Mac wake with `pmset`
 - **Worker settings**: a Worker tab in Settings with an on/off switch, job switches and times, "Test", "Run now", connection checks and the log (`WorkerSettings.tsx`, `worker_service.go`)
 - **Make targets**: `make build-worker` and `make test-worker`. `make build` puts `koko-worker` inside `Koko.app`
@@ -38,6 +43,9 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Worktree fields reset**: The new session dialog regenerated its worktree branch name about once a second, overwriting anything typed
 - **Close raced the reader**: Closing a live session could call `cmd.Wait` twice at once
 - **Settings toggles**: every toggle knob now stays inside its track
+- **Stand-up Jira claims**: ticket facts come from Jira itself, and each coverage claim must quote the ticket. A stand-up had credited a ticket with work that neither the ticket nor the PR named. Each ticket now links to Jira, with its status and assignee
+- **All-day invites**: a timed invite from midnight to midnight showed as "00:00–00:00" in the stand-up. It now shows as "All day"
+- **Release builds**: `Koko.app` from a release now holds `koko-worker`. The release workflow did not build it
 - **Missing diffs**: Files committed on the branch, and untracked files, now show a diff
 
 ## [0.4.0] - 2026-05-30
