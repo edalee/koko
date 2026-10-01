@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -52,20 +51,28 @@ func printMessage(msg Message) string {
 
 var jiraKey = regexp.MustCompile(`\b[A-Z][A-Z0-9]+-\d+\b`)
 
-// ticketVerdict is Claude's judgement on one approved PR.
-type ticketVerdict struct {
-	URL         string   `json:"url"`
-	Ticket      string   `json:"ticket"`  // "PDDI-123", or "" if none found
-	Covers      string   `json:"covers"`  // yes, partly, no, unknown
-	Summary     string   `json:"summary"` // one line on coverage
-	CloseTicket bool     `json:"closeTicket"`
-	FollowUps   []string `json:"followUps"`
-}
-
 type approvedPR struct {
 	pr       SearchPR
 	detail   PRDetail
 	blockers []string
+}
+
+// loadDetails reads each PR's detail, trying a failed one once more. A PR
+// that still fails is returned in failed with its reason, and the others go
+// on, so one slow PR does not hide the rest.
+func loadDetails(ctx context.Context, prs []SearchPR) (ok []SearchPR, details []PRDetail, failed []string) {
+	for _, p := range prs {
+		d, err := prDetail(ctx, p.URL)
+		if err != nil {
+			d, err = prDetail(ctx, p.URL)
+		}
+		if err != nil {
+			failed = append(failed, fmt.Sprintf("%s: could not load (%s)", slackLink(p.URL, p.short()), truncate(err.Error(), 150)))
+			continue
+		}
+		ok, details = append(ok, p), append(details, d)
+	}
+	return ok, details, failed
 }
 
 func runStandup(ctx context.Context, env Env) error {
@@ -78,14 +85,19 @@ func runStandup(ctx context.Context, env Env) error {
 	// failing source. Without internet the run fails instead, so the
 	// scheduler retries it once the internet is back.
 	var prs []approvedPR
+	var judged []judgedPR
 	approved, prErr := myApprovedPRs(ctx)
-	for _, p := range approved {
-		d, err := prDetail(ctx, p.URL)
-		if err != nil {
-			prErr = err
-			break
-		}
-		prs = append(prs, approvedPR{pr: p, detail: d, blockers: d.blockers()})
+	okPRs, details, prFailed := loadDetails(ctx, approved)
+	for i, p := range okPRs {
+		a := approvedPR{pr: p, detail: details[i], blockers: details[i].blockers()}
+		prs = append(prs, a)
+		judged = append(judged, judgedPR{pr: p, detail: a.detail, ready: len(a.blockers) == 0})
+	}
+	// Your PRs merged in the last week, for stories that can be closed now.
+	merged, mergedErr := myMergedPRs(ctx, now.AddDate(0, 0, -7))
+	okMerged, mergedDetails, _ := loadDetails(ctx, merged)
+	for i, p := range okMerged {
+		judged = append(judged, judgedPR{pr: p, detail: mergedDetails[i], merged: true})
 	}
 
 	var queue, team []SearchPR
@@ -111,8 +123,20 @@ func runStandup(ctx context.Context, env Env) error {
 
 	verdicts := map[string]ticketVerdict{}
 	var jiraErr error
-	if len(prs) > 0 {
-		verdicts, jiraErr = judgeTickets(ctx, env, prs)
+	if len(judged) > 0 {
+		var keys []string
+		seen := map[string]bool{}
+		for _, j := range judged {
+			if k := ticketKey(j.detail); k != "" && !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+		var tickets map[string]jiraTicket
+		tickets, jiraErr = fetchTickets(ctx, env.claude, env.cfg.JiraSite, keys)
+		if jiraErr == nil {
+			verdicts, jiraErr = judgeTickets(ctx, env, judged, tickets)
+		}
 		if jiraErr != nil && !online(ctx) {
 			return jiraErr
 		}
@@ -150,19 +174,27 @@ func runStandup(ctx context.Context, env Env) error {
 	switch {
 	case prErr != nil:
 		fmt.Fprintf(&b, "• Could not load your PRs: %s\n", truncate(prErr.Error(), 200))
-	case len(ready) == 0:
+	case len(ready) == 0 && len(prFailed) == 0:
 		b.WriteString("• None\n")
 	case jiraErr != nil:
 		fmt.Fprintf(&b, "_Could not check Jira: %s_\n", truncate(jiraErr.Error(), 200))
 	}
 	for _, p := range ready {
-		v := verdicts[p.pr.URL]
 		fmt.Fprintf(&b, "• %s %s\n", slackLink(p.pr.URL, p.pr.short()), p.pr.Title)
-		if line := ticketLine(v); line != "" {
-			b.WriteString("    " + line + "\n")
+		if v, ok := verdicts[p.pr.URL]; ok {
+			b.WriteString("    " + ticketLine(v) + "\n")
 		}
 	}
+	for _, f := range prFailed {
+		b.WriteString("• " + f + "\n")
+	}
 	sections = append(sections, b.String())
+
+	if s := closableSection(judged, verdicts); s != "" {
+		sections = append(sections, s)
+	} else if mergedErr != nil {
+		sections = append(sections, fmt.Sprintf("*Stories you can close*\n• Could not load your merged PRs: %s\n", truncate(mergedErr.Error(), 200)))
+	}
 
 	if len(blocked) > 0 {
 		b.Reset()
@@ -343,80 +375,6 @@ func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchP
 	b.WriteString(tally.summary(env, counts))
 	b.WriteString("\n\n" + strings.Join(lines, "\n"))
 	return b.String()
-}
-
-func ticketLine(v ticketVerdict) string {
-	switch {
-	case v.URL == "":
-		return "" // Jira was not checked
-	case v.Ticket == "":
-		return "No Jira ticket found."
-	case v.CloseTicket:
-		return fmt.Sprintf("%s: covered. %s Close the ticket after the merge.", v.Ticket, v.Summary)
-	default:
-		return fmt.Sprintf("%s: %s. %s", v.Ticket, v.Covers, v.Summary)
-	}
-}
-
-// judgeTickets asks Claude whether each approved PR covers its Jira ticket.
-// Go supplies the PR data, so Claude reads only Jira.
-func judgeTickets(ctx context.Context, env Env, prs []approvedPR) (map[string]ticketVerdict, error) {
-	type in struct {
-		URL      string   `json:"url"`
-		Title    string   `json:"title"`
-		Branch   string   `json:"branch"`
-		Body     string   `json:"body"`
-		Keys     []string `json:"jiraKeysFound"`
-		Ready    bool     `json:"readyToMerge"`
-		Blockers []string `json:"blockers,omitempty"`
-	}
-	var input []in
-	for _, p := range prs {
-		text := p.detail.Title + " " + p.detail.HeadRefName + " " + p.detail.Body
-		input = append(input, in{
-			URL: p.pr.URL, Title: p.detail.Title, Branch: p.detail.HeadRefName,
-			Body: truncate(p.detail.Body, 3000), Keys: uniq(jiraKey.FindAllString(text, -1)),
-			Ready: len(p.blockers) == 0, Blockers: p.blockers,
-		})
-	}
-	data, _ := json.MarshalIndent(input, "", "  ")
-	prompt := `These are my approved pull requests. For each one, find its Jira ticket (use jiraKeysFound, or a key in the title, branch or body), and read it with getJiraIssue.
-Decide whether the PR covers what the ticket asks for. Do not edit, comment on or move any ticket.
-
-Reply with only a JSON array, one object per PR, in this shape:
-[{"url": "<the PR url, copied exactly>", "ticket": "PDDI-123 or empty", "covers": "yes|partly|no|unknown",
-  "summary": "one short sentence on coverage", "closeTicket": true if the PR fully covers the ticket and is ready to merge,
-  "followUps": ["concrete next step", ...]}]
-Follow-ups are for PRs that are ready to merge: for example check the deploy, close the ticket, update docs, or raise a follow-up ticket. At most three each. Use British spelling.
-
-Pull requests:
-` + string(data)
-
-	res, err := env.claude.run(ctx, prompt, jiraRead, 10*time.Minute)
-	if err != nil {
-		return nil, err
-	}
-	var verdicts []ticketVerdict
-	if err := json.Unmarshal([]byte(extractJSON(res.Text)), &verdicts); err != nil {
-		return nil, fmt.Errorf("stand-up: unreadable ticket verdicts: %s", truncate(res.Text, 200))
-	}
-	out := map[string]ticketVerdict{}
-	for _, v := range verdicts {
-		out[v.URL] = v
-	}
-	return out, nil
-}
-
-func uniq(in []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, s := range in {
-		if !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // ---- Focus ----

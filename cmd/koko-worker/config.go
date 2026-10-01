@@ -44,7 +44,9 @@ type Config struct {
 	Enabled    bool   `json:"enabled"`
 	TimeZone   string `json:"timeZone"`
 	CalendarID string `json:"calendarId"`
-	TonoPath   string `json:"tonoPath"`
+	// JiraSite is the Atlassian site the stand-up reads tickets from.
+	JiraSite string `json:"jiraSite"`
+	TonoPath string `json:"tonoPath"`
 	// TonoMine has tono review your own open PRs, whoever the team is and
 	// however old the PR.
 	TonoMine bool `json:"tonoMine"`
@@ -70,6 +72,7 @@ func defaultConfig() Config {
 		Enabled:        false,
 		TimeZone:       "Europe/Stockholm",
 		CalendarID:     "primary",
+		JiraSite:       "epidemicsound.atlassian.net",
 		TonoPath:       filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
 		TonoMine:       true,
 		TonoTeamPRs:    true,
@@ -137,6 +140,9 @@ func (c *Config) fillDefaults() {
 	def := defaultConfig()
 	if c.TimeZone == "" {
 		c.TimeZone = def.TimeZone
+	}
+	if c.JiraSite == "" {
+		c.JiraSite = def.JiraSite
 	}
 	if c.CalendarID == "" {
 		c.CalendarID = def.CalendarID
