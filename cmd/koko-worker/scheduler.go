@@ -83,6 +83,7 @@ type TonoResult struct {
 	Failed   string            `json:"failed,omitempty"`
 	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
 	LGTM     bool              `json:"lgtm,omitempty"`     // no pass had anything to say
+	Pinged   bool              `json:"pinged,omitempty"`   // the one Slack line about the review went out
 	// Unposted are comments not yet posted. The next tono run posts them.
 	Unposted []string `json:"unposted,omitempty"`
 	// PostTries counts failed tries to post. At maxPostTries the review

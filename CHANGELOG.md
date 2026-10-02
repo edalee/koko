@@ -4,6 +4,12 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+- **Tono review ping**: once a review is on the PR, one Slack line says so, with the verdict and a link to the review. The review itself never goes to Slack
+
+### Changed
+- **Needs your review**: the stand-up lists only PRs opened by your team. PRs from outside it are counted in one line instead of listed
+
 ## [0.5.0] - 2026-10-02
 
 ### Added
