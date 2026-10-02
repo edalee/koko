@@ -303,7 +303,12 @@ func (t *reviewTally) summary(env Env, counts map[string]int) string {
 		fmt.Fprintf(&b, " %d could not be reviewed.", counts["failed"])
 	}
 	if counts["outside"] > 0 {
-		fmt.Fprintf(&b, " %d are outside tono's scope, which is PRs opened by %s in the last %d days.", counts["outside"], env.cfg.TonoTeam, env.cfg.TonoMaxAgeDays)
+		// Only team PRs are counted here, so outside the scope means too old.
+		if counts["outside"] == 1 {
+			fmt.Fprintf(&b, " 1 was opened more than %d days ago, so tono skips it.", env.cfg.TonoMaxAgeDays)
+		} else {
+			fmt.Fprintf(&b, " %d were opened more than %d days ago, so tono skips them.", counts["outside"], env.cfg.TonoMaxAgeDays)
+		}
 	}
 	if t.scopeErr != nil {
 		fmt.Fprintf(&b, " _Could not load tono's scope: %s_", truncate(t.scopeErr.Error(), 150))
@@ -329,14 +334,38 @@ func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []Sea
 		return b.String()
 	}
 
+	// Only the team's PRs get a line. The rest are counted, so the section
+	// stays short. Without the team's members, every PR is listed.
+	tally.loadScope(ctx, env)
+	team := queue
+	if tally.scopeErr == nil {
+		team = nil
+		for _, p := range queue {
+			if tally.scope.members[strings.ToLower(p.Author.Login)] {
+				team = append(team, p)
+			}
+		}
+	}
 	counts := map[string]int{}
 	var lines []string
-	for _, p := range queue {
+	for _, p := range team {
 		lines = append(lines, prLine(p, tally.status(ctx, env, p, counts)))
 	}
-	fmt.Fprintf(&b, "%d PRs wait for your review.", len(queue))
-	b.WriteString(tally.summary(env, counts))
-	b.WriteString("\n\n" + strings.Join(lines, "\n"))
+	others := len(queue) - len(team)
+	if others == 0 {
+		fmt.Fprintf(&b, "%d PRs wait for your review.", len(queue))
+	} else {
+		fmt.Fprintf(&b, "%d PRs wait for your review, %d of them from %s.", len(queue), len(team), env.cfg.TonoTeam)
+	}
+	if len(team) > 0 {
+		b.WriteString(tally.summary(env, counts))
+	}
+	if others > 0 {
+		fmt.Fprintf(&b, " %d from outside the team are not listed.", others)
+	}
+	if len(lines) > 0 {
+		b.WriteString("\n\n" + strings.Join(lines, "\n"))
+	}
 	return b.String()
 }
 
@@ -861,7 +890,28 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 			return "", err
 		}
 	}
+	// Once the whole review is on the PR, one Slack line says so. The review
+	// itself never goes to Slack.
+	if len(r.Comments) > 0 && r.Failed == "" && !r.Pinged {
+		if err := env.notify(ctx, reviewPing(r)); err != nil {
+			log.Printf("tono: Slack line for %s#%d: %v", r.Repo, r.Number, err)
+			return "", nil // the review is posted, so this is not worth a retry
+		}
+		r.Pinged = true
+		return "", save(nil)
+	}
 	return "", nil
+}
+
+// reviewPing is the one Slack line for a posted review: the PR, the verdict
+// and a link to the review.
+func reviewPing(r TonoResult) string {
+	verdict := strings.ToLower(verdictLabel(overallVerdict(r.Verdicts)))
+	if r.LGTM {
+		verdict = "LGTM"
+	}
+	pr := slackLink(r.URL, fmt.Sprintf("%s#%d", shortRepo(r.Repo), r.Number))
+	return fmt.Sprintf("Tono reviewed %s %s: %s (%s)", pr, r.Title, verdict, slackLink(r.Comments[0], "review"))
 }
 
 // postUnposted posts the comments earlier runs left unposted. It returns the

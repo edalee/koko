@@ -90,7 +90,7 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
     key: "standup",
     name: "Stand-up",
     about:
-      "Today's meetings, approved PRs ready to merge, PRs waiting for your review, and team PRs.",
+      "Today's meetings, approved PRs ready to merge, your team's PRs waiting for your review, and team PRs.",
     multi: false,
   },
   {
@@ -103,7 +103,7 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
     key: "tono",
     name: "Tono reviews",
     about:
-      "Reviews each PR once and posts the review as comments on the PR, as you. If there is nothing to report, it posts LGTM 😃⭐😸. Test prints the comments instead.",
+      "Reviews each PR once and posts the review as comments on the PR, as you. If there is nothing to report, it posts LGTM 😃⭐😸. One Slack line says each review is posted. Test prints the comments instead.",
     multi: true,
   },
 ];

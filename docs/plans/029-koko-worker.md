@@ -261,6 +261,11 @@ Done on 1 Oct: the stand-up's Jira facts come from Go, not Claude.
 - A new section, "Stories you can close", lists tickets assigned to you that are not done. Each one is covered by a PR merged in the last 7 days ("Now") or a PR ready to merge ("After the merge"). "Yours" means the ticket's assignee matches the account the Jira connector runs as.
 - One approved PR that fails to load no longer hides the rest. Each failed PR is tried once more, then gets its own line with the reason. A `gh` call that times out says so, instead of an empty error.
 
+Done on 2 Oct:
+- Released as 0.5.0. A release now builds `koko-worker` into `Koko.app`, and `koko-worker version` reports the build.
+- Once a review is on the PR, one Slack line says so: the PR, the verdict and a link to the review. It goes once per review (`TonoResult.Pinged`), even if posting finishes on a retry.
+- "Needs your review" lists only PRs opened by the team. The rest are counted in one line. Without the team's members, every PR is listed.
+
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
 2. Turn off baldrick-work's launchd agent.

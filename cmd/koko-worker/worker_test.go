@@ -783,6 +783,53 @@ func TestPostPending(t *testing.T) {
 	}
 }
 
+func TestReviewPingOnce(t *testing.T) {
+	const key = "o/r#1@abc"
+	ctx := context.Background()
+	f := &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{}}}
+	r := TonoResult{URL: "https://github.com/o/r/pull/1", Title: "Fix it", Repo: "o/r", Number: 1, SHA: "abc",
+		Verdicts: map[string]string{"review": verdictFollowUps}, Unposted: []string{"a", "b"}}
+	if _, err := postPending(ctx, f.env(), key, r); err != nil {
+		t.Fatal(err)
+	}
+	want := "Tono reviewed <https://github.com/o/r/pull/1|r#1> Fix it: mergeable with follow-ups (<https://github.com/o/r/pull/1#a|review>)"
+	if len(f.dms) != 1 || f.dms[0] != want || !f.st.TonoResults[key].Pinged {
+		t.Fatalf("dms %q, pinged %v", f.dms, f.st.TonoResults[key].Pinged)
+	}
+	// A later call with nothing left to post sends nothing more.
+	if _, err := postPending(ctx, f.env(), key, f.st.TonoResults[key]); err != nil || len(f.dms) != 1 {
+		t.Errorf("second call: err %v, dms %q", err, f.dms)
+	}
+	// An LGTM says so.
+	lg := r
+	lg.LGTM, lg.Verdicts, lg.Comments = true, nil, []string{"https://github.com/o/r/pull/1#c"}
+	if got := reviewPing(lg); !strings.Contains(got, ": LGTM (") {
+		t.Errorf("lgtm ping: %q", got)
+	}
+}
+
+func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
+	pr := func(n int, author string) SearchPR {
+		p := SearchPR{URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), Number: n, Title: "Change", CreatedAt: "2026-09-29T10:00:00Z"}
+		p.Repository.NameWithOwner = "o/r"
+		p.Author.Login = author
+		return p
+	}
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
+	cfg := defaultConfig()
+	env := Env{cfg: cfg, now: now, state: &State{}}
+	tally := &reviewTally{loaded: true, scope: tonoScope{
+		team: cfg.TonoTeam, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
+	}}
+	queue := []SearchPR{pr(1, "alice"), pr(2, "bob"), pr(3, "carol")}
+	got := reviewSection(context.Background(), env, tally, queue, nil)
+	if !strings.Contains(got, "3 PRs wait for your review, 1 of them from epidemicsound/content-protection.") ||
+		!strings.Contains(got, "2 from outside the team are not listed.") ||
+		!strings.Contains(got, "r#1") || strings.Contains(got, "r#2") || strings.Contains(got, "r#3") {
+		t.Errorf("section:\n%s", got)
+	}
+}
+
 func TestStandupStatusForPostingStates(t *testing.T) {
 	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
 	p.Repository.NameWithOwner = "o/r"
