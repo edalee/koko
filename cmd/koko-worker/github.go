@@ -154,16 +154,19 @@ func ghJSON(ctx context.Context, v any, args ...string) error {
 
 const searchFields = "url,number,title,createdAt,repository,author"
 
+// Every PR search passes --archived=false. An archived repo is read-only, so
+// tono can never post on its PRs, and they are not work to do.
+
 func myApprovedPRs(ctx context.Context) ([]SearchPR, error) {
 	var prs []SearchPR
-	err := ghJSON(ctx, &prs, "search", "prs", "--author", "@me", "--state", "open", "--review", "approved",
+	err := ghJSON(ctx, &prs, "search", "prs", "--archived=false", "--author", "@me", "--state", "open", "--review", "approved",
 		"--json", searchFields, "--limit", "50")
 	return prs, err
 }
 
 func myOpenPRs(ctx context.Context) ([]SearchPR, error) {
 	var prs []SearchPR
-	err := ghJSON(ctx, &prs, "search", "prs", "--author", "@me", "--state", "open", "--draft=false",
+	err := ghJSON(ctx, &prs, "search", "prs", "--archived=false", "--author", "@me", "--state", "open", "--draft=false",
 		"--json", searchFields, "--limit", "50")
 	return prs, err
 }
@@ -171,7 +174,7 @@ func myOpenPRs(ctx context.Context) ([]SearchPR, error) {
 // myMergedPRs is your PRs merged since the given day.
 func myMergedPRs(ctx context.Context, since time.Time) ([]SearchPR, error) {
 	var prs []SearchPR
-	err := ghJSON(ctx, &prs, "search", "prs", "--author", "@me", "--merged", "--merged-at", ">="+since.Format("2006-01-02"),
+	err := ghJSON(ctx, &prs, "search", "prs", "--archived=false", "--author", "@me", "--merged", "--merged-at", ">="+since.Format("2006-01-02"),
 		"--json", searchFields, "--limit", "50")
 	return prs, err
 }
@@ -179,7 +182,7 @@ func myMergedPRs(ctx context.Context, since time.Time) ([]SearchPR, error) {
 // reviewRequests includes requests to your teams, not only to you.
 func reviewRequests(ctx context.Context) ([]SearchPR, error) {
 	var prs []SearchPR
-	err := ghJSON(ctx, &prs, "search", "prs", "--review-requested", "@me", "--state", "open", "--draft=false",
+	err := ghJSON(ctx, &prs, "search", "prs", "--archived=false", "--review-requested", "@me", "--state", "open", "--draft=false",
 		"--json", searchFields, "--limit", "100")
 	return prs, err
 }
@@ -237,7 +240,7 @@ func repoPRs(ctx context.Context, repos []string) ([]SearchPR, error) {
 	if len(repos) == 0 {
 		return nil, nil
 	}
-	args := []string{"search", "prs", "--state", "open", "--draft=false"}
+	args := []string{"search", "prs", "--archived=false", "--state", "open", "--draft=false"}
 	for _, r := range repos {
 		args = append(args, "--repo", r)
 	}

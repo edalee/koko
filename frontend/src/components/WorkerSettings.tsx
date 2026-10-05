@@ -34,6 +34,7 @@ interface WorkerConfig {
   calendarId: string;
   tonoPath: string;
   tonoMine: boolean;
+  tonoMineMaxAgeDays: number;
   tonoTeamPRs: boolean;
   tonoTeam: string;
   tonoMaxAgeDays: number;
@@ -72,6 +73,7 @@ const DEFAULTS: WorkerConfig = {
   calendarId: "primary",
   tonoPath: "",
   tonoMine: true,
+  tonoMineMaxAgeDays: 14,
   tonoTeamPRs: true,
   tonoTeam: "epidemicsound/content-protection",
   tonoMaxAgeDays: 4,
@@ -514,7 +516,9 @@ export default function WorkerSettings() {
                       <label htmlFor="tono-mine" className="text-xs text-white/80">
                         My PRs
                       </label>
-                      <p className="text-[10px] text-tertiary">Every open PR you opened.</p>
+                      <p className="text-[10px] text-tertiary">
+                        Your open PRs, outside archived repos.
+                      </p>
                     </div>
                     <Toggle
                       id="tono-mine"
@@ -522,6 +526,24 @@ export default function WorkerSettings() {
                       onClick={() => save({ ...cfg, tonoMine: !cfg.tonoMine })}
                     />
                   </div>
+                  {cfg.tonoMine && (
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
+                      <span>Opened in the last</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={cfg.tonoMineMaxAgeDays}
+                        onChange={(e) =>
+                          save({
+                            ...cfg,
+                            tonoMineMaxAgeDays: Number.parseInt(e.target.value, 10) || 0,
+                          })
+                        }
+                        className={cn(inputClass, "w-12 tabular-nums")}
+                      />
+                      <span>days</span>
+                    </div>
+                  )}
                 </div>
               )}
 

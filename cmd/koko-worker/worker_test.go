@@ -783,6 +783,37 @@ func TestPostPending(t *testing.T) {
 	}
 }
 
+func TestPostRefusedForGood(t *testing.T) {
+	const key = "o/r#1@abc"
+	f := &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{}}}
+	env := f.env()
+	env.post = func(context.Context, string, string) (string, error) {
+		return "", fmt.Errorf("gh pr comment: GraphQL: Repository was archived so is read-only and unable to create comment because issue is locked (addComment)")
+	}
+	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}}
+	gaveUp, err := postPending(context.Background(), env, key, r)
+	got := f.st.TonoResults[key]
+	if err != nil || gaveUp == "" || got.PostTries != 1 || len(got.Unposted) != 0 || len(f.dms) != 1 || !strings.Contains(f.dms[0], "refuses comments") {
+		t.Errorf("gaveUp %q, err %v, result %+v, dms %q", gaveUp, err, got, f.dms)
+	}
+	if refusedForGood(fmt.Errorf("gh: connection reset by peer")) {
+		t.Error("a network error is not permanent")
+	}
+}
+
+func TestTonoMineAgeDefault(t *testing.T) {
+	if got := defaultConfig().TonoMineMaxAgeDays; got != 14 {
+		t.Errorf("default %d, want 14", got)
+	}
+	path := t.TempDir() + "/worker.json"
+	if err := os.WriteFile(path, []byte(`{"tonoMineMaxAgeDays": 0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := loadConfig(path); err != nil || cfg.TonoMineMaxAgeDays != 14 {
+		t.Errorf("empty value: %d, %v", cfg.TonoMineMaxAgeDays, err)
+	}
+}
+
 func TestReviewPingOnce(t *testing.T) {
 	const key = "o/r#1@abc"
 	ctx := context.Background()
