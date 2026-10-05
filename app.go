@@ -14,7 +14,7 @@ import (
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const version = "0.5.1"
+const version = "0.5.2"
 
 type App struct {
 	ctx context.Context
