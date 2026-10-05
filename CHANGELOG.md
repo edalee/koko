@@ -4,6 +4,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-05
+
+### Fixed
+- **Reinstalling the worker**: `koko-worker install` now waits for the old agent to unload before starting the new one. With a job running, it used to fail with "Bootstrap failed: 5" and leave no agent running
+
 ## [0.5.1] - 2026-10-02
 
 ### Added
