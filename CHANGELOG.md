@@ -4,6 +4,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-05
+
 ### Changed
 - **Tono "My PRs"**: reviews only your PRs opened in the last 14 days, a setting in Settings > Worker. It used to review every open PR you ever opened, back to 2022. "Run now" with a PR's URL still reviews any PR
 - **Archived repos**: every PR search leaves them out. An archived repo is read-only, so tono could never post there
