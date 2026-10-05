@@ -98,18 +98,47 @@ func install(paths Paths, ifIdle bool) error {
 	if err := os.WriteFile(agentPlistPath(), []byte(plist), 0o644); err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "bootout", launchDomain()+"/"+agentLabel).Run()
-	if out, err := exec.Command("launchctl", "bootstrap", launchDomain(), agentPlistPath()).CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %s", strings.TrimSpace(string(out)))
+	stopAgent()
+	if err := startAgent(); err != nil {
+		return err
 	}
 	fmt.Println("koko-worker agent installed and started")
 	return nil
 }
 
+// agentWait is how long stopAgent waits for launchd to unload the agent, and
+// startAgent's retry gap. A busy agent can take seconds to exit.
+const agentWait = 15 * time.Second
+
+// stopAgent unloads the agent and waits until launchd no longer has it.
+// bootout returns before the old process has exited, and a bootstrap in that
+// gap fails with "Bootstrap failed: 5: Input/output error".
+func stopAgent() {
+	_ = exec.Command("launchctl", "bootout", launchDomain()+"/"+agentLabel).Run()
+	for deadline := time.Now().Add(agentWait); agentLoaded() && time.Now().Before(deadline); {
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// startAgent loads the agent from its plist. launchd can still refuse just
+// after an unload, so it tries a few times before giving up.
+func startAgent() error {
+	var out []byte
+	var err error
+	for try := 1; try <= 4; try++ {
+		out, err = exec.Command("launchctl", "bootstrap", launchDomain(), agentPlistPath()).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		time.Sleep(time.Duration(try) * time.Second)
+	}
+	return fmt.Errorf("launchctl bootstrap: %s", strings.TrimSpace(string(out)))
+}
+
 // uninstall stops the agent, removes its plist and cancels any booked wake.
 // Config, state, logs and the copied binary stay.
 func uninstall(paths Paths) error {
-	_ = exec.Command("launchctl", "bootout", launchDomain()+"/"+agentLabel).Run()
+	stopAgent()
 	if err := os.Remove(agentPlistPath()); err != nil && !os.IsNotExist(err) {
 		return err
 	}
