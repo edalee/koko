@@ -440,8 +440,8 @@ export default function WorkerSettings() {
         <div>
           <h4 className="text-sm text-white font-medium">Worker</h4>
           <p className="text-xs text-muted-foreground mt-1">
-            Stand-up, focus time and tono reviews on weekdays. Runs in the background, even with
-            Koko closed.
+            Stand-up, focus time and PR reviews on weekdays. Runs in the background, even with Koko
+            closed.
           </p>
         </div>
         {switching ? (
@@ -611,7 +611,13 @@ export default function WorkerSettings() {
                       <button
                         key={src}
                         type="button"
-                        onClick={() => saveReviewer({ source: src })}
+                        onClick={() =>
+                          // A local source saves once it has a path, from the
+                          // path box below. Saved without one, it would fail reviews.
+                          src === "local" && !cfg.reviewer.path.trim()
+                            ? setReviewer({ source: src })
+                            : saveReviewer({ source: src })
+                        }
                         className={cn(
                           "px-2.5 py-1 text-[11px] rounded-md border transition-colors",
                           cfg.reviewer.source === src
@@ -883,7 +889,7 @@ export default function WorkerSettings() {
         ))}
         {!checks && !checking && (
           <p className="text-[10px] text-tertiary">
-            Checks Slack, GitHub, Jira, Google Calendar, tono and Mac wake.
+            Checks Slack, GitHub, Jira, Google Calendar, the reviewer and Mac wake.
           </p>
         )}
       </div>

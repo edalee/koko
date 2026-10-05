@@ -248,7 +248,7 @@ func (c *Config) fillDefaults() {
 		c.CalendarID = def.CalendarID
 	}
 	r, d := &c.Reviewer, def.Reviewer
-	r.Path = strings.TrimSpace(r.Path)
+	r.Path = expandHome(strings.TrimSpace(r.Path))
 	if r.Source == "" {
 		r.Source = d.Source
 	}
@@ -330,9 +330,8 @@ func (c Config) validate() error {
 			return fmt.Errorf("reviewer script %q, want a path inside the clone", r.Script)
 		}
 	case SourceLocal:
-		if r.Path == "" {
-			return fmt.Errorf("reviewer source is local, but no path is set")
-		}
+		// A missing path fails only the review job, in prepareReviewer. Here
+		// it would stop every job.
 	default:
 		return fmt.Errorf("reviewer source %q, want %s or %s", r.Source, SourceManaged, SourceLocal)
 	}
@@ -350,6 +349,19 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// expandHome turns a leading "~" or "~/" into your home folder. Nothing else
+// expands it: the worker runs the path as it is, without a shell.
+func expandHome(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, strings.TrimPrefix(path, "~"))
 }
 
 func ownerRepo(s string) bool {

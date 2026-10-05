@@ -411,10 +411,10 @@
 - **Files:** `cmd/koko-worker/calendar.go`
 - **Plan:** `docs/plans/029-koko-worker.md`
 
-## ADR-034: Tono reviews stay read-only
+## ADR-034: The reviewer stays read-only, and the worker posts
 - **Date:** 2026-09-30
 - **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR
-- **Decision:** The tono job calls the tono CLI as `tono <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the review from posting to GitHub.
+- **Decision:** The review job calls the reviewer CLI as `tono <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
 - **Rationale:**
   - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
   - `TONO_CLAUDE` points to a wrapper. It adds `--no-session-persistence` and denies the posting commands.

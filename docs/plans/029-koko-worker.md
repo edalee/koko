@@ -6,9 +6,9 @@ Status: merged to `main` in #20 (commit `e9d32b4`, 30 Sep). The wake test and th
 
 - **Config file:** the architecture diagram shows a `worker` section in `config.json`. The code uses its own `worker.json`, as "Keeping clear of other Koko work" says.
 - **Slack:** the backend table says `slack.go` DMs "through Koko's Slack token". The worker uses its own bot token and user ID from `worker.json`.
-- **Tono scope:** the Tono section describes only the team scope. The code has two switches, `tonoMine` and `tonoTeamPRs`, plus `tonoRepos`, as "Done on 30 Sep" describes.
-- **Run now with a PR URL:** only the CLI has it (`koko-worker run tono --pr URL`). The Settings UI's "Run now" takes no URL.
-- **Connection checks:** there are seven, not five. `claude` (the CLI on the worker's PATH) and `tono` (the CLI path) join Slack, GitHub, Jira, calendar and wake.
+- **Review scope:** the Tono section describes only the team scope. The code has `reviewer.mine` and `reviewer.team`, each with `enabled` and `maxAgeDays`, plus `reviewer.team.repos`, as "Done on 30 Sep" and "Done on 5 Oct" describe.
+- **Run now with a PR URL:** only the CLI has it (`koko-worker run review --pr URL`). The Settings UI's "Run now" takes no URL.
+- **Connection checks:** there are seven, not five. `claude` (the CLI on the worker's PATH) and `reviewer` (the managed clone or the local path) join Slack, GitHub, Jira, calendar and wake.
 - **Sudoers rule:** it allows `pmset schedule cancel wake` as well as `pmset schedule wake`. The worker cancels an old wake when the times change, and on uninstall.
 - **Focus window:** the default window starts at 09:00, not 09:15. The job still runs at 09:15 and books from then onwards.
 - **Deny list:** it is wider than the plan's list. It also refuses `Write`, `Edit`, `NotebookEdit`, Jira issue creation, and calendar delete, update and respond.

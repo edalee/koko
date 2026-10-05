@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -95,17 +96,24 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 	case "reviewer", legacyJobTono:
 		rv := cfg.Reviewer
 		cli := cfg.reviewerCLI(workerPaths())
+		_, cloneErr := os.Stat(filepath.Join(workerPaths().Reviewer, ".git"))
 		switch {
 		case rv.Source == SourceLocal:
-			r.OK, r.Detail = executable(cli), "local reviewer at "+cli
+			r.OK, r.Detail = rv.Path != "" && executable(cli), "local reviewer at "+cli
 			if !r.OK {
 				r.Detail = "no reviewer CLI at " + cli
+				if rv.Path == "" {
+					r.Detail = "the reviewer source is a local path, but no path is set"
+				}
 				r.Fix = "Set the reviewer path to an executable, or switch the source to managed."
 			}
-		case !executable(cli):
+		case os.IsNotExist(cloneErr):
 			// Not a failure: the first review run clones it.
 			r.OK = true
 			r.Detail = fmt.Sprintf("managed %s at %s, not cloned yet. The next review run clones it", rv.Repo, rv.Branch)
+		case !executable(cli):
+			r.Detail = fmt.Sprintf("the %s clone has no reviewer CLI at %s", rv.Repo, rv.Script)
+			r.Fix = "Check the reviewer repo and branch in Settings. The script must be at that path in the repo."
 		default:
 			st := loadState(workerPaths().State)
 			r.OK = true

@@ -83,7 +83,6 @@ func TestNewConfigWins(t *testing.T) {
 func TestReviewerValidation(t *testing.T) {
 	for _, bad := range []ReviewerConfig{
 		{Source: "git", Repo: "o/r", Script: "tono"},
-		{Source: SourceLocal},
 		{Source: SourceManaged, Repo: "tonometer", Script: "tono"},
 		{Source: SourceManaged, Repo: "o/r", Script: "../../bin/sh"},
 	} {
