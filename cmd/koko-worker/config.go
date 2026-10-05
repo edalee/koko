@@ -47,9 +47,10 @@ type Config struct {
 	// JiraSite is the Atlassian site the stand-up reads tickets from.
 	JiraSite string `json:"jiraSite"`
 	TonoPath string `json:"tonoPath"`
-	// TonoMine has tono review your own open PRs, whoever the team is and
-	// however old the PR.
-	TonoMine bool `json:"tonoMine"`
+	// TonoMine has tono review your own open PRs opened in the last
+	// TonoMineMaxAgeDays days, whoever the team is.
+	TonoMine           bool `json:"tonoMine"`
+	TonoMineMaxAgeDays int  `json:"tonoMineMaxAgeDays"`
 	// TonoTeamPRs has tono review PRs opened by TonoTeam's members in the last
 	// TonoMaxAgeDays days: the ones that ask for your review, and every open
 	// one in TonoRepos.
@@ -69,16 +70,17 @@ type Config struct {
 func defaultConfig() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		Enabled:        false,
-		TimeZone:       "Europe/Stockholm",
-		CalendarID:     "primary",
-		JiraSite:       "epidemicsound.atlassian.net",
-		TonoPath:       filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
-		TonoMine:       true,
-		TonoTeamPRs:    true,
-		TonoTeam:       "epidemicsound/content-protection",
-		TonoMaxAgeDays: 4,
-		Focus:          FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
+		Enabled:            false,
+		TimeZone:           "Europe/Stockholm",
+		CalendarID:         "primary",
+		JiraSite:           "epidemicsound.atlassian.net",
+		TonoPath:           filepath.Join(home, "Projects", "es", "repos", "tonometer", "tono"),
+		TonoMine:           true,
+		TonoMineMaxAgeDays: 14,
+		TonoTeamPRs:        true,
+		TonoTeam:           "epidemicsound/content-protection",
+		TonoMaxAgeDays:     4,
+		Focus:              FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
 		Jobs: map[string]JobConfig{
 			JobStandup: {Enabled: true, Times: []string{"07:00"}},
 			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
@@ -155,6 +157,9 @@ func (c *Config) fillDefaults() {
 	}
 	if c.TonoMaxAgeDays <= 0 {
 		c.TonoMaxAgeDays = def.TonoMaxAgeDays
+	}
+	if c.TonoMineMaxAgeDays <= 0 {
+		c.TonoMineMaxAgeDays = def.TonoMineMaxAgeDays
 	}
 	if c.TonoOwnPRsOnly {
 		c.TonoTeamPRs = false

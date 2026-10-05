@@ -572,13 +572,15 @@ func reviewedBefore(st *State, repo string, number int) bool {
 
 // tonoTarget is one PR for tono to review.
 type tonoTarget struct {
-	pr   SearchPR
-	mine bool
+	pr     SearchPR
+	mine   bool
+	tooOld bool // your PR, opened more than TonoMineMaxAgeDays ago
 }
 
 // tonoTargets is your open PRs if TonoMine is set. If TonoTeamPRs is set,
 // the PRs waiting for your review follow, then the open PRs in TonoRepos.
 // Others' PRs are people's, not bots', and runTono checks them against the team scope.
+// Your PRs opened more than TonoMineMaxAgeDays ago are marked tooOld.
 func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 	var out []tonoTarget
 	seen := map[string]bool{}
@@ -587,8 +589,11 @@ func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 		if err != nil {
 			return nil, err
 		}
+		since := env.now.AddDate(0, 0, -env.cfg.TonoMineMaxAgeDays)
 		for _, p := range mine {
-			out = append(out, tonoTarget{pr: p, mine: true})
+			created, err := time.Parse(time.RFC3339, p.CreatedAt)
+			old := err != nil || created.Before(since)
+			out = append(out, tonoTarget{pr: p, mine: true, tooOld: old})
 			seen[p.URL] = true
 		}
 	}
@@ -657,10 +662,10 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		if env.test && onlyURL == "" && reviewed > 0 {
 			break
 		}
-		// A PR named with --pr is reviewed whatever the scope says. Your own
-		// PRs are outside the team scope.
+		// A PR named with --pr is reviewed whatever the scope or its age says.
+		// Your own PRs are outside the team scope, and have their own age limit.
 		if onlyURL == "" {
-			if (!t.mine && scope.outside(p) != "") || reviewedBefore(env.state, p.repo(), p.Number) {
+			if (!t.mine && scope.outside(p) != "") || t.tooOld || reviewedBefore(env.state, p.repo(), p.Number) {
 				continue
 			}
 			onGitHub, err := hasTonoComment(ctx, p.repo(), p.Number)
@@ -869,7 +874,8 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 			}
 			r.PostTries++
 			log.Printf("tono: posting on %s#%d (try %d): %v", r.Repo, r.Number, r.PostTries, err)
-			if r.PostTries < maxPostTries {
+			permanent := refusedForGood(err)
+			if r.PostTries < maxPostTries && !permanent {
 				return "", save(nil)
 			}
 			r.Failed = truncate("could not post the review: "+err.Error(), 400)
@@ -877,7 +883,11 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 			if err := save(nil); err != nil {
 				return "", err
 			}
-			if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not post its review of %s after %d tries: %s", link, maxPostTries, r.Failed)); nerr != nil {
+			why := fmt.Sprintf("after %d tries", r.PostTries)
+			if permanent {
+				why = "because GitHub refuses comments on it"
+			}
+			if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not post its review of %s %s: %s", link, why, r.Failed)); nerr != nil {
 				return "", nerr
 			}
 			return r.Failed, nil
@@ -901,6 +911,18 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 		return "", save(nil)
 	}
 	return "", nil
+}
+
+// refusedForGood is true for a post GitHub will never accept, such as on an
+// archived repo or a locked PR. Retrying those only wastes a day of tries.
+func refusedForGood(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{"was archived", "is locked", "read-only"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // reviewPing is the one Slack line for a posted review: the PR, the verdict

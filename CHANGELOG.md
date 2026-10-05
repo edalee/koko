@@ -4,6 +4,13 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Changed
+- **Tono "My PRs"**: reviews only your PRs opened in the last 14 days, a setting in Settings > Worker. It used to review every open PR you ever opened, back to 2022. "Run now" with a PR's URL still reviews any PR
+- **Archived repos**: every PR search leaves them out. An archived repo is read-only, so tono could never post there
+
+### Fixed
+- **Posting refused for good**: a comment GitHub will never accept, such as on an archived repo or a locked PR, fails at once with one DM. It used to take three tries over a day
+
 ## [0.5.2] - 2026-10-05
 
 ### Fixed

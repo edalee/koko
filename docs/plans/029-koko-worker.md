@@ -266,6 +266,13 @@ Done on 2 Oct:
 - Once a review is on the PR, one Slack line says so: the PR, the verdict and a link to the review. It goes once per review (`TonoResult.Pinged`), even if posting finishes on a retry.
 - "Needs your review" lists only PRs opened by the team. The rest are counted in one line. Without the team's members, every PR is listed.
 
+Done on 5 Oct:
+- Tono reviewed Tools#191, a PR of yours from May 2022, in a repo that has since been archived. "My PRs" had no age limit, and the PR searches did not leave out archived repos. GitHub then refused the comment three times over a day.
+- "My PRs" now reviews only PRs opened in the last `tonoMineMaxAgeDays` days, default 14. "Run now" with a PR's URL still reviews any PR.
+- Every PR search passes `--archived=false`.
+- A post GitHub refuses for good (an archived repo, a locked PR) fails at once, with one DM.
+- `install` waits for the old agent to unload before starting the new one (0.5.2).
+
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
 2. Turn off baldrick-work's launchd agent.
