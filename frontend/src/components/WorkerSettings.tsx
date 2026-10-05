@@ -28,18 +28,27 @@ interface JobConfig {
   times: string[];
 }
 
+interface ScopeConfig {
+  enabled: boolean;
+  maxAgeDays: number;
+}
+
+interface ReviewerConfig {
+  source: "managed" | "local";
+  repo: string;
+  branch: string;
+  autoUpdate: boolean;
+  script: string;
+  path: string;
+  mine: ScopeConfig;
+  team: ScopeConfig & { team: string; repos: string[] };
+}
+
 interface WorkerConfig {
   enabled: boolean;
   timeZone: string;
   calendarId: string;
-  tonoPath: string;
-  tonoMine: boolean;
-  tonoMineMaxAgeDays: number;
-  tonoTeamPRs: boolean;
-  tonoTeam: string;
-  tonoMaxAgeDays: number;
-  tonoRepos: string[];
-  tonoOwnPRsOnly?: boolean; // old switch, read once by merge()
+  reviewer: ReviewerConfig;
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
   jobs: Record<string, JobConfig>;
@@ -57,6 +66,16 @@ interface WorkerStatus {
   nextRun?: string;
   wakeBooked?: string;
   configError?: string;
+  version?: string;
+  reviewer?: {
+    source: string;
+    cli: string;
+    repo?: string;
+    branch?: string;
+    commit?: string;
+    commitBranch?: string;
+    updated?: string;
+  };
   jobs: Record<string, { lastRun?: RunRecord }>;
 }
 
@@ -71,19 +90,22 @@ const DEFAULTS: WorkerConfig = {
   enabled: false,
   timeZone: "Europe/Stockholm",
   calendarId: "primary",
-  tonoPath: "",
-  tonoMine: true,
-  tonoMineMaxAgeDays: 14,
-  tonoTeamPRs: true,
-  tonoTeam: "epidemicsound/content-protection",
-  tonoMaxAgeDays: 4,
-  tonoRepos: [],
+  reviewer: {
+    source: "managed",
+    repo: "epidemicsound/tonometer",
+    branch: "main",
+    autoUpdate: true,
+    script: "tono",
+    path: "",
+    mine: { enabled: true, maxAgeDays: 14 },
+    team: { enabled: true, maxAgeDays: 4, team: "epidemicsound/content-protection", repos: [] },
+  },
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
   jobs: {
     standup: { enabled: true, times: ["07:00"] },
     focus: { enabled: true, times: ["09:15"] },
-    tono: { enabled: true, times: ["09:30", "12:00", "14:00"] },
+    review: { enabled: true, times: ["09:30", "12:00", "14:00"] },
   },
 };
 
@@ -102,8 +124,8 @@ const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
     multi: false,
   },
   {
-    key: "tono",
-    name: "Tono reviews",
+    key: "review",
+    name: "Review worker",
     about:
       "Reviews each PR once and posts the review as comments on the PR, as you. If there is nothing to report, it posts LGTM 😃⭐😸. One Slack line says each review is posted. Test prints the comments instead.",
     multi: true,
@@ -123,20 +145,79 @@ const CONNECTION_NAMES: Record<string, string> = {
   claude: "Claude Code",
   jira: "Jira",
   calendar: "Google Calendar",
-  tono: "Tono CLI",
+  reviewer: "Reviewer",
   wake: "Mac wake",
 };
 
-function merge(raw: string): WorkerConfig {
-  const { tonoOwnPRsOnly, ...parsed } = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
+// The flat tono settings worker.json held before 0.5.4. merge() carries them
+// over once, like the worker's Config.migrate, and the next save drops them.
+interface LegacyConfig {
+  tonoPath?: string;
+  tonoMine?: boolean;
+  tonoMineMaxAgeDays?: number;
+  tonoTeamPRs?: boolean;
+  tonoOwnPRsOnly?: boolean;
+  tonoTeam?: string;
+  tonoMaxAgeDays?: number;
+  tonoRepos?: string[];
+}
+
+function migrateReviewer(old: LegacyConfig): ReviewerConfig {
+  const d = DEFAULTS.reviewer;
+  const path = (old.tonoPath ?? "").trim();
+  return {
+    ...d,
+    ...(path ? { source: "local" as const, path } : {}),
+    mine: {
+      enabled: old.tonoMine ?? d.mine.enabled,
+      maxAgeDays: old.tonoMineMaxAgeDays || d.mine.maxAgeDays,
+    },
+    team: {
+      enabled: old.tonoOwnPRsOnly ? false : (old.tonoTeamPRs ?? d.team.enabled),
+      maxAgeDays: old.tonoMaxAgeDays || d.team.maxAgeDays,
+      team: old.tonoTeam || d.team.team,
+      repos: old.tonoRepos ?? [],
+    },
+  };
+}
+
+export function merge(raw: string): WorkerConfig {
+  const {
+    tonoPath,
+    tonoMine,
+    tonoMineMaxAgeDays,
+    tonoTeamPRs,
+    tonoOwnPRsOnly,
+    tonoTeam,
+    tonoMaxAgeDays,
+    tonoRepos,
+    ...parsed
+  } = JSON.parse(raw || "{}") as Partial<WorkerConfig> & LegacyConfig;
+  const r =
+    parsed.reviewer ??
+    migrateReviewer({
+      tonoPath,
+      tonoMine,
+      tonoMineMaxAgeDays,
+      tonoTeamPRs,
+      tonoOwnPRsOnly,
+      tonoTeam,
+      tonoMaxAgeDays,
+      tonoRepos,
+    });
+  const { tono, ...jobs } = parsed.jobs ?? {};
   return {
     ...DEFAULTS,
-    ...(tonoOwnPRsOnly ? { tonoTeamPRs: false } : {}),
     ...parsed,
-    tonoRepos: parsed.tonoRepos ?? [],
+    reviewer: {
+      ...DEFAULTS.reviewer,
+      ...r,
+      mine: { ...DEFAULTS.reviewer.mine, ...r.mine },
+      team: { ...DEFAULTS.reviewer.team, ...r.team, repos: r.team?.repos ?? [] },
+    },
     slack: { ...DEFAULTS.slack, ...parsed.slack },
     focus: { ...DEFAULTS.focus, ...parsed.focus },
-    jobs: { ...DEFAULTS.jobs, ...parsed.jobs },
+    jobs: { ...DEFAULTS.jobs, ...(tono && !jobs.review ? { review: tono } : {}), ...jobs },
   };
 }
 
@@ -289,6 +370,13 @@ export default function WorkerSettings() {
   const setJob = (key: string, job: JobConfig) =>
     save({ ...cfg, jobs: { ...cfg.jobs, [key]: job } });
 
+  // setReviewer changes a text box as you type, and onBlur saves it.
+  // saveReviewer saves at once, for switches and numbers.
+  const setReviewer = (patch: Partial<ReviewerConfig>) =>
+    setCfg({ ...cfg, reviewer: { ...cfg.reviewer, ...patch } });
+  const saveReviewer = (patch: Partial<ReviewerConfig>) =>
+    save({ ...cfg, reviewer: { ...cfg.reviewer, ...patch } });
+
   const handleSwitch = async () => {
     const next = !cfg.enabled;
     setSwitching(true);
@@ -326,7 +414,7 @@ export default function WorkerSettings() {
           text.trim() ||
           (test
             ? "(no output)"
-            : job === "tono"
+            : job === "review"
               ? "Done. The reviews are on the PRs."
               : "Done. Check your Slack DMs."),
       });
@@ -509,11 +597,92 @@ export default function WorkerSettings() {
                 </div>
               )}
 
-              {key === "tono" && (
-                <div className="space-y-2 pt-1">
+              {key === "review" && (
+                <div className="space-y-2.5 pt-1">
+                  <div>
+                    <p className="text-xs text-white/80">Reviewer</p>
+                    <p className="text-[10px] text-tertiary">
+                      The code that does the reviews. Managed: the worker keeps its own clone, so
+                      the branch you have checked out never changes what runs.
+                    </p>
+                  </div>
+                  <div className="flex gap-1.5">
+                    {(["managed", "local"] as const).map((src) => (
+                      <button
+                        key={src}
+                        type="button"
+                        onClick={() => saveReviewer({ source: src })}
+                        className={cn(
+                          "px-2.5 py-1 text-[11px] rounded-md border transition-colors",
+                          cfg.reviewer.source === src
+                            ? "bg-white/[0.08] border-white/[0.12] text-white"
+                            : "border-white/[0.06] text-tertiary hover:text-muted-foreground",
+                        )}
+                      >
+                        {src === "managed" ? "Managed" : "Local path"}
+                      </button>
+                    ))}
+                  </div>
+                  {cfg.reviewer.source === "managed" ? (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
+                        <span>Repo</span>
+                        <input
+                          type="text"
+                          value={cfg.reviewer.repo}
+                          onChange={(e) => setReviewer({ repo: e.target.value })}
+                          onBlur={() => save(cfg)}
+                          placeholder="owner/repo"
+                          className={cn(inputClass, "flex-1 min-w-40 font-mono")}
+                        />
+                        <span>branch</span>
+                        <input
+                          type="text"
+                          value={cfg.reviewer.branch}
+                          onChange={(e) => setReviewer({ branch: e.target.value })}
+                          onBlur={() => save(cfg)}
+                          placeholder="main"
+                          className={cn(inputClass, "w-28 font-mono")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <label htmlFor="reviewer-update" className="text-[10px] text-tertiary">
+                          Update to the newest commit on the branch before each run
+                        </label>
+                        <Toggle
+                          id="reviewer-update"
+                          on={cfg.reviewer.autoUpdate}
+                          onClick={() => saveReviewer({ autoUpdate: !cfg.reviewer.autoUpdate })}
+                        />
+                      </div>
+                      <p className="text-[10px] text-tertiary">
+                        {status?.reviewer?.commit
+                          ? `Last run used ${status.reviewer.commitBranch} @ ${status.reviewer.commit}${
+                              status.reviewer.updated
+                                ? `, updated ${formatWhen(status.reviewer.updated)}`
+                                : ""
+                            }.`
+                          : "Not cloned yet. The next review run clones it."}
+                      </p>
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      value={cfg.reviewer.path}
+                      onChange={(e) => setReviewer({ path: e.target.value })}
+                      onBlur={() => save(cfg)}
+                      placeholder="Path to the reviewer CLI, for example ~/repos/tonometer/tono"
+                      className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
+                    />
+                  )}
+                </div>
+              )}
+
+              {key === "review" && (
+                <div className="space-y-2 pt-3 border-t border-white/[0.05]">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <label htmlFor="tono-mine" className="text-xs text-white/80">
+                      <label htmlFor="review-mine" className="text-xs text-white/80">
                         My PRs
                       </label>
                       <p className="text-[10px] text-tertiary">
@@ -521,22 +690,28 @@ export default function WorkerSettings() {
                       </p>
                     </div>
                     <Toggle
-                      id="tono-mine"
-                      on={cfg.tonoMine}
-                      onClick={() => save({ ...cfg, tonoMine: !cfg.tonoMine })}
+                      id="review-mine"
+                      on={cfg.reviewer.mine.enabled}
+                      onClick={() =>
+                        saveReviewer({
+                          mine: { ...cfg.reviewer.mine, enabled: !cfg.reviewer.mine.enabled },
+                        })
+                      }
                     />
                   </div>
-                  {cfg.tonoMine && (
+                  {cfg.reviewer.mine.enabled && (
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
                       <span>Opened in the last</span>
                       <input
                         type="number"
                         min={1}
-                        value={cfg.tonoMineMaxAgeDays}
+                        value={cfg.reviewer.mine.maxAgeDays}
                         onChange={(e) =>
-                          save({
-                            ...cfg,
-                            tonoMineMaxAgeDays: Number.parseInt(e.target.value, 10) || 0,
+                          saveReviewer({
+                            mine: {
+                              ...cfg.reviewer.mine,
+                              maxAgeDays: Number.parseInt(e.target.value, 10) || 0,
+                            },
                           })
                         }
                         className={cn(inputClass, "w-12 tabular-nums")}
@@ -547,11 +722,11 @@ export default function WorkerSettings() {
                 </div>
               )}
 
-              {key === "tono" && (
+              {key === "review" && (
                 <div className="space-y-2.5 pt-3 border-t border-white/[0.05]">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <label htmlFor="tono-team" className="text-xs text-white/80">
+                      <label htmlFor="review-team" className="text-xs text-white/80">
                         Team PRs
                       </label>
                       <p className="text-[10px] text-tertiary">
@@ -559,19 +734,25 @@ export default function WorkerSettings() {
                       </p>
                     </div>
                     <Toggle
-                      id="tono-team"
-                      on={cfg.tonoTeamPRs}
-                      onClick={() => save({ ...cfg, tonoTeamPRs: !cfg.tonoTeamPRs })}
+                      id="review-team"
+                      on={cfg.reviewer.team.enabled}
+                      onClick={() =>
+                        saveReviewer({
+                          team: { ...cfg.reviewer.team, enabled: !cfg.reviewer.team.enabled },
+                        })
+                      }
                     />
                   </div>
-                  {cfg.tonoTeamPRs && (
+                  {cfg.reviewer.team.enabled && (
                     <>
                       <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
                         <span>Opened by</span>
                         <input
                           type="text"
-                          value={cfg.tonoTeam}
-                          onChange={(e) => setCfg({ ...cfg, tonoTeam: e.target.value })}
+                          value={cfg.reviewer.team.team}
+                          onChange={(e) =>
+                            setReviewer({ team: { ...cfg.reviewer.team, team: e.target.value } })
+                          }
                           onBlur={() => save(cfg)}
                           placeholder="org/team-slug"
                           className={cn(
@@ -583,11 +764,13 @@ export default function WorkerSettings() {
                         <input
                           type="number"
                           min={1}
-                          value={cfg.tonoMaxAgeDays}
+                          value={cfg.reviewer.team.maxAgeDays}
                           onChange={(e) =>
-                            save({
-                              ...cfg,
-                              tonoMaxAgeDays: Number.parseInt(e.target.value, 10) || 0,
+                            saveReviewer({
+                              team: {
+                                ...cfg.reviewer.team,
+                                maxAgeDays: Number.parseInt(e.target.value, 10) || 0,
+                              },
                             })
                           }
                           className={cn(inputClass, "w-12 tabular-nums")}
@@ -595,23 +778,14 @@ export default function WorkerSettings() {
                         <span>days</span>
                       </div>
                       <RepoList
-                        repos={cfg.tonoRepos}
-                        onChange={(tonoRepos) => save({ ...cfg, tonoRepos })}
+                        repos={cfg.reviewer.team.repos}
+                        onChange={(repos) =>
+                          saveReviewer({ team: { ...cfg.reviewer.team, repos } })
+                        }
                       />
                     </>
                   )}
                 </div>
-              )}
-
-              {key === "tono" && (
-                <input
-                  type="text"
-                  value={cfg.tonoPath}
-                  onChange={(e) => setCfg({ ...cfg, tonoPath: e.target.value })}
-                  onBlur={() => save(cfg)}
-                  placeholder="Path to the tono CLI (default: tonometer repo)"
-                  className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
-                />
               )}
 
               <div className="flex items-center justify-between gap-2">

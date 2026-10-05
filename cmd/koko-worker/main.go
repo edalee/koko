@@ -1,5 +1,5 @@
 // koko-worker runs Koko's scheduled work jobs: the stand-up, focus time and
-// tono reviews. launchd keeps `koko-worker serve` running. The Koko app
+// PR reviews. launchd keeps `koko-worker serve` running. The Koko app
 // switches it on and off and calls the other subcommands.
 package main
 
@@ -70,10 +70,10 @@ func usage() {
 	fmt.Fprint(os.Stderr, `Usage:
   koko-worker serve                      run the scheduler (launchd starts this)
   koko-worker run <job> [--test [--date YYYY-MM-DD]] [--pr URL]
-                                         run standup, focus or tono now. --test prints
+                                         run standup, focus or review now. --test prints
                                          instead of sending a DM, and books nothing.
                                          --date runs as if it were 07:00 that day
-  koko-worker check [name]               check connections: slack, github, claude, jira, calendar, tono, wake
+  koko-worker check [name]               check connections: slack, github, claude, jira, calendar, reviewer, wake
   koko-worker status                     JSON status for the Koko app
   koko-worker install [--if-idle]        switch the launchd agent on. --if-idle skips it while a job runs
   koko-worker uninstall                  switch the launchd agent off
@@ -124,7 +124,7 @@ func runJob(ctx context.Context, env Env, job, onlyURL string) error {
 		return runStandup(ctx, env)
 	case JobFocus:
 		return runFocus(ctx, env)
-	case JobTono:
+	case JobReview:
 		return runTono(ctx, env, onlyURL)
 	}
 	return fmt.Errorf("unknown job %q", job)
@@ -137,12 +137,15 @@ func runJob(ctx context.Context, env Env, job, onlyURL string) error {
 func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	test := fs.Bool("test", false, "print instead of DM, book nothing")
-	pr := fs.String("pr", "", "tono only: review this PR URL")
+	pr := fs.String("pr", "", "review only: review this PR URL")
 	date := fs.String("date", "", "with --test: run as if it were 07:00 on this day (YYYY-MM-DD)")
 	if len(args) == 0 {
-		return fmt.Errorf("run needs a job: standup, focus or tono")
+		return fmt.Errorf("run needs a job: standup, focus or review")
 	}
 	job := args[0]
+	if job == legacyJobTono {
+		job = JobReview // the name before 0.5.4
+	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -351,6 +354,15 @@ func cmdStatus(paths Paths) error {
 	if !st.WakeBooked.IsZero() {
 		out["wakeBooked"] = st.WakeBooked
 	}
+	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths)}
+	if cfg.Reviewer.Source == SourceManaged {
+		reviewer["repo"], reviewer["branch"] = cfg.Reviewer.Repo, cfg.Reviewer.Branch
+		if st.ReviewerCommit != "" {
+			reviewer["commit"], reviewer["commitBranch"] = st.ReviewerCommit, st.ReviewerBranch
+			reviewer["updated"] = st.ReviewerUpdated
+		}
+	}
+	out["reviewer"] = reviewer
 	jobs := map[string]jobStatus{}
 	for _, job := range allJobs {
 		jc := cfg.Jobs[job]

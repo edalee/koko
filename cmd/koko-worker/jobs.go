@@ -107,9 +107,9 @@ func runStandup(ctx context.Context, env Env) error {
 		queue, queueErr = reviewQueue(requests, me), meErr
 	}
 	var teamErr error
-	if env.cfg.TonoTeamPRs && len(env.cfg.TonoRepos) > 0 {
+	if env.cfg.Reviewer.Team.Enabled && len(env.cfg.Reviewer.Team.Repos) > 0 {
 		var inRepos []SearchPR
-		inRepos, teamErr = repoPRs(ctx, env.cfg.TonoRepos)
+		inRepos, teamErr = repoPRs(ctx, env.cfg.Reviewer.Team.Repos)
 		if teamErr == nil {
 			team, teamErr = reviewQueue(inRepos, me), meErr
 		}
@@ -252,10 +252,10 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 	case reviewed && r.Failed != "" && len(r.Comments) > 0:
 		// Part of the review reached the PR before posting failed.
 		counts["failed"]++
-		return "tono posted part of its review (" + slackLink(r.Comments[0], "review") + ")"
+		return "the review worker posted part of its review (" + slackLink(r.Comments[0], "review") + ")"
 	case reviewed && r.Failed != "":
 		counts["failed"]++
-		return "tono could not review it"
+		return "the review worker could not review it"
 	case reviewed && len(r.Unposted) > 0:
 		// Not on GitHub yet, so no verdict to show.
 		counts["waiting"]++
@@ -278,7 +278,7 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 		return status
 	case t.scopeErr == nil && t.scope.outside(p) != "":
 		counts["outside"]++
-		return "outside tono's scope: " + t.scope.outside(p)
+		return "outside the review scope: " + t.scope.outside(p)
 	default:
 		counts["waiting"]++
 		return "not reviewed yet"
@@ -288,7 +288,7 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 // summary is the sentence after a section's count: what tono made of the PRs.
 func (t *reviewTally) summary(env Env, counts map[string]int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, " Tono has reviewed %d (code, docs and comments)", counts["reviewed"])
+	fmt.Fprintf(&b, " The review worker has reviewed %d (code, docs and comments)", counts["reviewed"])
 	if counts["reviewed"] > 0 {
 		fmt.Fprintf(&b, ": %d ready to approve, %d with follow-ups, %d not mergeable", counts[verdictReady], counts[verdictFollowUps], counts[verdictNotMergeable])
 		if n := counts[""]; n > 0 {
@@ -305,13 +305,13 @@ func (t *reviewTally) summary(env Env, counts map[string]int) string {
 	if counts["outside"] > 0 {
 		// Only team PRs are counted here, so outside the scope means too old.
 		if counts["outside"] == 1 {
-			fmt.Fprintf(&b, " 1 was opened more than %d days ago, so tono skips it.", env.cfg.TonoMaxAgeDays)
+			fmt.Fprintf(&b, " 1 was opened more than %d days ago, so it is skipped.", env.cfg.Reviewer.Team.MaxAgeDays)
 		} else {
-			fmt.Fprintf(&b, " %d were opened more than %d days ago, so tono skips them.", counts["outside"], env.cfg.TonoMaxAgeDays)
+			fmt.Fprintf(&b, " %d were opened more than %d days ago, so they are skipped.", counts["outside"], env.cfg.Reviewer.Team.MaxAgeDays)
 		}
 	}
 	if t.scopeErr != nil {
-		fmt.Fprintf(&b, " _Could not load tono's scope: %s_", truncate(t.scopeErr.Error(), 150))
+		fmt.Fprintf(&b, " _Could not load the review scope: %s_", truncate(t.scopeErr.Error(), 150))
 	}
 	return b.String()
 }
@@ -355,7 +355,7 @@ func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []Sea
 	if others == 0 {
 		fmt.Fprintf(&b, "%d PRs wait for your review.", len(queue))
 	} else {
-		fmt.Fprintf(&b, "%d PRs wait for your review, %d of them from %s.", len(queue), len(team), env.cfg.TonoTeam)
+		fmt.Fprintf(&b, "%d PRs wait for your review, %d of them from %s.", len(queue), len(team), env.cfg.Reviewer.Team.Team)
 	}
 	if len(team) > 0 {
 		b.WriteString(tally.summary(env, counts))
@@ -374,7 +374,7 @@ func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []Sea
 // review, because "Needs your review" lists those. It is empty if the
 // section is switched off or has no repos.
 func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchPR, prsErr error, queue []SearchPR) string {
-	if !env.cfg.TonoTeamPRs || len(env.cfg.TonoRepos) == 0 {
+	if !env.cfg.Reviewer.Team.Enabled || len(env.cfg.Reviewer.Team.Repos) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -397,10 +397,10 @@ func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchP
 		lines = append(lines, prLine(p, tally.status(ctx, env, p, counts)))
 	}
 	if len(lines) == 0 {
-		fmt.Fprintf(&b, "• None in %s\n", strings.Join(env.cfg.TonoRepos, ", "))
+		fmt.Fprintf(&b, "• None in %s\n", strings.Join(env.cfg.Reviewer.Team.Repos, ", "))
 		return b.String()
 	}
-	fmt.Fprintf(&b, "%d open team PRs in %s.", len(lines), strings.Join(env.cfg.TonoRepos, ", "))
+	fmt.Fprintf(&b, "%d open team PRs in %s.", len(lines), strings.Join(env.cfg.Reviewer.Team.Repos, ", "))
 	b.WriteString(tally.summary(env, counts))
 	b.WriteString("\n\n" + strings.Join(lines, "\n"))
 	return b.String()
@@ -458,7 +458,7 @@ exec claude "$@" --no-session-persistence \
 // cannot catch flags such as gh api -X PATCH.
 const readOnlyGH = `#!/bin/bash
 # koko-worker: read-only gh for tono runs.
-refuse() { echo "koko-worker: gh $* is refused in tono runs (read-only)" >&2; exit 1; }
+refuse() { echo "koko-worker: gh $* is refused in review runs (read-only)" >&2; exit 1; }
 case "$2" in
   create|delete|edit|close|merge|comment|review|ready|reopen|rerun|cancel|lock|unlock|transfer|rename|archive|unarchive|fork|upload|set|remove|add|pin|unpin|develop|enable|disable|run|sync)
     refuse "$@" ;;
@@ -486,7 +486,7 @@ while [ $i -lt ${#args[@]} ]; do
     *) break ;;
   esac
 done
-case "${args[$i]}" in push|send-pack) echo "koko-worker: git push is refused in tono runs" >&2; exit 1 ;; esac
+case "${args[$i]}" in push|send-pack) echo "koko-worker: git push is refused in review runs" >&2; exit 1 ;; esac
 exec %q "$@"
 `
 
@@ -524,13 +524,13 @@ type tonoScope struct {
 }
 
 func loadScope(ctx context.Context, cfg Config, now time.Time) (tonoScope, error) {
-	members, err := teamMembers(ctx, cfg.TonoTeam)
+	members, err := teamMembers(ctx, cfg.Reviewer.Team.Team)
 	if err != nil {
 		return tonoScope{}, err
 	}
 	return tonoScope{
-		team: cfg.TonoTeam, days: cfg.TonoMaxAgeDays, members: members,
-		since: now.AddDate(0, 0, -cfg.TonoMaxAgeDays),
+		team: cfg.Reviewer.Team.Team, days: cfg.Reviewer.Team.MaxAgeDays, members: members,
+		since: now.AddDate(0, 0, -cfg.Reviewer.Team.MaxAgeDays),
 	}, nil
 }
 
@@ -584,12 +584,12 @@ type tonoTarget struct {
 func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 	var out []tonoTarget
 	seen := map[string]bool{}
-	if env.cfg.TonoMine {
+	if env.cfg.Reviewer.Mine.Enabled {
 		mine, err := myOpenPRs(ctx)
 		if err != nil {
 			return nil, err
 		}
-		since := env.now.AddDate(0, 0, -env.cfg.TonoMineMaxAgeDays)
+		since := env.now.AddDate(0, 0, -env.cfg.Reviewer.Mine.MaxAgeDays)
 		for _, p := range mine {
 			created, err := time.Parse(time.RFC3339, p.CreatedAt)
 			old := err != nil || created.Before(since)
@@ -597,14 +597,14 @@ func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 			seen[p.URL] = true
 		}
 	}
-	if !env.cfg.TonoTeamPRs {
+	if !env.cfg.Reviewer.Team.Enabled {
 		return out, nil
 	}
 	requests, err := reviewRequests(ctx)
 	if err != nil {
 		return nil, err
 	}
-	inRepos, err := repoPRs(ctx, env.cfg.TonoRepos)
+	inRepos, err := repoPRs(ctx, env.cfg.Reviewer.Team.Repos)
 	if err != nil {
 		return nil, err
 	}
@@ -626,8 +626,10 @@ func tonoKey(repo string, number int, sha string) string {
 }
 
 func runTono(ctx context.Context, env Env, onlyURL string) error {
-	if _, err := os.Stat(env.cfg.TonoPath); err != nil {
-		return fmt.Errorf("tono: not found at %s", env.cfg.TonoPath)
+	// Before the PR loop, so a reviewer that cannot run marks nothing reviewed.
+	cli, err := prepareReviewer(ctx, env)
+	if err != nil {
+		return err
 	}
 	if err := os.WriteFile(env.paths.TonoWrap, []byte(tonoWrapper), 0o700); err != nil {
 		return err
@@ -645,7 +647,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		return err
 	}
 	var scope tonoScope
-	if env.cfg.TonoTeamPRs {
+	if env.cfg.Reviewer.Team.Enabled {
 		if scope, err = loadScope(ctx, env.cfg, env.now); err != nil {
 			return err
 		}
@@ -681,7 +683,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			return err
 		}
 		key := tonoKey(p.repo(), p.Number, d.HeadRefOid)
-		out, err := tonoReview(ctx, env, p, d.HeadRefOid)
+		out, err := tonoReview(ctx, env, cli, p, d.HeadRefOid)
 		link := slackLink(p.URL, p.short())
 		var skipped tonoSkippedError
 		switch {
@@ -689,7 +691,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			// tono had nothing to review: another run holds the PR, or it just
 			// became closed or a draft. Leave it unmarked. A closed or draft PR
 			// drops out of the next search anyway.
-			log.Printf("tono: %s skipped: %v", p.short(), err)
+			log.Printf("review: %s skipped: %v", p.short(), err)
 			continue
 		case err != nil && !env.online(ctx):
 			// Not marked, so the scheduler's retry reviews it once the
@@ -701,8 +703,8 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			// It leaves an error line, such as "Not logged in" or "API
 			// Error: Can't reach the API server". The PR stays unmarked, so a
 			// later run reviews it.
-			bad := fmt.Errorf("%s: a tono pass broke: %s", p.short(), strings.Join(out.broken, "; "))
-			log.Printf("tono: %v", bad)
+			bad := fmt.Errorf("%s: a review pass broke: %s", p.short(), strings.Join(out.broken, "; "))
+			log.Printf("review: %v", bad)
 			if !env.online(ctx) {
 				netErr = bad
 			} else {
@@ -724,12 +726,12 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			result.LGTM = len(comments) == 1 && strings.HasPrefix(comments[0], lgtmMarker)
 		}
 		if result.Failed != "" {
-			log.Printf("tono: %s failed: %s", p.short(), result.Failed)
+			log.Printf("review: %s failed: %s", p.short(), result.Failed)
 			// Your own PRs get a warning now. A failed review of someone
 			// else's PR shows in the stand-up instead.
 			if t.mine {
 				failures = append(failures, fmt.Sprintf("%s: %s", p.short(), result.Failed))
-				if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not review %s: %s", link, result.Failed)); nerr != nil {
+				if nerr := env.notify(ctx, fmt.Sprintf(":warning: The review worker could not review %s: %s", link, result.Failed)); nerr != nil {
 					return nerr
 				}
 			}
@@ -761,10 +763,10 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	}
 	if len(broken) > 0 {
 		// Not a reportedError: no DM has said so yet, so the scheduler does.
-		return fmt.Errorf("tono: %s", strings.Join(append(broken, failures...), "; "))
+		return fmt.Errorf("review: %s", strings.Join(append(broken, failures...), "; "))
 	}
 	if len(failures) > 0 {
-		return reportedError{fmt.Errorf("tono: %s", strings.Join(failures, "; "))}
+		return reportedError{fmt.Errorf("review: %s", strings.Join(failures, "; "))}
 	}
 	return nil
 }
@@ -801,7 +803,7 @@ func commentsFor(out tonoOutcome, sha string) (comments []string, failed string)
 	if v := overallVerdict(out.verdicts); v == "" || v == verdictReady {
 		return []string{lgtmComment(sha)}, ""
 	}
-	return nil, fmt.Sprintf("tono wrote no PR comment (verdict %q), see %s", overallVerdict(out.verdicts), out.log)
+	return nil, fmt.Sprintf("the reviewer wrote no PR comment (verdict %q), see %s", overallVerdict(out.verdicts), out.log)
 }
 
 // maxPostTries is the failed try that fails the review: the third failed try
@@ -841,7 +843,7 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 		if err == nil && (state != "OPEN" || (head != "" && head != r.SHA)) {
 			r.Failed = fmt.Sprintf("the PR changed before the review was posted (%s at %.7s)", strings.ToLower(state), head)
 			r.Unposted = nil
-			log.Printf("tono: %s#%d: %s", r.Repo, r.Number, r.Failed)
+			log.Printf("review: %s#%d: %s", r.Repo, r.Number, r.Failed)
 			// The review is of an old commit or a closed PR. Forget it, so
 			// an open PR gets a fresh review at its new head.
 			prefix := fmt.Sprintf("%s#%d@", r.Repo, r.Number)
@@ -857,7 +859,7 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 			if len(r.Comments) > 0 {
 				// Part of the review is already on the PR, and its marker
 				// blocks a fresh review. Only a "Run now" with the URL gets one.
-				return "", env.notify(ctx, fmt.Sprintf(":warning: Tono posted part of its review of %s, then the PR changed (%s). To review it again, use Run now with its URL.", link, r.Failed))
+				return "", env.notify(ctx, fmt.Sprintf(":warning: The review worker posted part of its review of %s, then the PR changed (%s). To review it again, use Run now with its URL.", link, r.Failed))
 			}
 			return "", nil
 		}
@@ -873,7 +875,7 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 				return "", offlineError{err}
 			}
 			r.PostTries++
-			log.Printf("tono: posting on %s#%d (try %d): %v", r.Repo, r.Number, r.PostTries, err)
+			log.Printf("review: posting on %s#%d (try %d): %v", r.Repo, r.Number, r.PostTries, err)
 			permanent := refusedForGood(err)
 			if r.PostTries < maxPostTries && !permanent {
 				return "", save(nil)
@@ -887,7 +889,7 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 			if permanent {
 				why = "because GitHub refuses comments on it"
 			}
-			if nerr := env.notify(ctx, fmt.Sprintf(":warning: Tono could not post its review of %s %s: %s", link, why, r.Failed)); nerr != nil {
+			if nerr := env.notify(ctx, fmt.Sprintf(":warning: The review worker could not post its review of %s %s: %s", link, why, r.Failed)); nerr != nil {
 				return "", nerr
 			}
 			return r.Failed, nil
@@ -904,7 +906,7 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 	// itself never goes to Slack.
 	if len(r.Comments) > 0 && r.Failed == "" && !r.Pinged {
 		if err := env.notify(ctx, reviewPing(r)); err != nil {
-			log.Printf("tono: Slack line for %s#%d: %v", r.Repo, r.Number, err)
+			log.Printf("review: Slack line for %s#%d: %v", r.Repo, r.Number, err)
 			return "", nil // the review is posted, so this is not worth a retry
 		}
 		r.Pinged = true
@@ -933,7 +935,7 @@ func reviewPing(r TonoResult) string {
 		verdict = "LGTM"
 	}
 	pr := slackLink(r.URL, fmt.Sprintf("%s#%d", shortRepo(r.Repo), r.Number))
-	return fmt.Sprintf("Tono reviewed %s %s: %s (%s)", pr, r.Title, verdict, slackLink(r.Comments[0], "review"))
+	return fmt.Sprintf("Review worker reviewed %s %s: %s (%s)", pr, r.Title, verdict, slackLink(r.Comments[0], "review"))
 }
 
 // postUnposted posts the comments earlier runs left unposted. It returns the
@@ -1055,7 +1057,7 @@ type reportedError struct{ error }
 // tonoReview runs the tono CLI at the PR head in a cache clone. It never
 // touches your working clones. One review per cache clone at a time, so a
 // "Run now" cannot check out another PR under a review in progress.
-func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (tonoOutcome, error) {
+func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA string) (tonoOutcome, error) {
 	dir := filepath.Join(env.paths.Cache, strings.ReplaceAll(p.repo(), "/", "__"))
 	if err := os.MkdirAll(env.paths.Cache, 0o700); err != nil {
 		return tonoOutcome{}, err
@@ -1085,7 +1087,7 @@ func tonoReview(ctx context.Context, env Env, p SearchPR, headSHA string) (tonoO
 
 	ctx, cancel := context.WithTimeout(ctx, tonoTimeout)
 	defer cancel()
-	cmd := groupCommand(ctx, env.cfg.TonoPath, fmt.Sprint(p.Number), "--all", "-l", "high", "-R", p.repo())
+	cmd := groupCommand(ctx, cli, fmt.Sprint(p.Number), "--all", "-l", "high", "-R", p.repo())
 	cmd.Dir = dir
 	shims, err := readOnlyShims(filepath.Join(env.paths.Dir, "tono-bin"))
 	if err != nil {
@@ -1284,7 +1286,7 @@ const lgtmMarker = "<!-- tono:lgtm"
 // tono marker makes hasTonoComment true, so later runs skip the PR.
 func lgtmComment(sha string) string {
 	short := sha[:min(7, len(sha))]
-	return fmt.Sprintf("%s sha=%s -->\nLGTM 😃⭐😸\n\n<sub>tono review of the code, docs and code comments at `%s`, run with Claude</sub>", lgtmMarker, short, short)
+	return fmt.Sprintf("%s sha=%s -->\nLGTM 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", lgtmMarker, short, short)
 }
 
 // tonoLockKey is tono's name for one review target: "owner/repo|n" with every

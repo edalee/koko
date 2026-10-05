@@ -272,6 +272,11 @@ Done on 5 Oct:
 - Every PR search passes `--archived=false`.
 - A post GitHub refuses for good (an archived repo, a locked PR) fails at once, with one DM.
 - `install` waits for the old agent to unload before starting the new one (0.5.2).
+- The reviewer ran from your own tonometer checkout, which was on a feature branch 4 commits behind `main`. Now:
+  - The job is the review worker, `review`. Settings, Slack, the stand-up and logs say so. `run tono` is an alias, and `install --if-idle` still checks the old `tono.lock`.
+  - worker.json has a `reviewer` section. `source` is `managed` (a worker-owned clone of `repo` at `branch`, under `~/.cache/koko-worker/reviewer`) or `local` (`path`). `autoUpdate` fetches the branch before each scheduled run or Run now. A failed fetch runs the last good copy, and a test run never updates. `mine` and `team` each have `enabled` and `maxAgeDays`, and `team` has `team` and `repos`.
+  - The old flat `tono*` keys and `jobs.tono` are carried over on load, by the worker and the UI alike. An empty `tonoPath` becomes a managed reviewer. State keys `tono@…` become `review@…`, so run history stays.
+  - The state records the reviewer commit each run used. `status` and the card show it, and `check reviewer` reports it.
 
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.

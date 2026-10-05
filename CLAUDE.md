@@ -16,7 +16,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **Remote API** — HTTP/WebSocket on localhost:19876 with Bearer auth
 - **MCP server** — JSON-RPC 2.0 over stdio, 8 tools (launched via `koko mcp`)
 - **CLI companion** — `koko-cli` (cmd/koko-cli/)
-- **koko-worker**: scheduled work jobs (stand-up, focus time, tono reviews) in `cmd/koko-worker/`. It is its own Go module and binary, run by a launchd agent (`com.koko.worker`), so jobs run with Koko closed. The app controls it only through `worker.json` and the binary's subcommands. macOS only.
+- **koko-worker**: scheduled work jobs (stand-up, focus time, PR reviews by the review worker) in `cmd/koko-worker/`. It is its own Go module and binary, run by a launchd agent (`com.koko.worker`), so jobs run with Koko closed. The app controls it only through `worker.json` and the binary's subcommands. macOS only.
 
 ## Key Dependencies
 **Go:**
