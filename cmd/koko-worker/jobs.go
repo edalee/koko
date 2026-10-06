@@ -285,7 +285,7 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 	}
 }
 
-// summary is the sentence after a section's count: what tono made of the PRs.
+// summary is the sentence after a section's count: what the review worker made of the PRs.
 func (t *reviewTally) summary(env Env, counts map[string]int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, " The review worker has reviewed %d (code, docs and comments)", counts["reviewed"])
@@ -370,7 +370,7 @@ func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []Sea
 }
 
 // teamSection is the stand-up's "Team PRs" section: the team's open PRs in
-// TonoRepos. It skips PRs outside tono's scope, and PRs that ask for your
+// Reviewer.Team.Repos. It skips PRs outside the review scope, and PRs that ask for your
 // review, because "Needs your review" lists those. It is empty if the
 // section is switched off or has no repos.
 func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchPR, prsErr error, queue []SearchPR) string {
@@ -457,7 +457,7 @@ exec claude "$@" --no-session-persistence \
 // the real gh. The deny list alone matches only command prefixes, so it
 // cannot catch flags such as gh api -X PATCH.
 const readOnlyGH = `#!/bin/bash
-# koko-worker: read-only gh for tono runs.
+# koko-worker: read-only gh for review runs.
 refuse() { echo "koko-worker: gh $* is refused in review runs (read-only)" >&2; exit 1; }
 case "$2" in
   create|delete|edit|close|merge|comment|review|ready|reopen|rerun|cancel|lock|unlock|transfer|rename|archive|unarchive|fork|upload|set|remove|add|pin|unpin|develop|enable|disable|run|sync)
@@ -477,7 +477,7 @@ exec %q "$@"
 // readOnlyGit stands in for git on tono's PATH. It refuses push, wherever the
 // subcommand sits (git -C . push), and passes everything else to the real git.
 const readOnlyGit = `#!/bin/bash
-# koko-worker: git without push for tono runs.
+# koko-worker: git without push for review runs.
 args=("$@"); i=0
 while [ $i -lt ${#args[@]} ]; do
   case "${args[$i]}" in
@@ -514,8 +514,8 @@ func readOnlyShims(dir string) (string, error) {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// tonoScope is which PRs tono may review: opened by a member of the team, in
-// the last TonoMaxAgeDays days.
+// tonoScope is which team PRs the review worker may review: opened by a member of the team, in
+// the last Reviewer.Team.MaxAgeDays days.
 type tonoScope struct {
 	team    string
 	days    int
@@ -574,13 +574,13 @@ func reviewedBefore(st *State, repo string, number int) bool {
 type tonoTarget struct {
 	pr     SearchPR
 	mine   bool
-	tooOld bool // your PR, opened more than TonoMineMaxAgeDays ago
+	tooOld bool // your PR, opened more than Reviewer.Mine.MaxAgeDays ago
 }
 
-// tonoTargets is your open PRs if TonoMine is set. If TonoTeamPRs is set,
-// the PRs waiting for your review follow, then the open PRs in TonoRepos.
+// tonoTargets is your open PRs if Reviewer.Mine is on. If Reviewer.Team is on,
+// the PRs waiting for your review follow, then the open PRs in Reviewer.Team.Repos.
 // Others' PRs are people's, not bots', and runTono checks them against the team scope.
-// Your PRs opened more than TonoMineMaxAgeDays ago are marked tooOld.
+// Your PRs opened more than Reviewer.Mine.MaxAgeDays ago are marked tooOld.
 func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 	var out []tonoTarget
 	seen := map[string]bool{}
@@ -1054,7 +1054,7 @@ const tonoTimeout = 45 * time.Minute
 // logs it without a second DM.
 type reportedError struct{ error }
 
-// tonoReview runs the tono CLI at the PR head in a cache clone. It never
+// tonoReview runs the reviewer CLI, cli, at the PR head in a cache clone. It never
 // touches your working clones. One review per cache clone at a time, so a
 // "Run now" cannot check out another PR under a review in progress.
 func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA string) (tonoOutcome, error) {

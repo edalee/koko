@@ -90,8 +90,8 @@ func TestReviewerValidation(t *testing.T) {
 		team := cfg.Reviewer.Team
 		cfg.Reviewer = bad
 		cfg.Reviewer.Team = team
-		if cfg.validate() == nil {
-			t.Errorf("want an error for %+v", bad)
+		if cfg.Reviewer.problem() == nil || cfg.validate() != nil {
+			t.Errorf("want a reviewer problem, and a valid config, for %+v", bad)
 		}
 	}
 }

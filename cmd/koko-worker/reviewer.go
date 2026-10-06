@@ -13,24 +13,25 @@ import (
 
 // prepareReviewer makes the reviewer CLI ready and returns its path.
 //
-// A local reviewer runs as it is. A missing path fails only the review job,
-// so the stand-up and focus time keep running.
+// Bad reviewer settings fail only the review job, so the stand-up and focus
+// time keep running. A local reviewer runs as it is.
 //
 // A managed reviewer is the worker's own clone of Reviewer.Repo, so the
 // branch you have checked out in your own clone never changes what reviews
-// run. The first run clones it, and a clone of another repo is replaced, so
-// a repo changed in Settings takes effect. A scheduled run or Run now then
-// moves it to the newest commit on Reviewer.Branch, with AutoUpdate on or when
-// the branch changed. A failed fetch keeps the last good copy. A test run
-// never updates, because a test has no job lock and a scheduled review may be
-// running from the same clone.
+// run. A scheduled run or Run now clones it the first time, and replaces a
+// clone of another repo, so a repo changed in Settings takes effect. It then
+// moves the clone to the newest commit on Reviewer.Branch, with AutoUpdate on
+// or when the branch changed. A failed fetch keeps the last good copy.
+//
+// A test run never clones, replaces or updates the clone. It takes no job
+// lock, so a scheduled review may be reading from the clone at the time.
 func prepareReviewer(ctx context.Context, env Env) (string, error) {
 	r := env.cfg.Reviewer
+	if err := r.problem(); err != nil {
+		return "", fmt.Errorf("review: %w. Fix it in Settings > Worker > Review worker", err)
+	}
 	cli := env.cfg.reviewerCLI(env.paths)
 	if r.Source == SourceLocal {
-		if r.Path == "" {
-			return "", fmt.Errorf("review: the reviewer source is a local path, but no path is set in Settings")
-		}
 		if !executable(cli) {
 			return "", fmt.Errorf("review: no reviewer CLI at %s", cli)
 		}
@@ -38,13 +39,31 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 	}
 
 	dir := env.paths.Reviewer
+	_, statErr := os.Stat(filepath.Join(dir, ".git"))
+	cloned := statErr == nil
+	sameRepo := false
+	if cloned {
+		origin, err := gitOut(ctx, dir, "remote", "get-url", "origin")
+		sameRepo = err == nil && originIs(origin, r.Repo)
+	}
+	if env.test {
+		switch {
+		case !cloned:
+			return "", fmt.Errorf("review: the reviewer %s is not cloned yet. A scheduled run or Run now clones it, and a test does not", r.Repo)
+		case !sameRepo:
+			return "", fmt.Errorf("review: the reviewer clone is not of %s. A scheduled run or Run now replaces it, and a test does not", r.Repo)
+		}
+		if !executable(cli) {
+			return "", fmt.Errorf("review: no reviewer CLI at %s in the %s clone", r.Script, r.Repo)
+		}
+		return cli, nil
+	}
+
 	fresh := false
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		if origin, err := gitOut(ctx, dir, "remote", "get-url", "origin"); err != nil || !originIs(origin, r.Repo) {
-			log.Printf("review: the reviewer clone is not of %s. Cloning it again", r.Repo)
-			if err := os.RemoveAll(dir); err != nil {
-				return "", err
-			}
+	if cloned && !sameRepo {
+		log.Printf("review: the reviewer clone is not of %s. Cloning it again", r.Repo)
+		if err := os.RemoveAll(dir); err != nil {
+			return "", err
 		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
@@ -60,7 +79,7 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 			return "", err
 		}
 		branch = r.Branch
-	case !env.test && (r.AutoUpdate || branch != r.Branch):
+	case r.AutoUpdate || branch != r.Branch:
 		if err := checkoutBranch(ctx, dir, r.Branch); err != nil {
 			// Offline, or the branch is gone: review with what is there.
 			log.Printf("review: updating the reviewer: %v. Using the last good copy", err)

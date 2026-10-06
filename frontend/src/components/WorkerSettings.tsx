@@ -676,7 +676,7 @@ export default function WorkerSettings() {
                       type="text"
                       value={cfg.reviewer.path}
                       onChange={(e) => setReviewer({ path: e.target.value })}
-                      onBlur={() => save(cfg)}
+                      onBlur={() => cfg.reviewer.path.trim() && save(cfg)}
                       placeholder="Path to the reviewer CLI, for example ~/repos/tonometer/tono"
                       className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
                     />

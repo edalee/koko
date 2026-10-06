@@ -74,6 +74,14 @@ func TestPrepareReviewer(t *testing.T) {
 	ctx := context.Background()
 	head := func() string { return gitRun(t, filepath.Join(root, "clone"), "rev-parse", "--short", "HEAD") }
 
+	// A test run never clones.
+	if _, err := prepareReviewer(ctx, newEnv(true)); err == nil || !strings.Contains(err.Error(), "not cloned yet") {
+		t.Errorf("a test run before the first clone: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "clone")); !os.IsNotExist(err) {
+		t.Error("a test run must not create the clone")
+	}
+
 	// The first run clones and checks out main.
 	cli, err := prepareReviewer(ctx, newEnv(false))
 	if err != nil || cli != filepath.Join(root, "clone", "tono") || st.ReviewerBranch != "main" || st.ReviewerCommit != head() {
@@ -102,8 +110,15 @@ func TestPrepareReviewer(t *testing.T) {
 		t.Errorf("branch change: err %v, branch %s, head %s", err, st.ReviewerBranch, head())
 	}
 
-	// A repo change replaces the clone.
+	// After a repo change, a test run leaves the clone alone, and a real run
+	// replaces it.
 	cfg.Reviewer.Repo, cfg.Reviewer.Branch = "o/other", "main"
+	if _, err := prepareReviewer(ctx, newEnv(true)); err == nil || !strings.Contains(err.Error(), "not of o/other") {
+		t.Errorf("a test run after a repo change: %v", err)
+	}
+	if origin := gitRun(t, filepath.Join(root, "clone"), "remote", "get-url", "origin"); originIs(origin, "o/other") {
+		t.Error("a test run must not replace the clone")
+	}
 	if _, err := prepareReviewer(ctx, newEnv(false)); err != nil {
 		t.Fatal(err)
 	}

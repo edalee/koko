@@ -970,13 +970,13 @@ func TestTonoScopeConfig(t *testing.T) {
 		t.Errorf("my PRs and team PRs should default on: %v, %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
 	}
 	cfg.Reviewer.Team.Team = "content-protection"
-	if cfg.validate() == nil {
+	if cfg.Reviewer.problem() == nil {
 		t.Error("want an error for a team without its org")
 	}
 	cfg = defaultConfig()
 	for _, bad := range []string{"kalimba", "epidemicsound/", "a/b/c"} {
 		cfg.Reviewer.Team.Repos = []string{bad}
-		if cfg.validate() == nil {
+		if cfg.Reviewer.problem() == nil {
 			t.Errorf("want an error for repo %q", bad)
 		}
 	}

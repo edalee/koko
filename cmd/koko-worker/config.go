@@ -175,7 +175,7 @@ func (c *Config) migrate(data []byte) {
 	delete(c.Jobs, legacyJobTono)
 }
 
-// Paths the worker uses. All but Cache sit under ~/Library/Application
+// Paths the worker uses. All but Cache and Reviewer sit under ~/Library/Application
 // Support/koko, next to Koko's own files.
 type Paths struct {
 	Config   string // worker.json
@@ -320,7 +320,19 @@ func (c Config) validate() error {
 			}
 		}
 	}
-	r := c.Reviewer
+	// The reviewer settings are checked by the review job (problem), not here:
+	// a typo in them must not stop the stand-up and focus time.
+	for _, t := range []string{c.Focus.WindowStart, c.Focus.WindowEnd} {
+		if _, _, err := parseClock(t); err != nil {
+			return fmt.Errorf("focus window: %w", err)
+		}
+	}
+	return nil
+}
+
+// problem is what is wrong with the reviewer settings, or nil. Only the
+// review job and `check reviewer` fail on it.
+func (r ReviewerConfig) problem() error {
 	switch r.Source {
 	case SourceManaged:
 		if !ownerRepo(r.Repo) {
@@ -330,8 +342,9 @@ func (c Config) validate() error {
 			return fmt.Errorf("reviewer script %q, want a path inside the clone", r.Script)
 		}
 	case SourceLocal:
-		// A missing path fails only the review job, in prepareReviewer. Here
-		// it would stop every job.
+		if r.Path == "" {
+			return fmt.Errorf("the reviewer source is a local path, but no path is set")
+		}
 	default:
 		return fmt.Errorf("reviewer source %q, want %s or %s", r.Source, SourceManaged, SourceLocal)
 	}
@@ -341,11 +354,6 @@ func (c Config) validate() error {
 	for _, repo := range r.Team.Repos {
 		if !ownerRepo(repo) {
 			return fmt.Errorf("review repo %q, want owner/repo", repo)
-		}
-	}
-	for _, t := range []string{c.Focus.WindowStart, c.Focus.WindowEnd} {
-		if _, _, err := parseClock(t); err != nil {
-			return fmt.Errorf("focus window: %w", err)
 		}
 	}
 	return nil

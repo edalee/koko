@@ -54,7 +54,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `types.go` — Shared Go types with JSON tags
 - `worker_service.go`: Wails-bound bridge to koko-worker. It edits `worker.json` and calls the binary. Methods pass JSON strings, so `models.ts` stays unchanged.
 - `cmd/koko-cli/` — CLI companion
-- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`
+- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `jira.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`, `reviewer.go` (the managed reviewer clone)
 - `frontend/src/` — React app
   - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, WorktreesModule, WorktreeRemovalDialog, etc.
   - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.

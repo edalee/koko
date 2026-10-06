@@ -98,6 +98,9 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		cli := cfg.reviewerCLI(workerPaths())
 		_, cloneErr := os.Stat(filepath.Join(workerPaths().Reviewer, ".git"))
 		switch {
+		case rv.problem() != nil:
+			r.Detail = rv.problem().Error()
+			r.Fix = "Fix the reviewer settings in Settings > Worker > Review worker."
 		case rv.Source == SourceLocal:
 			r.OK, r.Detail = rv.Path != "" && executable(cli), "local reviewer at "+cli
 			if !r.OK {
