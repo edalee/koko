@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -18,7 +19,7 @@ type CheckResult struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
-var checkNames = []string{"slack", "github", "claude", "jira", "calendar", "tono", "wake"}
+var checkNames = []string{"slack", "github", "claude", "jira", "calendar", "reviewer", "wake"}
 
 // cmdCheck prints the checks as JSON. It exits 0 even when a check fails,
 // because a failed check is a result, not an error.
@@ -92,13 +93,34 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 			r.Fix = "Reconnect Google Calendar in claude.ai under Settings, Connectors, and allow calendar access on Google's consent screen."
 		}
 
-	case "tono":
-		info, err := os.Stat(cfg.TonoPath)
-		r.OK = err == nil && info.Mode()&0o111 != 0
-		r.Detail = cfg.TonoPath
-		if !r.OK {
-			r.Detail = "no tono CLI at " + cfg.TonoPath
-			r.Fix = "Set the tono path to the tonometer repo's `tono` script."
+	case "reviewer", legacyJobTono:
+		rv := cfg.Reviewer
+		cli := cfg.reviewerCLI(workerPaths())
+		_, cloneErr := os.Stat(filepath.Join(workerPaths().Reviewer, ".git"))
+		switch {
+		case rv.problem() != nil:
+			r.Detail = rv.problem().Error()
+			r.Fix = "Fix the reviewer settings in Settings > Worker > Review worker."
+		case rv.Source == SourceLocal:
+			r.OK, r.Detail = rv.Path != "" && executable(cli), "local reviewer at "+cli
+			if !r.OK {
+				r.Detail = "no reviewer CLI at " + cli
+				if rv.Path == "" {
+					r.Detail = "the reviewer source is a local path, but no path is set"
+				}
+				r.Fix = "Set the reviewer path to an executable, or switch the source to managed."
+			}
+		case os.IsNotExist(cloneErr):
+			// Not a failure: the first review run clones it.
+			r.OK = true
+			r.Detail = fmt.Sprintf("managed %s at %s, not cloned yet. The next review run clones it", rv.Repo, rv.Branch)
+		case !executable(cli):
+			r.Detail = fmt.Sprintf("the %s clone has no reviewer CLI at %s", rv.Repo, rv.Script)
+			r.Fix = "Check the reviewer repo and branch in Settings. The script must be at that path in the repo."
+		default:
+			st := loadState(workerPaths().State)
+			r.OK = true
+			r.Detail = fmt.Sprintf("managed %s at %s, commit %s", rv.Repo, rv.Branch, st.ReviewerCommit)
 		}
 
 	case "wake":

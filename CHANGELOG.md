@@ -4,6 +4,13 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+- **Reviewer setting**: Settings > Worker > Review worker picks where the reviewer code comes from. "Managed", the default, keeps the worker's own clone of `epidemicsound/tonometer` and moves it to the newest commit on `main` before each run. If a fetch fails, the last good copy runs. "Local path" runs a CLI you point at. The card shows which commit the last run used. Your own tonometer checkout no longer decides which code reviews your PRs
+
+### Changed
+- **Review worker**: the tono job is now called the review worker, `review`, in Settings, Slack, the stand-up and the logs. `koko-worker run tono` still works
+- **Reviewer config**: worker.json keeps the review settings in one `reviewer` section: the source, and the My PRs and Team PRs scopes, each with an age limit. A worker.json from before is carried over on load, values included
+
 ## [0.5.3] - 2026-10-05
 
 ### Changed

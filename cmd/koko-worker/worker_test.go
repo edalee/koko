@@ -151,7 +151,7 @@ func TestDueRuns(t *testing.T) {
 	})
 	t.Run("lid opened at 13:00 catches up once per job", func(t *testing.T) {
 		got := dueString(dueRuns(cfg, empty, monday(13, 0)))
-		if got != "standup[07:00] focus[09:15] tono[09:30,12:00]" {
+		if got != "standup[07:00] focus[09:15] review[09:30,12:00]" {
 			t.Errorf("got %q", got)
 		}
 	})
@@ -187,7 +187,7 @@ func TestDueRuns(t *testing.T) {
 	})
 	t.Run("job switched off", func(t *testing.T) {
 		c := testConfig()
-		c.Jobs[JobTono] = JobConfig{Enabled: false, Times: []string{"09:30"}}
+		c.Jobs[JobReview] = JobConfig{Enabled: false, Times: []string{"09:30"}}
 		st := readyState(c)
 		if got := dueString(dueRuns(c, st, monday(9, 40))); got != "standup[07:00] focus[09:15]" {
 			t.Errorf("got %q", got)
@@ -337,7 +337,7 @@ func TestConfigValidate(t *testing.T) {
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("defaults invalid: %v", err)
 	}
-	cfg.Jobs[JobTono] = JobConfig{Enabled: true, Times: []string{"9.30"}}
+	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"9.30"}}
 	if err := cfg.validate(); err == nil {
 		t.Error("want an error for a bad time")
 	}
@@ -366,7 +366,7 @@ func TestManualSlots(t *testing.T) {
 		t.Errorf("stand-up: got %v", got)
 	}
 	// Tono run by hand at 12:05 covers 09:30 and 12:00, not 14:00.
-	got := manualSlots(cfg, JobTono, monday(12, 5))
+	got := manualSlots(cfg, JobReview, monday(12, 5))
 	if len(got) != 2 || got[1].Format("15:04") != "12:00" {
 		t.Errorf("tono: got %v", got)
 	}
@@ -433,11 +433,11 @@ func TestLoadConfigKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	def := defaultConfig()
-	if cfg.TonoPath != def.TonoPath || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
+	if cfg.Reviewer.Source != SourceManaged || cfg.Reviewer.Repo != def.Reviewer.Repo || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
 		t.Errorf("empty values not defaulted: %+v", cfg)
 	}
-	if got := strings.Join(cfg.Jobs[JobTono].Times, ","); got != "09:30,12:00,14:00" {
-		t.Errorf("tono times = %q", got)
+	if got := strings.Join(cfg.Jobs[JobReview].Times, ","); got != "09:30,12:00,14:00" {
+		t.Errorf("review times = %q", got)
 	}
 	if cfg.Jobs[JobFocus].Enabled || strings.Join(cfg.Jobs[JobFocus].Times, ",") != "09:15" {
 		t.Errorf("focus = %+v", cfg.Jobs[JobFocus])
@@ -495,9 +495,9 @@ func TestTimeMovedEarlierWaitsForTomorrow(t *testing.T) {
 
 func TestJobSwitchedOnLateWaitsForTomorrow(t *testing.T) {
 	cfg := testConfig()
-	cfg.Jobs[JobTono] = JobConfig{Enabled: false, Times: []string{"09:30"}}
+	cfg.Jobs[JobReview] = JobConfig{Enabled: false, Times: []string{"09:30"}}
 	st := readyState(cfg)
-	cfg.Jobs[JobTono] = JobConfig{Enabled: true, Times: []string{"09:30"}}
+	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}}
 	syncTimes(cfg, &st, monday(10, 0))
 	if got := dueString(dueRuns(cfg, st, monday(10, 0))); strings.Contains(got, "tono") {
 		t.Errorf("tono ran straight after being switched on: %q", got)
@@ -801,19 +801,6 @@ func TestPostRefusedForGood(t *testing.T) {
 	}
 }
 
-func TestTonoMineAgeDefault(t *testing.T) {
-	if got := defaultConfig().TonoMineMaxAgeDays; got != 14 {
-		t.Errorf("default %d, want 14", got)
-	}
-	path := t.TempDir() + "/worker.json"
-	if err := os.WriteFile(path, []byte(`{"tonoMineMaxAgeDays": 0}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if cfg, err := loadConfig(path); err != nil || cfg.TonoMineMaxAgeDays != 14 {
-		t.Errorf("empty value: %d, %v", cfg.TonoMineMaxAgeDays, err)
-	}
-}
-
 func TestReviewPingOnce(t *testing.T) {
 	const key = "o/r#1@abc"
 	ctx := context.Background()
@@ -823,7 +810,7 @@ func TestReviewPingOnce(t *testing.T) {
 	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
-	want := "Tono reviewed <https://github.com/o/r/pull/1|r#1> Fix it: mergeable with follow-ups (<https://github.com/o/r/pull/1#a|review>)"
+	want := "Review worker reviewed <https://github.com/o/r/pull/1|r#1> Fix it: mergeable with follow-ups (<https://github.com/o/r/pull/1#a|review>)"
 	if len(f.dms) != 1 || f.dms[0] != want || !f.st.TonoResults[key].Pinged {
 		t.Fatalf("dms %q, pinged %v", f.dms, f.st.TonoResults[key].Pinged)
 	}
@@ -850,7 +837,7 @@ func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
 	cfg := defaultConfig()
 	env := Env{cfg: cfg, now: now, state: &State{}}
 	tally := &reviewTally{loaded: true, scope: tonoScope{
-		team: cfg.TonoTeam, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
+		team: cfg.Reviewer.Team.Team, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
 	}}
 	queue := []SearchPR{pr(1, "alice"), pr(2, "bob"), pr(3, "carol")}
 	got := reviewSection(context.Background(), env, tally, queue, nil)
@@ -880,7 +867,7 @@ func TestStandupStatusForPostingStates(t *testing.T) {
 	}
 	partial := base
 	partial.Failed, partial.Comments = "could not post the review: boom", []string{"https://github.com/o/r/pull/1#c1"}
-	if s, _ := status(partial); !strings.HasPrefix(s, "tono posted part of its review") {
+	if s, _ := status(partial); !strings.HasPrefix(s, "the review worker posted part of its review") {
 		t.Errorf("partial: %q", s)
 	}
 }
@@ -976,20 +963,20 @@ func TestOneReviewPerPR(t *testing.T) {
 
 func TestTonoScopeConfig(t *testing.T) {
 	cfg := defaultConfig()
-	if cfg.TonoTeam != "epidemicsound/content-protection" || cfg.TonoMaxAgeDays != 4 {
-		t.Errorf("defaults: %q, %d", cfg.TonoTeam, cfg.TonoMaxAgeDays)
+	if cfg.Reviewer.Team.Team != "epidemicsound/content-protection" || cfg.Reviewer.Team.MaxAgeDays != 4 {
+		t.Errorf("defaults: %q, %d", cfg.Reviewer.Team.Team, cfg.Reviewer.Team.MaxAgeDays)
 	}
-	if !cfg.TonoMine || !cfg.TonoTeamPRs {
-		t.Errorf("my PRs and team PRs should default on: %v, %v", cfg.TonoMine, cfg.TonoTeamPRs)
+	if !cfg.Reviewer.Mine.Enabled || !cfg.Reviewer.Team.Enabled {
+		t.Errorf("my PRs and team PRs should default on: %v, %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
 	}
-	cfg.TonoTeam = "content-protection"
-	if cfg.validate() == nil {
+	cfg.Reviewer.Team.Team = "content-protection"
+	if cfg.Reviewer.problem() == nil {
 		t.Error("want an error for a team without its org")
 	}
 	cfg = defaultConfig()
 	for _, bad := range []string{"kalimba", "epidemicsound/", "a/b/c"} {
-		cfg.TonoRepos = []string{bad}
-		if cfg.validate() == nil {
+		cfg.Reviewer.Team.Repos = []string{bad}
+		if cfg.Reviewer.problem() == nil {
 			t.Errorf("want an error for repo %q", bad)
 		}
 	}
@@ -1009,16 +996,16 @@ func TestLoadConfigTonoPRs(t *testing.T) {
 		return cfg
 	}
 	// A config from before the split keeps both kinds on.
-	if cfg := load(`{"tonoTeam": "epidemicsound/content-protection"}`); !cfg.TonoMine || !cfg.TonoTeamPRs {
+	if cfg := load(`{"tonoTeam": "epidemicsound/content-protection"}`); !cfg.Reviewer.Mine.Enabled || !cfg.Reviewer.Team.Enabled {
 		t.Errorf("old config: %+v", cfg)
 	}
 	// The old "own PRs only" switch turns team PRs off.
-	if cfg := load(`{"tonoOwnPRsOnly": true}`); !cfg.TonoMine || cfg.TonoTeamPRs {
-		t.Errorf("tonoOwnPRsOnly: mine %v, team %v", cfg.TonoMine, cfg.TonoTeamPRs)
+	if cfg := load(`{"tonoOwnPRsOnly": true}`); !cfg.Reviewer.Mine.Enabled || cfg.Reviewer.Team.Enabled {
+		t.Errorf("tonoOwnPRsOnly: mine %v, team %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
 	}
 	cfg := load(`{"tonoMine": false, "tonoRepos": [" epidemicsound/kalimba ", ""]}`)
-	if cfg.TonoMine || strings.Join(cfg.TonoRepos, ",") != "epidemicsound/kalimba" {
-		t.Errorf("mine %v, repos %q", cfg.TonoMine, cfg.TonoRepos)
+	if cfg.Reviewer.Mine.Enabled || strings.Join(cfg.Reviewer.Team.Repos, ",") != "epidemicsound/kalimba" {
+		t.Errorf("mine %v, repos %q", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Repos)
 	}
 }
 
@@ -1031,10 +1018,10 @@ func TestTeamSection(t *testing.T) {
 	}
 	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
 	cfg := defaultConfig()
-	cfg.TonoRepos = []string{"epidemicsound/kalimba"}
+	cfg.Reviewer.Team.Repos = []string{"epidemicsound/kalimba"}
 	env := Env{cfg: cfg, now: now, state: &State{}}
 	tally := &reviewTally{loaded: true, scope: tonoScope{
-		team: cfg.TonoTeam, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
+		team: cfg.Reviewer.Team.Team, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
 	}}
 	recent := "2026-09-29T10:00:00Z"
 	prs := []SearchPR{
@@ -1048,7 +1035,7 @@ func TestTeamSection(t *testing.T) {
 		strings.Contains(got, "kalimba#2") || strings.Contains(got, "kalimba#3") || strings.Contains(got, "kalimba#4") {
 		t.Errorf("team section:\n%s", got)
 	}
-	env.cfg.TonoTeamPRs = false
+	env.cfg.Reviewer.Team.Enabled = false
 	if s := teamSection(context.Background(), env, tally, prs, nil, nil); s != "" {
 		t.Errorf("switched off, got:\n%s", s)
 	}

@@ -55,7 +55,7 @@ These wait on the old Slack DM bot decision (see "Old Slack DM bot" under Worker
 - [x] **koko-worker**: background launchd agent for scheduled work jobs (plan 029)
 - [x] **Stand-up DM**: meetings, PRs ready to merge with a Jira check, and PRs waiting for review
 - [x] **Focus time**: books "Focus" blocks in free calendar gaps
-- [x] **Tono reviews**: read-only tono runs on new PRs, reported by DM
+- [x] **Review worker**: reviews new PRs and posts the review on the PR. The reviewer code is a managed clone or a local path
 - [x] **Settings > Worker**: on/off, job times, Test and Run now, connection checks, log
 - [ ] **Mac wake test**: add the sudoers rule, then test a wake with the Mac asleep
 - [ ] **Dependabot strategy**: rules for approving or closing dependency bumps

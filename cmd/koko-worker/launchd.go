@@ -56,7 +56,9 @@ func launchDomain() string { return fmt.Sprintf("gui/%d", os.Getuid()) }
 // restarts the agent and would stop that job.
 func install(paths Paths, ifIdle bool) error {
 	if ifIdle {
-		for _, job := range allJobs {
+		// The legacy name too: an agent from before 0.5.4 holds tono.lock
+		// while it reviews.
+		for _, job := range append(allJobs, legacyJobTono) {
 			if !lockFree(jobLockPath(paths, job)) {
 				fmt.Printf("koko-worker: %s is running, not reinstalling now\n", job)
 				return nil

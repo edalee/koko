@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -43,6 +44,11 @@ type State struct {
 	TimesAdded map[string]time.Time `json:"timesAdded"`
 	WakeBooked time.Time            `json:"wakeBooked,omitempty"` // only set when pmset succeeded
 	WakeTried  time.Time            `json:"wakeTried,omitempty"`  // last wake attempted, booked or not
+	// The managed reviewer's commit at its last run, its branch, and when
+	// the commit last changed.
+	ReviewerCommit  string    `json:"reviewerCommit,omitempty"`
+	ReviewerBranch  string    `json:"reviewerBranch,omitempty"`
+	ReviewerUpdated time.Time `json:"reviewerUpdated,omitempty"`
 }
 
 func slotKey(job string, slot time.Time) string {
@@ -67,7 +73,31 @@ func loadState(path string) State {
 	if st.TonoResults == nil {
 		st.TonoResults = map[string]TonoResult{}
 	}
+	renameJobKeys(&st, legacyJobTono, JobReview)
 	return st
+}
+
+// renameJobKeys moves run records and run times from one job name to
+// another, so the review job's history survives its rename from "tono".
+func renameJobKeys(st *State, from, to string) {
+	prefix := from + "@"
+	for k, v := range st.Runs {
+		if strings.HasPrefix(k, prefix) {
+			if _, taken := st.Runs[to+"@"+k[len(prefix):]]; !taken {
+				v.Job = to
+				st.Runs[to+"@"+k[len(prefix):]] = v
+			}
+			delete(st.Runs, k)
+		}
+	}
+	for k, v := range st.TimesAdded {
+		if strings.HasPrefix(k, prefix) {
+			if _, taken := st.TimesAdded[to+"@"+k[len(prefix):]]; !taken {
+				st.TimesAdded[to+"@"+k[len(prefix):]] = v
+			}
+			delete(st.TimesAdded, k)
+		}
+	}
 }
 
 // TonoResult is tono's outcome for one commit of one PR.

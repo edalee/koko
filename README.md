@@ -86,7 +86,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **koko-worker**: a background agent that runs scheduled work jobs on weekdays, even with the Koko window closed
 - **Stand-up (07:00)**: one Slack DM with today's meetings, your PRs ready to merge with a Jira check, and PRs waiting for your review
 - **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more
-- **Tono reviews (09:30, 12:00, 14:00)**: runs the tono CLI on new PRs in scope and DMs the report. It never posts to GitHub
+- **Review worker (09:30, 12:00, 14:00)**: reviews each new PR once, yours from the last 14 days and the team's, and posts the review on the PR as you. A PR with nothing to report gets LGTM. One Slack line says each review is posted. The reviewer code comes from a managed clone of `epidemicsound/tonometer` at `main`, or a local path, set in Settings
 - **Settings > Worker**: one switch for the worker, a switch and times per job, "Test" and "Run now" buttons, connection checks and the log
 - **Catch-up and retries**: a job missed while the Mac slept runs on wake. A job waits for the internet, and gets 3 tries for other failures
 
@@ -165,12 +165,12 @@ It needs these connections. Settings > Worker checks each one and says how to fi
 - **Slack**: a bot token (`xoxb-`) with the `chat:write` scope, and your Slack user ID. The worker keeps its own Slack settings, apart from Koko's Slack bot.
 - **GitHub**: the `gh` CLI, signed in with `gh auth login`.
 - **Claude Code**: `claude` on the PATH, with the claude.ai Google Calendar and Atlassian connectors connected.
-- **tono**: the path to the tonometer repo's `tono` script.
+- **Reviewer**: nothing to set by default. The review worker keeps its own clone of `epidemicsound/tonometer` at `main` and updates it before each run. To run another reviewer, set a local path in Settings > Worker > Review worker.
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the exact line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
 
 The switch in Settings > Worker installs the launchd agent `com.koko.worker`. The same switch removes it. You can also run `koko-worker install` and `koko-worker uninstall` by hand.
 
-The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state, logs and tono reports sit in `~/Library/Application Support/koko/worker/`. Tono's cache clones sit in `~/.cache/koko-worker/repos`.
+The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state and logs sit in `~/Library/Application Support/koko/worker/`. The PRs' repos are cloned to `~/.cache/koko-worker/repos`, and the managed reviewer to `~/.cache/koko-worker/reviewer`.
 
 ## Build from Source
 
@@ -291,7 +291,8 @@ cmd/koko-cli/              CLI companion binary
 cmd/koko-worker/           Scheduled work jobs (own Go module, launchd agent)
   main.go                  Subcommands: serve, run, check, status, install, uninstall
   scheduler.go             Due slots, catch-up, retries, state.json under a file lock
-  jobs.go                  Stand-up, focus time and tono review jobs
+  jobs.go                  Stand-up, focus time and review jobs
+  reviewer.go              The review worker's reviewer: managed clone or local path
   claude.go                Headless `claude -p` runner with allowlists
   calendar.go              Google Calendar events and the focus gap finder
   github.go                PR lists through gh
