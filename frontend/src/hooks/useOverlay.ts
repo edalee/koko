@@ -17,11 +17,17 @@ export function useOverlay() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && activeOverlay) {
         closeOverlay();
+        return;
+      }
+      // Cmd+, opens and closes Settings, the usual Mac shortcut.
+      if (e.key === "," && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        toggleOverlay("settings");
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeOverlay, closeOverlay]);
+  }, [activeOverlay, closeOverlay, toggleOverlay]);
 
   return { activeOverlay, toggleOverlay, closeOverlay };
 }

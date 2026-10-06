@@ -47,7 +47,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **Clipboard support** — `Cmd+C` (plain + HTML), `Cmd+Shift+C` (Markdown), right-click context menu
 - **Search Web**: Right-click selected terminal text to search it in your default browser
 - **Redraw Terminal**: A right-click action that rebuilds a terminal whose text looks corrupt
-- **Keyboard shortcuts** — `Cmd+N` new session, `Cmd+W` close, `Cmd+1-9` switch
+- **Keyboard shortcuts** — `Cmd+N` new session, `Cmd+W` close, `Cmd+1-9` switch, `Cmd+,` Settings
 - **Terminal search**: `Cmd+F` searches the terminal scrollback
 - **Git worktrees**: The session dialog can create a worktree on a new branch, so parallel sessions on one repo stay apart. The Worktrees module lists, opens and removes them. Closing a session offers to remove the worktree Koko created for it
 

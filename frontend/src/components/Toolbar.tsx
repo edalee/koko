@@ -130,7 +130,7 @@ export default function Toolbar({
               ? "text-accent bg-white/10"
               : "text-white/70 hover:text-white hover:bg-white/5",
           )}
-          title="Settings"
+          title="Settings (⌘,)"
         >
           <Settings className="size-4" />
         </button>
