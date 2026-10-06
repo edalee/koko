@@ -4,6 +4,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-06
+
 ### Added
 - **Settings shortcut**: `Cmd+,` opens and closes Settings, the usual Mac shortcut. The cog's tooltip shows it
 
