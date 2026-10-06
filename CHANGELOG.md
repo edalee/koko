@@ -4,6 +4,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-10-06
+
 ### Added
 - **Reviewer setting**: Settings > Worker > Review worker picks where the reviewer code comes from. "Managed", the default, keeps the worker's own clone of `epidemicsound/tonometer` and moves it to the newest commit on `main` before each run. If a fetch fails, the last good copy runs. "Local path" runs a CLI you point at. The card shows which commit the last run used. Your own tonometer checkout no longer decides which code reviews your PRs
 
