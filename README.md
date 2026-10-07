@@ -170,7 +170,7 @@ It needs these connections. Settings > Worker checks each one and says how to fi
 
 The switch in Settings > Worker installs the launchd agent `com.koko.worker`. The same switch removes it. You can also run `koko-worker install` and `koko-worker uninstall` by hand.
 
-The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state and logs sit in `~/Library/Application Support/koko/worker/`. The PRs' repos are cloned to `~/.cache/koko-worker/repos`, and the managed reviewer to `~/.cache/koko-worker/reviewer`.
+The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state and logs sit in `~/Library/Application Support/koko/worker/`. `logs/worker.log` moves to `worker.log.1` at 5 MB, so it stays under about 10 MB. Review run logs (`logs/tono-*.log`) are deleted after 60 days, when the state forgets the review. The PRs' repos are cloned to `~/.cache/koko-worker/repos`, and the managed reviewer to `~/.cache/koko-worker/reviewer`.
 
 ## Build from Source
 

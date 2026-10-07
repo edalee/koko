@@ -278,6 +278,11 @@ Done on 5 Oct:
   - The old flat `tono*` keys and `jobs.tono` are carried over on load, by the worker and the UI alike. An empty `tonoPath` becomes a managed reviewer. State keys `tono@…` become `review@…`, so run history stays.
   - The state records the reviewer commit each run used. `status` and the card show it, and `check reviewer` reports it.
 
+Done on 7 Oct: log retention.
+- Logs grew forever. The scheduler now writes `worker.log` through its own writer, which moves it to `worker.log.1` at 5 MB, so the log stays under about 10 MB.
+- launchd sends the agent's own stdout and stderr to `agent-stderr.log`, so a rename never leaves launchd writing to the old file. The plist changes on the next install.
+- Once a day, `serveTick` deletes review run logs (`tono-*.log`) older than 60 days, the same age at which `pruneState` forgets a review. Tono's own logs in `~/.cache/tono/logs` belong to tono, and stay.
+
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
 2. Turn off baldrick-work's launchd agent.

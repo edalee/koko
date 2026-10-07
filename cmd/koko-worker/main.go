@@ -186,6 +186,12 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 // serve is the scheduler loop. It reloads worker.json on every tick, so
 // changes in the Koko UI apply within half a minute.
 func serve(ctx context.Context, paths Paths) error {
+	if l, err := openRotatingLog(agentLogPath(paths), logCap); err == nil {
+		log.SetOutput(l)
+		defer func() { _ = l.Close() }()
+	} else {
+		log.Printf("worker.log: %v", err) // stays on stderr
+	}
 	log.Printf("koko-worker %s started", version)
 	var lastConfigErr string
 	for {
@@ -237,7 +243,17 @@ func serveTick(ctx context.Context, cfg Config, paths Paths) {
 	}); err != nil {
 		log.Printf("state: %v", err)
 	}
+	if time.Since(lastLogPrune) > 24*time.Hour {
+		lastLogPrune = time.Now()
+		if n := pruneReviewLogs(paths.Logs, lastLogPrune); n > 0 {
+			log.Printf("logs: removed %d review logs older than 60 days", n)
+		}
+	}
 }
+
+// lastLogPrune is when serveTick last pruned old review logs. Once a day is
+// enough, and a restart prunes at once.
+var lastLogPrune time.Time
 
 // runDue runs one due job under the job's lock, which a "Run now" of the same
 // job also takes. It rechecks under the lock, because a "Run now" that just

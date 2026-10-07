@@ -4,6 +4,9 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Changed
+- **Worker logs**: `worker.log` moves to `worker.log.1` at 5 MB, replacing the older one, so the scheduler's log stays under about 10 MB. Review run logs older than 60 days are deleted once a day, matching how long the worker remembers a review. The agent's own crash output goes to `agent-stderr.log`. Logs used to grow forever
+
 ## [0.5.5] - 2026-10-06
 
 ### Added
