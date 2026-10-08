@@ -627,14 +627,14 @@ func TestDraftComment(t *testing.T) {
 	// The shape of a real verified log: the heading above the block varies.
 	verified := "## Findings\n\n- one\n\n## Draft comment (not posted)\n\n```\n<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>\n```\n\nTwo MCP servers failed.\n"
 	want := "<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>"
-	if got := draftComment(verified); got != want {
+	if got := draftComment(verified, "tono"); got != want {
 		t.Errorf("got %q", got)
 	}
 	// A fenced block without a marker is not a draft.
-	if got := draftComment("## Checked\n\n```json\n[]\n```\n"); got != "" {
+	if got := draftComment("## Checked\n\n```json\n[]\n```\n", "tono"); got != "" {
 		t.Errorf("want no draft, got %q", got)
 	}
-	lgtm := lgtmComment("55d37455abcdef")
+	lgtm := lgtmComment("tono", "55d37455abcdef")
 	if !strings.HasPrefix(lgtm, "<!-- tono:lgtm sha=55d3745 -->\nLGTM 😃⭐😸") {
 		t.Errorf("lgtm = %q", lgtm)
 	}
@@ -647,20 +647,20 @@ func TestCommentsFor(t *testing.T) {
 		out  tonoOutcome
 		want string // "draft", "lgtm" or "failed"
 	}{
-		{"drafts are posted", tonoOutcome{drafts: []string{draft}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
-		{"clean, no verdicts", tonoOutcome{passes: 3, verdicts: map[string]string{}}, "lgtm"},
-		{"clean, ready", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
-		{"a pass did not finish", tonoOutcome{passes: 2, verdicts: map[string]string{}}, "failed"},
-		{"drafts, but a pass did not finish", tonoOutcome{drafts: []string{draft}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
-		{"follow-ups but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
-		{"not mergeable but no draft", tonoOutcome{passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
+		{"drafts are posted", tonoOutcome{format: FormatTonoLogs, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
+		{"clean, no verdicts", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{}}, "lgtm"},
+		{"clean, ready", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
+		{"a pass did not finish", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 2, verdicts: map[string]string{}}, "failed"},
+		{"drafts, but a pass did not finish", tonoOutcome{format: FormatTonoLogs, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"follow-ups but no draft", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"not mergeable but no draft", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
 		// overallVerdict needs a clean code review for "ready", so a lone docs
 		// "mergeable" reads as follow-ups: no LGTM without a code verdict.
-		{"docs mergeable, no code verdict", tonoOutcome{passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
-		{"cut-short draft", tonoOutcome{drafts: []string{"<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}, passes: 3}, "failed"},
+		{"docs mergeable, no code verdict", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
+		{"cut-short draft", tonoOutcome{format: FormatTonoLogs, expected: 3, comments: []reviewComment{{Pass: "review", Body: "<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}}, passes: 3}, "failed"},
 	}
 	for _, c := range cases {
-		comments, failed := commentsFor(c.out, "abc1234def")
+		comments, _, failed := commentsFor(c.out, "abc1234def", "tono")
 		got := "failed"
 		switch {
 		case failed != "" && len(comments) > 0:
@@ -888,8 +888,8 @@ func TestLooksLikeReview(t *testing.T) {
 		t.Error("a clean pass must read as a review")
 	}
 	// Two clean passes and one that broke: no LGTM.
-	out := tonoOutcome{passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
-	if c, failed := commentsFor(out, "abc"); c != nil || !strings.Contains(failed, "API Error") {
+	out := tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
+	if c, _, failed := commentsFor(out, "abc", "tono"); c != nil || !strings.Contains(failed, "API Error") {
 		t.Errorf("broken pass: comments %v, failed %q", c, failed)
 	}
 }
@@ -903,16 +903,16 @@ func TestDraftCommentFences(t *testing.T) {
 		{"marker only quoted in prose", "- The docs quote `<!-- tono:... -->` as an example.\n", ""},
 	}
 	for _, c := range cases {
-		if got := draftComment(c.in); got != c.want {
+		if got := draftComment(c.in, "tono"); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
 	}
 	// A marker line outside any fence the finder can read is not clean.
-	if !hasMarkerLine("## Draft\n\n<!-- tono:review n=1 -->\nBody\n") || hasMarkerLine("- quoted `<!-- tono:x -->`") {
+	if !hasMarkerLine("## Draft\n\n<!-- tono:review n=1 -->\nBody\n", "tono") || hasMarkerLine("- quoted `<!-- tono:x -->`", "tono") {
 		t.Error("hasMarkerLine")
 	}
-	out := tonoOutcome{passes: 3, unreadable: 1, verdicts: map[string]string{}}
-	if c, failed := commentsFor(out, "abc"); failed == "" || c != nil {
+	out := tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, unreadable: 1, verdicts: map[string]string{}}
+	if c, _, failed := commentsFor(out, "abc", "tono"); failed == "" || c != nil {
 		t.Error("an unreadable draft must fail, not post LGTM")
 	}
 }

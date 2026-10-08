@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -20,6 +21,17 @@ const (
 )
 
 var allJobs = []string{JobStandup, JobFocus, JobReview}
+
+// Reviewer formats: how the reviewer hands back its review.
+const (
+	FormatResultJSON = "result-json" // the reviewer contract: a JSON file at $REVIEW_RESULT
+	FormatTonoLogs   = "tono-logs"   // tono's verified logs, for a tono without the contract
+)
+
+var markerPrefixRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// defaultReviewerArgs are tono's: every pass, at the high level, for the PR's repo.
+func defaultReviewerArgs() []string { return []string{"{pr}", "--all", "-l", "high", "-R", "{repo}"} }
 
 // Reviewer sources.
 const (
@@ -38,6 +50,16 @@ type ReviewerConfig struct {
 	AutoUpdate bool   `json:"autoUpdate"`
 	Script     string `json:"script"` // managed: the reviewer CLI, relative to the clone
 	Path       string `json:"path"`   // local: the reviewer CLI
+	// Format is how the reviewer hands back its review (plan 030):
+	// FormatResultJSON, the reviewer contract, or FormatTonoLogs, read from
+	// tono's own logs for a tono without the contract.
+	Format string `json:"format"`
+	// Args are the reviewer's arguments. {pr}, {repo}, {url} and {sha} are
+	// filled in for each PR.
+	Args []string `json:"args"`
+	// MarkerPrefix starts the reviewer's comment markers, "<!-- tono:" for
+	// "tono". A PR with a comment behind the marker counts as reviewed.
+	MarkerPrefix string `json:"markerPrefix"`
 	// Mine is your own open PRs, whoever the team is.
 	Mine ScopeConfig `json:"mine"`
 	// Team is PRs opened by Team's members: the ones that ask for your review,
@@ -101,6 +123,7 @@ func defaultConfig() Config {
 		JiraSite:   "epidemicsound.atlassian.net",
 		Reviewer: ReviewerConfig{
 			Source: SourceManaged, Repo: "epidemicsound/tonometer", Branch: "main", AutoUpdate: true, Script: "tono",
+			Format: FormatTonoLogs, Args: defaultReviewerArgs(), MarkerPrefix: "tono",
 			Mine: ScopeConfig{Enabled: true, MaxAgeDays: 14},
 			Team: TeamScopeConfig{Enabled: true, MaxAgeDays: 4, Team: "epidemicsound/content-protection"},
 		},
@@ -258,6 +281,22 @@ func (c *Config) fillDefaults() {
 	if r.Branch == "" {
 		r.Branch = d.Branch
 	}
+	if r.Format == "" {
+		r.Format = d.Format
+	}
+	var args []string
+	for _, a := range r.Args {
+		if a = strings.TrimSpace(a); a != "" {
+			args = append(args, a)
+		}
+	}
+	if len(args) == 0 {
+		args = d.Args
+	}
+	r.Args = args
+	if r.MarkerPrefix = strings.TrimSpace(r.MarkerPrefix); r.MarkerPrefix == "" {
+		r.MarkerPrefix = d.MarkerPrefix
+	}
 	if r.Script == "" {
 		r.Script = d.Script
 	}
@@ -333,6 +372,12 @@ func (c Config) validate() error {
 // problem is what is wrong with the reviewer settings, or nil. Only the
 // review job and `check reviewer` fail on it.
 func (r ReviewerConfig) problem() error {
+	if r.Format != FormatTonoLogs && r.Format != FormatResultJSON {
+		return fmt.Errorf("reviewer format %q, want %s or %s", r.Format, FormatResultJSON, FormatTonoLogs)
+	}
+	if !markerPrefixRe.MatchString(r.MarkerPrefix) {
+		return fmt.Errorf("marker prefix %q, want letters, digits and dashes", r.MarkerPrefix)
+	}
 	switch r.Source {
 	case SourceManaged:
 		if !ownerRepo(r.Repo) {

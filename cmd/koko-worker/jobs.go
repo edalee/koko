@@ -670,7 +670,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			if (!t.mine && scope.outside(p) != "") || t.tooOld || reviewedBefore(env.state, p.repo(), p.Number) {
 				continue
 			}
-			onGitHub, err := hasTonoComment(ctx, p.repo(), p.Number)
+			onGitHub, err := hasTonoComment(ctx, p.repo(), p.Number, env.cfg.Reviewer.MarkerPrefix)
 			if err != nil {
 				return err
 			}
@@ -722,8 +722,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		if err != nil {
 			result.Failed = truncate(err.Error(), 400)
 		} else {
-			comments, result.Failed = commentsFor(out, d.HeadRefOid)
-			result.LGTM = len(comments) == 1 && strings.HasPrefix(comments[0], lgtmMarker)
+			comments, result.LGTM, result.Failed = commentsFor(out, d.HeadRefOid, env.cfg.Reviewer.MarkerPrefix)
 		}
 		if result.Failed != "" {
 			log.Printf("review: %s failed: %s", p.short(), result.Failed)
@@ -771,39 +770,63 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 	return nil
 }
 
-// commentsFor picks what to post for a review: each pass's draft, or an LGTM
-// when no pass had anything to say. It returns a failure and no comments
-// instead in four cases:
-//   - a pass did not finish, or left output that is not a review
-//   - a pass has a tono marker line but no draft the worker can read
-//   - a draft has no footer, so it may be cut short
-//   - the verdict is bad but no pass wrote it up
+// commentsFor picks what to post for a review, and whether it is an LGTM.
+// A posted comment makes later runs skip the PR, so a review that may be
+// incomplete posts nothing and fails instead.
 //
-// A posted comment makes later runs skip the PR, so a review with a pass
-// missing must post nothing.
-func commentsFor(out tonoOutcome, sha string) (comments []string, failed string) {
-	if out.passes < len(tonoPasses) {
+// A FormatResultJSON reviewer's comments are posted as written. Each must
+// start with the marker line, and a reviewed PR needs at least one.
+//
+// For FormatTonoLogs, each pass's draft is posted. When every pass is an
+// LGTM, only the first is posted, so a clean PR gets one LGTM, not three. With
+// no draft at all, from a tono older than its LGTM drafts, the worker posts
+// its own LGTM. It fails when a pass did not finish (a skipped code review
+// does not count), when a marker line has no draft it can read, when a draft
+// has no footer, or when the verdict is bad but no pass wrote it up.
+func commentsFor(out tonoOutcome, sha, prefix string) (comments []string, lgtm bool, failed string) {
+	if out.format == FormatResultJSON {
+		if len(out.comments) == 0 {
+			return nil, false, "the reviewer reviewed the PR but wrote no comment, see " + out.log
+		}
+		for _, c := range out.comments {
+			if !strings.HasPrefix(firstLine(c.Body), "<!-- "+prefix+":") {
+				return nil, false, fmt.Sprintf("a %s comment does not start with the marker <!-- %s:, see %s", c.Pass, prefix, out.log)
+			}
+			comments = append(comments, c.Body)
+		}
+		return comments, out.lgtmPasses == len(out.comments), ""
+	}
+
+	if out.passes < out.expected {
 		why := ""
 		if len(out.broken) > 0 {
 			why = " (" + strings.Join(out.broken, "; ") + ")"
 		}
-		return nil, fmt.Sprintf("only %d of %d passes finished%s, see %s", out.passes, len(tonoPasses), why, out.log)
+		return nil, false, fmt.Sprintf("only %d of %d passes finished%s, see %s", out.passes, out.expected, why, out.log)
 	}
 	if out.unreadable > 0 {
-		return nil, "a pass wrote a PR comment the worker could not read, see " + out.log
+		return nil, false, "a pass wrote a PR comment the worker could not read, see " + out.log
 	}
-	for _, d := range out.drafts {
-		if !strings.HasSuffix(d, "</sub>") {
-			return nil, "a draft PR comment has no footer, so it may be cut short, see " + out.log
+	for _, c := range out.comments {
+		if !strings.HasSuffix(c.Body, "</sub>") {
+			return nil, false, "a draft PR comment has no footer, so it may be cut short, see " + out.log
 		}
 	}
-	if len(out.drafts) > 0 {
-		return out.drafts, ""
+	if len(out.comments) > 0 {
+		if out.lgtmPasses == len(out.comments) && out.passes == len(out.comments) {
+			return []string{out.comments[0].Body}, true, ""
+		}
+		for _, c := range out.comments {
+			comments = append(comments, c.Body)
+		}
+		return comments, false, ""
 	}
-	if v := overallVerdict(out.verdicts); v == "" || v == verdictReady {
-		return []string{lgtmComment(sha)}, ""
+	// The fallback LGTM needs no verdicts at all, or a ready code review. A
+	// docs "mergeable" alone, with no code verdict, is not enough.
+	if len(out.verdicts) == 0 || (out.verdicts["review"] == verdictReady && overallVerdict(out.verdicts) == verdictReady) {
+		return []string{lgtmComment(prefix, sha)}, true, ""
 	}
-	return nil, fmt.Sprintf("the reviewer wrote no PR comment (verdict %q), see %s", overallVerdict(out.verdicts), out.log)
+	return nil, false, fmt.Sprintf("the reviewer wrote no PR comment (verdict %q), see %s", overallVerdict(out.verdicts), out.log)
 }
 
 // maxPostTries is the failed try that fails the review: the third failed try
@@ -975,8 +998,12 @@ var (
 )
 
 // parseVerdict reads the verdict from a pass's verified output. It prefers
-// the quoted verdict line of the draft PR comment, then any bold verdict.
+// the quoted verdict line of the draft PR comment, then any bold verdict. A
+// clean review's "> **LGTM!**" counts as ready to approve.
 func parseVerdict(text string) string {
+	if lgtmLine.MatchString(text) {
+		return verdictReady
+	}
 	m := verdictQuote.FindStringSubmatch(text)
 	if m == nil {
 		m = verdictBold.FindStringSubmatch(text)
@@ -995,17 +1022,26 @@ func parseVerdict(text string) string {
 }
 
 // overallVerdict is the worst pass. "Ready" needs a clean code review, and
-// no pass that says not mergeable.
+// no pass that says not mergeable. A reviewer whose passes have other names
+// is ready when every pass is.
 func overallVerdict(verdicts map[string]string) string {
 	if len(verdicts) == 0 {
 		return ""
 	}
+	allReady := true
 	for _, v := range verdicts {
 		if v == verdictNotMergeable {
 			return verdictNotMergeable
 		}
+		allReady = allReady && v == verdictReady
 	}
-	if verdicts["review"] == verdictReady {
+	if review, ok := verdicts["review"]; ok {
+		if review == verdictReady {
+			return verdictReady
+		}
+		return verdictFollowUps
+	}
+	if allReady {
 		return verdictReady
 	}
 	return verdictFollowUps
@@ -1085,25 +1121,35 @@ func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA st
 		}
 	}
 
+	rv := env.cfg.Reviewer
+	logPath := filepath.Join(env.paths.Logs, fmt.Sprintf("tono-%s-%d-%s.log", shortRepo(p.repo()), p.Number, headSHA[:min(8, len(headSHA))]))
+	resultPath := strings.TrimSuffix(logPath, ".log") + ".result.json"
+	_ = os.MkdirAll(env.paths.Logs, 0o700)
+	_ = os.Remove(resultPath) // a result from an earlier run must not count
+
 	ctx, cancel := context.WithTimeout(ctx, tonoTimeout)
 	defer cancel()
-	cmd := groupCommand(ctx, cli, fmt.Sprint(p.Number), "--all", "-l", "high", "-R", p.repo())
+	cmd := groupCommand(ctx, cli, expandArgs(rv.Args, p, headSHA)...)
 	cmd.Dir = dir
 	shims, err := readOnlyShims(filepath.Join(env.paths.Dir, "tono-bin"))
 	if err != nil {
 		return tonoOutcome{}, err
 	}
-	cmd.Env = append(os.Environ(), "TONO_CLAUDE="+env.paths.TonoWrap, "PATH="+shims+":"+os.Getenv("PATH"))
-	// stdout and stderr go only to the log. The review comes from tono's
-	// verified logs, read by tonoVerified.
+	// The reviewer contract's environment (plan 030). TONO_CLAUDE is tono's
+	// name for REVIEW_CLAUDE.
+	cmd.Env = append(os.Environ(),
+		"REVIEW_RESULT="+resultPath, "REVIEW_PR="+fmt.Sprint(p.Number), "REVIEW_REPO="+p.repo(),
+		"REVIEW_PR_URL="+p.URL, "REVIEW_SHA="+headSHA,
+		"REVIEW_CLAUDE="+env.paths.TonoWrap, "TONO_CLAUDE="+env.paths.TonoWrap,
+		"PATH="+shims+":"+os.Getenv("PATH"))
+	// stdout and stderr go only to the log. The review comes from the result
+	// file, or from tono's verified logs, read by tonoVerified.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	started := time.Now()
 	err = cmd.Run()
 
-	logPath := filepath.Join(env.paths.Logs, fmt.Sprintf("tono-%s-%d-%s.log", shortRepo(p.repo()), p.Number, headSHA[:min(8, len(headSHA))]))
-	_ = os.MkdirAll(env.paths.Logs, 0o700)
 	_ = os.WriteFile(logPath, append(stderr.Bytes(), stdout.Bytes()...), 0o600)
 	if ctx.Err() == context.DeadlineExceeded {
 		return tonoOutcome{}, fmt.Errorf("timed out after %s", tonoTimeout)
@@ -1115,17 +1161,38 @@ func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA st
 	if err != nil {
 		return tonoOutcome{}, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))
 	}
-	out := tonoVerified(started, p.repo(), p.Number)
+
+	if rv.Format == FormatResultJSON {
+		out, err := readResult(resultPath)
+		out.log = logPath
+		return out, err
+	}
+	out := tonoVerified(started, p.repo(), p.Number, rv.MarkerPrefix)
 	out.log = logPath
+	if !out.ran["review"] && out.passes < out.expected {
+		// tono skips the code review when its LGTM is already on the head
+		// commit. Then two passes are the whole review, not a broken one.
+		if lgtm, err := lgtmOnHead(ctx, p.repo(), p.Number, rv.MarkerPrefix, headSHA); err == nil && lgtm {
+			out.expected--
+		}
+	}
 	return out, nil
 }
 
-// tonoOutcome is what tono's verified passes left: the draft PR comment of
-// each pass that had something to say, and each pass's verdict.
+// tonoOutcome is what a review left: the comments to post, and each pass's
+// verdict. A FormatResultJSON reviewer fills in comments and verdicts. For
+// FormatTonoLogs they come from tono's verified logs, one draft per pass that
+// wrote one, and the other fields say how complete the review is.
 type tonoOutcome struct {
-	drafts   []string
-	verdicts map[string]string
-	passes   int // passes whose verified output reads as a review
+	format     string
+	comments   []reviewComment
+	verdicts   map[string]string
+	lgtmPasses int // comments that are an LGTM
+	// expected is how many passes should have run: three, less a code review
+	// tono skipped because its LGTM is already on the head commit.
+	expected int
+	passes   int             // passes whose verified output reads as a review
+	ran      map[string]bool // those passes, by name
 	// unreadable counts passes with a tono marker line but no draft that
 	// draftComment could read.
 	unreadable int
@@ -1161,13 +1228,13 @@ const minReviewLines = 3
 // tonoVerified reads each pass's verified output from this run: its draft PR
 // comment, if it wrote one, and its verdict. tono's stdout also holds the raw
 // rounds, whose findings the verify step may drop.
-func tonoVerified(since time.Time, repo string, number int) tonoOutcome {
+func tonoVerified(since time.Time, repo string, number int, prefix string) tonoOutcome {
 	dir := os.Getenv("XDG_CACHE_HOME")
 	if dir == "" {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".cache")
 	}
-	out := tonoOutcome{verdicts: map[string]string{}}
+	out := tonoOutcome{format: FormatTonoLogs, verdicts: map[string]string{}, expected: len(tonoPasses), ran: map[string]bool{}}
 	for _, pass := range tonoPasses {
 		matches, _ := filepath.Glob(filepath.Join(dir, "tono", "logs", "*-"+tonoLockKey(repo, number)+"-"+pass.name+"-merged.log"))
 		var newest string
@@ -1189,12 +1256,18 @@ func tonoVerified(since time.Time, repo string, number int) tonoOutcome {
 			continue
 		}
 		out.passes++
+		out.ran[pass.name] = true
 		if v := parseVerdict(string(data)); v != "" {
 			out.verdicts[pass.name] = v
 		}
-		if d := draftComment(string(data)); d != "" {
-			out.drafts = append(out.drafts, d)
-		} else if hasMarkerLine(string(data)) {
+		if d := draftComment(string(data), prefix); d != "" {
+			c := reviewComment{Pass: pass.name, Body: d}
+			if isLGTMDraft(d) {
+				c.Verdict = contractLGTM
+				out.lgtmPasses++
+			}
+			out.comments = append(out.comments, c)
+		} else if hasMarkerLine(string(data), prefix) {
 			out.unreadable++
 		}
 	}
@@ -1220,14 +1293,14 @@ func codeFence(line string) (indent int, fence string, info, ok bool) {
 }
 
 // draftComment is the pass's draft PR comment: the fenced block that starts
-// with a tono marker. The heading above the block varies from run to run, so
-// the marker is what finds it. "" means the pass wrote no comment.
+// with the marker "<!-- prefix:". The heading above the block varies from run
+// to run, so the marker is what finds it. "" means the pass wrote no comment.
 //
 // A fence inside the draft that names a language (```go) opens an inner
 // block, and the next bare fence closes it. A bare inner fence at least as
 // long as the outer one closes the draft early, and the missing footer then
 // fails the review in commentsFor.
-func draftComment(verified string) string {
+func draftComment(verified, prefix string) string {
 	lines := strings.Split(verified, "\n")
 	for i := 0; i < len(lines); i++ {
 		indent, fence, _, ok := codeFence(lines[i])
@@ -1260,7 +1333,7 @@ func draftComment(verified string) string {
 		if !closed {
 			return ""
 		}
-		if text := strings.TrimSpace(strings.Join(body, "\n")); strings.HasPrefix(text, "<!-- tono:") {
+		if text := strings.TrimSpace(strings.Join(body, "\n")); strings.HasPrefix(text, "<!-- "+prefix+":") {
 			return text
 		}
 		i = j
@@ -1268,25 +1341,23 @@ func draftComment(verified string) string {
 	return ""
 }
 
-// hasMarkerLine is true when a line starts with a tono marker. A pass with
-// one but no draft that draftComment can read must not count as clean.
-func hasMarkerLine(verified string) bool {
+// hasMarkerLine is true when a line starts with the marker "<!-- prefix:". A
+// pass with one but no draft that draftComment can read must not count as clean.
+func hasMarkerLine(verified, prefix string) bool {
 	for _, line := range strings.Split(verified, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "<!-- tono:") {
+		if strings.HasPrefix(strings.TrimSpace(line), "<!-- "+prefix+":") {
 			return true
 		}
 	}
 	return false
 }
 
-// lgtmMarker starts every LGTM comment.
-const lgtmMarker = "<!-- tono:lgtm"
-
-// lgtmComment is the comment for a PR where no pass had anything to say. Its
-// tono marker makes hasTonoComment true, so later runs skip the PR.
-func lgtmComment(sha string) string {
+// lgtmComment is the worker's own comment for a clean review, for a tono that
+// writes no LGTM draft of its own. Its marker makes hasTonoComment true, so
+// later runs skip the PR.
+func lgtmComment(prefix, sha string) string {
 	short := sha[:min(7, len(sha))]
-	return fmt.Sprintf("%s sha=%s -->\nLGTM 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", lgtmMarker, short, short)
+	return fmt.Sprintf("<!-- %s:lgtm sha=%s -->\nLGTM 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", prefix, short, short)
 }
 
 // tonoLockKey is tono's name for one review target: "owner/repo|n" with every
