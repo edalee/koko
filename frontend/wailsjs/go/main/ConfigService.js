@@ -18,12 +18,12 @@ export function GetHiddenPRs() {
   return window['go']['main']['ConfigService']['GetHiddenPRs']();
 }
 
-export function GetSessions() {
-  return window['go']['main']['ConfigService']['GetSessions']();
+export function GetPRPanel() {
+  return window['go']['main']['ConfigService']['GetPRPanel']();
 }
 
-export function GetTrackedRepos() {
-  return window['go']['main']['ConfigService']['GetTrackedRepos']();
+export function GetSessions() {
+  return window['go']['main']['ConfigService']['GetSessions']();
 }
 
 export function HidePR(arg1, arg2) {
@@ -38,8 +38,8 @@ export function SaveSessions(arg1) {
   return window['go']['main']['ConfigService']['SaveSessions'](arg1);
 }
 
-export function SetTrackedRepos(arg1) {
-  return window['go']['main']['ConfigService']['SetTrackedRepos'](arg1);
+export function SetPRPanel(arg1) {
+  return window['go']['main']['ConfigService']['SetPRPanel'](arg1);
 }
 
 export function UnhidePR(arg1, arg2) {

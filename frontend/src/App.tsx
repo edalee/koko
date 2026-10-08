@@ -32,6 +32,7 @@ import { useSessionContext } from "./hooks/useSessionContext";
 import { reloadAction, useSessionTabs } from "./hooks/useSessionTabs";
 import { useSubagents } from "./hooks/useSubagents";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { isHiddenPR } from "./lib/prs";
 
 export default function App() {
   const {
@@ -86,8 +87,8 @@ export default function App() {
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
   const sessionStates = useSessionActivity(connectedIds);
   const sessionBranches = useSessionBranches(tabs.map((t) => t.directory));
-  const { prs, loading, refresh } = useGitHub();
-  const visiblePRCount = prs.filter((p) => !hiddenPRs.has(`${p.repo}#${p.number}`)).length;
+  const { prs, loading, errors: prErrors, refresh } = useGitHub();
+  const visiblePRCount = prs.filter((p) => !isHiddenPR(hiddenPRs, p)).length;
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const {
     changes: fileChanges,
@@ -579,6 +580,7 @@ export default function App() {
           }}
           onRefresh={refresh}
           hiddenPRs={hiddenPRs}
+          errors={prErrors}
           onHiddenChange={loadHiddenPRs}
           onOpenDiff={(repo, number, path, files) =>
             codeViewer.openPRDiff(repo, number, path, files)

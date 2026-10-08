@@ -28,6 +28,7 @@ import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 import type { FileChange } from "../hooks/useFileChanges";
 import type { GitHubNotification, NotifFilter } from "../hooks/useNotifications";
 import type { SubagentProcess } from "../hooks/useSubagents";
+import { isHiddenPR } from "../lib/prs";
 import type { BranchCI, GitHubPR, WorkflowRun } from "../types";
 import NotificationBadge from "./NotificationBadge";
 import NotificationsPanel from "./NotificationsPanel";
@@ -366,7 +367,7 @@ export default function RightSidebar({
         <button
           type="button"
           onClick={() => {
-            const firstVisible = prs.find((p) => !hiddenPRs.has(`${p.repo}#${p.number}`));
+            const firstVisible = prs.find((p) => !isHiddenPR(hiddenPRs, p));
             onPRClick?.(firstVisible ?? null);
           }}
           className="relative p-1.5 rounded-md transition-colors text-muted-foreground hover:text-white hover:bg-white/5"

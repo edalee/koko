@@ -20,7 +20,7 @@ export function FetchPRFiles(arg1:string,arg2:number):Promise<Array<main.PRFile>
 
 export function FetchPRReviews(arg1:string,arg2:number):Promise<Array<main.PRReview>>;
 
-export function FetchPRs():Promise<Array<main.GitHubPR>>;
+export function FetchPRs():Promise<main.PRList>;
 
 export function MarkAllNotificationsRead():Promise<void>;
 

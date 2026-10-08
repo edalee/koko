@@ -209,8 +209,9 @@ func (cs *ConfigService) HidePR(repo string, number int) error {
 // UnhidePR removes the hidden flag from a PR.
 func (cs *ConfigService) UnhidePR(repo string, number int) error {
 	cs.mu.Lock()
-	key := fmt.Sprintf("%s#%d", repo, number)
-	delete(cs.config.HiddenPRs, key)
+	delete(cs.config.HiddenPRs, fmt.Sprintf("%s#%d", repo, number))
+	// The "repo#n" key that hid it before 0.5.9.
+	delete(cs.config.HiddenPRs, fmt.Sprintf("%s#%d", repo[strings.LastIndex(repo, "/")+1:], number))
 	cfg := cs.config
 	cs.mu.Unlock()
 	return cs.SaveConfig(cfg)

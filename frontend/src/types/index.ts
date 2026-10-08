@@ -5,7 +5,7 @@ export interface PRCheck {
 }
 
 export interface GitHubPR {
-  repo: string;
+  repo: string; // "owner/repo"
   number: number;
   title: string;
   author: string;
@@ -25,6 +25,7 @@ export interface GitHubPR {
   labels: string[];
   assignees: string[];
   checks: PRCheck[];
+  section: "mine" | "team";
 }
 
 export interface PRFile {
