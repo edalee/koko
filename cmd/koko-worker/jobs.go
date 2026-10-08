@@ -1151,19 +1151,7 @@ func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA s
 	if err != nil {
 		return reviewOutcome{}, err
 	}
-	// The command's own NAME=value words, then the reviewer contract's
-	// environment (plan 030), which they cannot override. A PATH from the
-	// command still gets the read-only gh and git in front.
-	path := os.Getenv("PATH")
-	for _, kv := range cmdEnv {
-		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
-			path = v
-		}
-	}
-	cmd.Env = append(append(os.Environ(), cmdEnv...),
-		"REVIEW_RESULT="+resultPath, "REVIEW_PR="+fmt.Sprint(p.Number), "REVIEW_REPO="+p.repo(),
-		"REVIEW_PR_URL="+p.URL, "REVIEW_SHA="+headSHA, "REVIEW_CLAUDE="+env.paths.ClaudeWrap,
-		"PATH="+shims+":"+path)
+	cmd.Env = reviewerEnv(os.Environ(), cmdEnv, shims, env.paths.ClaudeWrap, resultPath, p, headSHA)
 	// stdout and stderr go only to the log. The review comes from the result
 	// file, or from the reviewer's logs, read by readLogs.
 	var stdout, stderr bytes.Buffer
@@ -1199,6 +1187,29 @@ func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA s
 		}
 	}
 	return out, nil
+}
+
+// reviewerEnv is the reviewer's environment: base, then the command's own
+// NAME=value words, then the reviewer contract's variables (plan 030), which
+// the command cannot override. A PATH from the command still gets the
+// read-only gh and git in shims in front. exec keeps the last of a name.
+func reviewerEnv(base, cmdEnv []string, shims, claude, resultPath string, p SearchPR, sha string) []string {
+	path := ""
+	for _, kv := range base {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			path = v
+		}
+	}
+	for _, kv := range cmdEnv {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			path = v
+		}
+	}
+	out := append(append([]string{}, base...), cmdEnv...)
+	return append(out,
+		"REVIEW_RESULT="+resultPath, "REVIEW_PR="+fmt.Sprint(p.Number), "REVIEW_REPO="+p.repo(),
+		"REVIEW_PR_URL="+p.URL, "REVIEW_SHA="+sha, "REVIEW_CLAUDE="+claude,
+		"PATH="+shims+":"+path)
 }
 
 // reviewOutcome is what a review left: the comments to post, and each pass's

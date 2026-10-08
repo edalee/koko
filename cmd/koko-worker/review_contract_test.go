@@ -206,3 +206,27 @@ func TestReviewerProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewerEnv(t *testing.T) {
+	p := SearchPR{URL: "u", Number: 7}
+	p.Repository.NameWithOwner = "o/r"
+	last := func(env []string, name string) string {
+		v := ""
+		for _, kv := range env {
+			if x, ok := strings.CutPrefix(kv, name+"="); ok {
+				v = x
+			}
+		}
+		return v
+	}
+	base := []string{"PATH=/usr/bin", "HOME=/h"}
+	env := reviewerEnv(base, []string{"TONO_CLAUDE=/wrap", "REVIEW_RESULT=/evil"}, "/shims", "/wrap", "/result.json", p, "abc")
+	if last(env, "TONO_CLAUDE") != "/wrap" || last(env, "REVIEW_RESULT") != "/result.json" || last(env, "PATH") != "/shims:/usr/bin" {
+		t.Errorf("env: %q", env)
+	}
+	// A PATH from the command keeps the read-only gh and git in front.
+	env = reviewerEnv(base, []string{"PATH=/opt/homebrew/bin"}, "/shims", "/wrap", "/r", p, "abc")
+	if last(env, "PATH") != "/shims:/opt/homebrew/bin" {
+		t.Errorf("PATH: %q", last(env, "PATH"))
+	}
+}
