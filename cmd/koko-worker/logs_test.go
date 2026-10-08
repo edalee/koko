@@ -49,11 +49,14 @@ func TestPruneReviewLogs(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	files := map[string]time.Duration{
-		"tono-kalimba-28-abc.log": 61 * 24 * time.Hour, // old review log: removed
-		"tono-zufolo-554-def.log": 59 * 24 * time.Hour, // recent: kept
-		"worker.log":              90 * 24 * time.Hour, // not a review log: kept
-		"agent-stderr.log":        90 * 24 * time.Hour,
-		"tono-notes.txt":          90 * 24 * time.Hour,
+		"tono-kalimba-28-abc.log":           61 * 24 * time.Hour, // old review log from before 0.5.8: removed
+		"review-kalimba-29-abc.log":         61 * 24 * time.Hour, // old review log: removed
+		"review-kalimba-29-abc.result.json": 61 * 24 * time.Hour, // its result file: removed
+		"review-zufolo-555-def.log":         1 * 24 * time.Hour,  // recent: kept
+		"tono-zufolo-554-def.log":           59 * 24 * time.Hour, // recent: kept
+		"worker.log":                        90 * 24 * time.Hour, // not a review log: kept
+		"agent-stderr.log":                  90 * 24 * time.Hour,
+		"tono-notes.txt":                    90 * 24 * time.Hour,
 	}
 	for name, age := range files {
 		p := filepath.Join(dir, name)
@@ -64,15 +67,15 @@ func TestPruneReviewLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n := pruneReviewLogs(dir, now); n != 1 {
-		t.Errorf("removed %d, want 1", n)
+	if n := pruneReviewLogs(dir, now); n != 3 {
+		t.Errorf("removed %d, want 3", n)
 	}
 	entries, _ := os.ReadDir(dir)
 	var left []string
 	for _, e := range entries {
 		left = append(left, e.Name())
 	}
-	if got := strings.Join(left, ","); got != "agent-stderr.log,tono-notes.txt,tono-zufolo-554-def.log,worker.log" {
+	if got := strings.Join(left, ","); got != "agent-stderr.log,review-zufolo-555-def.log,tono-notes.txt,tono-zufolo-554-def.log,worker.log" {
 		t.Errorf("left %s", got)
 	}
 }

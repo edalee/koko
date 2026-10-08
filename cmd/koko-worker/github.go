@@ -155,7 +155,7 @@ func ghJSON(ctx context.Context, v any, args ...string) error {
 const searchFields = "url,number,title,createdAt,repository,author"
 
 // Every PR search passes --archived=false. An archived repo is read-only, so
-// tono can never post on its PRs, and they are not work to do.
+// the worker can never post on its PRs, and they are not work to do.
 
 func myApprovedPRs(ctx context.Context) ([]SearchPR, error) {
 	var prs []SearchPR
@@ -188,7 +188,7 @@ func reviewRequests(ctx context.Context) ([]SearchPR, error) {
 }
 
 // postComment adds body as a comment on the PR, through your gh auth, and
-// returns the comment's URL. It runs the real gh, not tono's read-only one.
+// returns the comment's URL. It runs the real gh, not the reviewer's read-only one.
 func postComment(ctx context.Context, prURL, body string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -278,11 +278,11 @@ func teamMembers(ctx context.Context, team string) (map[string]bool, error) {
 	return members, nil
 }
 
-// hasTonoComment is true if the PR already carries a comment behind the
-// reviewer's marker "<!-- prefix:", for example from a teammate who ran tono
-// with -c (post the findings). prefix is checked to be [a-z0-9-] in
+// hasReviewComment is true if the PR already carries a comment behind the
+// reviewer's marker "<!-- prefix:", for example from a teammate who ran the
+// reviewer and posted its findings. prefix is checked to be [a-z0-9-] in
 // ReviewerConfig.problem, so it is safe inside the jq filter.
-func hasTonoComment(ctx context.Context, repo string, number int, prefix string) (bool, error) {
+func hasReviewComment(ctx context.Context, repo string, number int, prefix string) (bool, error) {
 	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
 		"--jq", `.[] | select(.body | contains("<!-- `+prefix+`:")) | .id`)
 	if err != nil {

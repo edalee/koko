@@ -228,10 +228,10 @@ func runStandup(ctx context.Context, env Env) error {
 	return env.send(ctx, Message{Sections: sections})
 }
 
-// reviewTally reads tono's results for the stand-up's PR lines. A PR keeps
-// its review after new commits, because tono reviews each PR once.
+// reviewTally reads the review results for the stand-up's PR lines. A PR
+// keeps its review after new commits, because each PR is reviewed once.
 type reviewTally struct {
-	scope    tonoScope
+	scope    reviewScope
 	scopeErr error
 	loaded   bool
 }
@@ -243,7 +243,7 @@ func (t *reviewTally) loadScope(ctx context.Context, env Env) {
 	}
 }
 
-// status is tono's status for one PR, counted in counts. A posted review
+// status is the review status for one PR, counted in counts. A posted review
 // links to its first PR comment.
 func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts map[string]int) string {
 	t.loadScope(ctx, env)
@@ -321,7 +321,7 @@ func prLine(p SearchPR, status string) string {
 }
 
 // reviewSection is the stand-up's "Needs your review" section: a summary of
-// tono's reviews, then one line per PR.
+// the review worker's reviews, then one line per PR.
 func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []SearchPR, queueErr error) string {
 	var b strings.Builder
 	b.WriteString("*Needs your review*\n")
@@ -441,18 +441,18 @@ func formatGaps(gaps []Gap) string {
 	return strings.Join(parts, ", ")
 }
 
-// ---- Tono ----
+// ---- Review ----
 
-// tonoWrapper is TONO_CLAUDE for tono's own Claude runs. It keeps the runs out
-// of your conversation list and denies the posting commands. It is a guard on
-// top of never passing tono's -c flag (post the findings to the PR). The
-// read-only gh and git in readOnlyShims are the stronger guard.
-const tonoWrapper = `#!/bin/bash
+// claudeWrapper is REVIEW_CLAUDE and {claude}, for the reviewer's own Claude
+// runs. It keeps the runs out of your conversation list and denies the
+// posting commands. The read-only gh and git in readOnlyShims are the
+// stronger guard.
+const claudeWrapper = `#!/bin/bash
 exec claude "$@" --no-session-persistence \
   "--disallowedTools=Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr merge:*),Bash(gh pr edit:*),Bash(gh pr close:*),Bash(git push:*)"
 `
 
-// readOnlyGH stands in for gh on tono's PATH. It refuses any command that
+// readOnlyGH stands in for gh on the reviewer's PATH. It refuses any command that
 // changes GitHub, including gh api calls that send data, and passes reads to
 // the real gh. The deny list alone matches only command prefixes, so it
 // cannot catch flags such as gh api -X PATCH.
@@ -474,7 +474,7 @@ esac
 exec %q "$@"
 `
 
-// readOnlyGit stands in for git on tono's PATH. It refuses push, wherever the
+// readOnlyGit stands in for git on the reviewer's PATH. It refuses push, wherever the
 // subcommand sits (git -C . push), and passes everything else to the real git.
 const readOnlyGit = `#!/bin/bash
 # koko-worker: git without push for review runs.
@@ -491,7 +491,7 @@ exec %q "$@"
 `
 
 // readOnlyShims writes the gh and git stand-ins into dir and returns dir,
-// for the front of tono's PATH.
+// for the front of the reviewer's PATH.
 func readOnlyShims(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
@@ -514,28 +514,28 @@ func readOnlyShims(dir string) (string, error) {
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// tonoScope is which team PRs the review worker may review: opened by a member of the team, in
+// reviewScope is which team PRs the review worker may review: opened by a member of the team, in
 // the last Reviewer.Team.MaxAgeDays days.
-type tonoScope struct {
+type reviewScope struct {
 	team    string
 	days    int
 	members map[string]bool
 	since   time.Time
 }
 
-func loadScope(ctx context.Context, cfg Config, now time.Time) (tonoScope, error) {
+func loadScope(ctx context.Context, cfg Config, now time.Time) (reviewScope, error) {
 	members, err := teamMembers(ctx, cfg.Reviewer.Team.Team)
 	if err != nil {
-		return tonoScope{}, err
+		return reviewScope{}, err
 	}
-	return tonoScope{
+	return reviewScope{
 		team: cfg.Reviewer.Team.Team, days: cfg.Reviewer.Team.MaxAgeDays, members: members,
 		since: now.AddDate(0, 0, -cfg.Reviewer.Team.MaxAgeDays),
 	}, nil
 }
 
 // outside says why a PR is outside the scope, or "" if it is inside.
-func (s tonoScope) outside(p SearchPR) string {
+func (s reviewScope) outside(p SearchPR) string {
 	if !s.members[strings.ToLower(p.Author.Login)] {
 		return "not opened by " + s.team
 	}
@@ -546,11 +546,11 @@ func (s tonoScope) outside(p SearchPR) string {
 	return ""
 }
 
-// latestResult is tono's most recent result for the PR, at any commit.
-func latestResult(st *State, repo string, number int) (TonoResult, bool) {
-	var best TonoResult
+// latestResult is the most recent review result for the PR, at any commit.
+func latestResult(st *State, repo string, number int) (ReviewResult, bool) {
+	var best ReviewResult
 	found := false
-	for _, r := range st.TonoResults {
+	for _, r := range st.Results {
 		if r.Repo == repo && r.Number == number && (!found || r.At.After(best.At)) {
 			best, found = r, true
 		}
@@ -558,11 +558,11 @@ func latestResult(st *State, repo string, number int) (TonoResult, bool) {
 	return best, found
 }
 
-// reviewedBefore is true if tono has looked at the PR at any commit, even if
+// reviewedBefore is true if the reviewer has looked at the PR at any commit, even if
 // the review failed. Each PR gets one review.
 func reviewedBefore(st *State, repo string, number int) bool {
 	prefix := fmt.Sprintf("%s#%d@", repo, number)
-	for k := range st.TonoReviewed {
+	for k := range st.Reviewed {
 		if strings.HasPrefix(k, prefix) {
 			return true
 		}
@@ -570,19 +570,19 @@ func reviewedBefore(st *State, repo string, number int) bool {
 	return false
 }
 
-// tonoTarget is one PR for tono to review.
-type tonoTarget struct {
+// reviewTarget is one PR to review.
+type reviewTarget struct {
 	pr     SearchPR
 	mine   bool
 	tooOld bool // your PR, opened more than Reviewer.Mine.MaxAgeDays ago
 }
 
-// tonoTargets is your open PRs if Reviewer.Mine is on. If Reviewer.Team is on,
+// reviewTargets is your open PRs if Reviewer.Mine is on. If Reviewer.Team is on,
 // the PRs waiting for your review follow, then the open PRs in Reviewer.Team.Repos.
-// Others' PRs are people's, not bots', and runTono checks them against the team scope.
+// Others' PRs are people's, not bots', and runReview checks them against the team scope.
 // Your PRs opened more than Reviewer.Mine.MaxAgeDays ago are marked tooOld.
-func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
-	var out []tonoTarget
+func reviewTargets(ctx context.Context, env Env) ([]reviewTarget, error) {
+	var out []reviewTarget
 	seen := map[string]bool{}
 	if env.cfg.Reviewer.Mine.Enabled {
 		mine, err := myOpenPRs(ctx)
@@ -593,7 +593,7 @@ func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 		for _, p := range mine {
 			created, err := time.Parse(time.RFC3339, p.CreatedAt)
 			old := err != nil || created.Before(since)
-			out = append(out, tonoTarget{pr: p, mine: true, tooOld: old})
+			out = append(out, reviewTarget{pr: p, mine: true, tooOld: old})
 			seen[p.URL] = true
 		}
 	}
@@ -614,24 +614,24 @@ func tonoTargets(ctx context.Context, env Env) ([]tonoTarget, error) {
 	}
 	for _, p := range append(reviewQueue(requests, me), reviewQueue(inRepos, me)...) {
 		if !seen[p.URL] {
-			out = append(out, tonoTarget{pr: p})
+			out = append(out, reviewTarget{pr: p})
 			seen[p.URL] = true
 		}
 	}
 	return out, nil
 }
 
-func tonoKey(repo string, number int, sha string) string {
+func reviewKey(repo string, number int, sha string) string {
 	return fmt.Sprintf("%s#%d@%s", repo, number, sha)
 }
 
-func runTono(ctx context.Context, env Env, onlyURL string) error {
+func runReview(ctx context.Context, env Env, onlyURL string) error {
 	// Before the PR loop, so a reviewer that cannot run marks nothing reviewed.
 	cli, err := prepareReviewer(ctx, env)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(env.paths.TonoWrap, []byte(tonoWrapper), 0o700); err != nil {
+	if err := os.WriteFile(env.paths.ClaudeWrap, []byte(claudeWrapper), 0o700); err != nil {
 		return err
 	}
 	var failures []string
@@ -642,18 +642,18 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		}
 		failures = append(failures, gaveUp...)
 	}
-	targets, err := tonoTargets(ctx, env)
+	targets, err := reviewTargets(ctx, env)
 	if err != nil {
 		return err
 	}
-	var scope tonoScope
+	var scope reviewScope
 	if env.cfg.Reviewer.Team.Enabled {
 		if scope, err = loadScope(ctx, env.cfg, env.now); err != nil {
 			return err
 		}
 	}
 	var netErr error
-	var broken []string // reviews where a tono pass broke, left unmarked
+	var broken []string // reviews where a pass broke, left unmarked
 	reviewed := 0
 	for _, t := range targets {
 		p := t.pr
@@ -670,25 +670,25 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 			if (!t.mine && scope.outside(p) != "") || t.tooOld || reviewedBefore(env.state, p.repo(), p.Number) {
 				continue
 			}
-			onGitHub, err := hasTonoComment(ctx, p.repo(), p.Number, env.cfg.Reviewer.MarkerPrefix)
+			onGitHub, err := hasReviewComment(ctx, p.repo(), p.Number, env.cfg.Reviewer.MarkerPrefix)
 			if err != nil {
 				return err
 			}
 			if onGitHub {
-				continue // someone already posted a tono review on the PR
+				continue // someone already posted a review behind the marker
 			}
 		}
 		d, err := prDetail(ctx, p.URL)
 		if err != nil {
 			return err
 		}
-		key := tonoKey(p.repo(), p.Number, d.HeadRefOid)
-		out, err := tonoReview(ctx, env, cli, p, d.HeadRefOid)
+		key := reviewKey(p.repo(), p.Number, d.HeadRefOid)
+		out, err := runReviewer(ctx, env, cli, p, d.HeadRefOid)
 		link := slackLink(p.URL, p.short())
-		var skipped tonoSkippedError
+		var skipped reviewSkippedError
 		switch {
 		case errors.As(err, &skipped):
-			// tono had nothing to review: another run holds the PR, or it just
+			// Nothing to review: another run holds the PR, or it just
 			// became closed or a draft. Leave it unmarked. A closed or draft PR
 			// drops out of the next search anyway.
 			log.Printf("review: %s skipped: %v", p.short(), err)
@@ -714,7 +714,7 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		}
 		reviewed++
 
-		result := TonoResult{
+		result := ReviewResult{
 			URL: p.URL, Title: p.Title, Repo: p.repo(), Number: p.Number, SHA: d.HeadRefOid,
 			Mine: t.mine, At: time.Now(), Verdicts: out.verdicts,
 		}
@@ -737,12 +737,12 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 		}
 		// Each PR gets one review. A review that failed for a reason other
 		// than the network is marked too, so it is not re-reported at every
-		// tono slot. The comments are saved as unposted first, so a kill
+		// review slot. The comments are saved as unposted first, so a kill
 		// during posting leaves them for the next run.
 		result.Unposted = comments
 		if err := env.persist(func(st *State) {
-			st.TonoReviewed[key] = time.Now()
-			st.TonoResults[key] = result
+			st.Reviewed[key] = time.Now()
+			st.Results[key] = result
 		}); err != nil {
 			return err
 		}
@@ -774,17 +774,17 @@ func runTono(ctx context.Context, env Env, onlyURL string) error {
 // A posted comment makes later runs skip the PR, so a review that may be
 // incomplete posts nothing and fails instead.
 //
-// A FormatResultJSON reviewer's comments are posted as written. Each must
-// start with the marker line, and a reviewed PR needs at least one.
+// A result file's comments are posted as written. Each must start with the
+// marker line, and a reviewed PR needs at least one.
 //
-// For FormatTonoLogs, each pass's draft is posted. When every pass is an
-// LGTM, only the first is posted, so a clean PR gets one LGTM, not three. With
-// no draft at all, from a tono older than its LGTM drafts, the worker posts
+// From the logs, each pass's draft is posted. When every pass is an LGTM,
+// only the first is posted, so a clean PR gets one LGTM, not three. With no
+// draft at all, from a reviewer that writes no LGTM draft, the worker posts
 // its own LGTM. It fails when a pass did not finish (a skipped code review
 // does not count), when a marker line has no draft it can read, when a draft
 // has no footer, or when the verdict is bad but no pass wrote it up.
-func commentsFor(out tonoOutcome, sha, prefix string) (comments []string, lgtm bool, failed string) {
-	if out.format == FormatResultJSON {
+func commentsFor(out reviewOutcome, sha, prefix string) (comments []string, lgtm bool, failed string) {
+	if !out.fromLogs {
 		if len(out.comments) == 0 {
 			return nil, false, "the reviewer reviewed the PR but wrote no comment, see " + out.log
 		}
@@ -851,10 +851,10 @@ type offlineError struct{ error }
 // A failed post counts one try, unless the internet is down. The try that
 // reaches maxPostTries fails the review, drops the rest, and a DM says so.
 // gaveUp then holds the reason.
-func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp string, err error) {
+func postPending(ctx context.Context, env Env, key string, r ReviewResult) (gaveUp string, err error) {
 	save := func(change func(*State)) error {
 		return env.persist(func(st *State) {
-			st.TonoResults[key] = r
+			st.Results[key] = r
 			if change != nil {
 				change(st)
 			}
@@ -871,9 +871,9 @@ func postPending(ctx context.Context, env Env, key string, r TonoResult) (gaveUp
 			// an open PR gets a fresh review at its new head.
 			prefix := fmt.Sprintf("%s#%d@", r.Repo, r.Number)
 			if err := save(func(st *State) {
-				for k := range st.TonoReviewed {
+				for k := range st.Reviewed {
 					if strings.HasPrefix(k, prefix) {
-						delete(st.TonoReviewed, k)
+						delete(st.Reviewed, k)
 					}
 				}
 			}); err != nil {
@@ -952,7 +952,7 @@ func refusedForGood(err error) bool {
 
 // reviewPing is the one Slack line for a posted review: the PR, the verdict
 // and a link to the review.
-func reviewPing(r TonoResult) string {
+func reviewPing(r ReviewResult) string {
 	verdict := strings.ToLower(verdictLabel(overallVerdict(r.Verdicts)))
 	if r.LGTM {
 		verdict = "LGTM"
@@ -965,7 +965,7 @@ func reviewPing(r TonoResult) string {
 // reviews it gave up on.
 func postUnposted(ctx context.Context, env Env) ([]string, error) {
 	var failures []string
-	for key, r := range env.state.TonoResults {
+	for key, r := range env.state.Results {
 		if len(r.Unposted) == 0 {
 			continue
 		}
@@ -985,7 +985,7 @@ func firstLine(s string) string {
 	return line
 }
 
-// Tono verdicts, from the verdict line of each pass's draft PR comment.
+// Review verdicts, from the verdict line of each pass's draft PR comment.
 const (
 	verdictReady        = "mergeable"
 	verdictFollowUps    = "follow-ups"
@@ -1060,7 +1060,7 @@ func verdictLabel(v string) string {
 }
 
 // groupCommand starts name in its own process group. When ctx ends, the whole
-// group gets SIGTERM, so tono's trap runs and Claude's children stop too.
+// group gets SIGTERM, so the reviewer's trap runs and Claude's children stop too.
 // Anything in the group still running a minute later gets SIGKILL.
 func groupCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -1074,33 +1074,33 @@ func groupCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// tonoSkippedError means tono exited with tonoSkipExit.
-type tonoSkippedError struct{ error }
+// reviewSkippedError means the reviewer exited with skipExit.
+type reviewSkippedError struct{ error }
 
-// tonoSkipExit is tono's "nothing to review" exit code: another run holds the
+// skipExit is the reviewer's "nothing to review" exit code: another run holds the
 // lock, or the PR is closed or a draft.
-const tonoSkipExit = 2
+const skipExit = 2
 
-// tonoTimeout caps one review. On timeout, tono's whole process group gets
-// SIGTERM, so tono's trap removes its lock. A plain kill would leave the lock
+// reviewTimeout caps one review. On timeout, the reviewer's whole process
+// group gets SIGTERM, so its trap can remove its lock. A plain kill would leave the lock
 // behind and block every later review of that PR.
-const tonoTimeout = 45 * time.Minute
+const reviewTimeout = 45 * time.Minute
 
 // reportedError is a failure the job has already sent you, so the scheduler
 // logs it without a second DM.
 type reportedError struct{ error }
 
-// tonoReview runs the reviewer CLI, cli, at the PR head in a cache clone. It never
+// runReviewer runs the reviewer CLI, cli, at the PR head in a cache clone. It never
 // touches your working clones. One review per cache clone at a time, so a
 // "Run now" cannot check out another PR under a review in progress.
-func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA string) (tonoOutcome, error) {
+func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA string) (reviewOutcome, error) {
 	dir := filepath.Join(env.paths.Cache, strings.ReplaceAll(p.repo(), "/", "__"))
 	if err := os.MkdirAll(env.paths.Cache, 0o700); err != nil {
-		return tonoOutcome{}, err
+		return reviewOutcome{}, err
 	}
 	unlock, err := lockFile(dir + ".lock")
 	if err != nil {
-		return tonoOutcome{}, err
+		return reviewOutcome{}, err
 	}
 	defer unlock()
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -1109,7 +1109,7 @@ func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA st
 		cancel()
 		if err != nil {
 			_ = os.RemoveAll(dir) // a half-made clone would break every later review
-			return tonoOutcome{}, fmt.Errorf("clone %s: %v: %s", p.repo(), err, truncate(strings.TrimSpace(string(out)), 300))
+			return reviewOutcome{}, fmt.Errorf("clone %s: %v: %s", p.repo(), err, truncate(strings.TrimSpace(string(out)), 300))
 		}
 	}
 	for _, args := range [][]string{
@@ -1117,33 +1117,36 @@ func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA st
 		{"-C", dir, "checkout", "--quiet", "--force", "--detach", headSHA},
 	} {
 		if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
-			return tonoOutcome{}, fmt.Errorf("git %s: %s", args[2], truncate(strings.TrimSpace(string(out)), 300))
+			return reviewOutcome{}, fmt.Errorf("git %s: %s", args[2], truncate(strings.TrimSpace(string(out)), 300))
 		}
 	}
 
 	rv := env.cfg.Reviewer
-	logPath := filepath.Join(env.paths.Logs, fmt.Sprintf("tono-%s-%d-%s.log", shortRepo(p.repo()), p.Number, headSHA[:min(8, len(headSHA))]))
+	logPath := filepath.Join(env.paths.Logs, fmt.Sprintf("%s%s-%d-%s.log", reviewLogPrefix, shortRepo(p.repo()), p.Number, headSHA[:min(8, len(headSHA))]))
 	resultPath := strings.TrimSuffix(logPath, ".log") + ".result.json"
 	_ = os.MkdirAll(env.paths.Logs, 0o700)
 	_ = os.Remove(resultPath) // a result from an earlier run must not count
 
-	ctx, cancel := context.WithTimeout(ctx, tonoTimeout)
+	ctx, cancel := context.WithTimeout(ctx, reviewTimeout)
 	defer cancel()
-	cmd := groupCommand(ctx, cli, expandArgs(rv.Args, p, headSHA)...)
-	cmd.Dir = dir
-	shims, err := readOnlyShims(filepath.Join(env.paths.Dir, "tono-bin"))
+	cmdEnv, prog, args, err := reviewerCommand(rv.Command, cli, env.paths.ClaudeWrap, p, headSHA)
 	if err != nil {
-		return tonoOutcome{}, err
+		return reviewOutcome{}, err
 	}
-	// The reviewer contract's environment (plan 030). TONO_CLAUDE is tono's
-	// name for REVIEW_CLAUDE.
-	cmd.Env = append(os.Environ(),
+	cmd := groupCommand(ctx, prog, args...)
+	cmd.Dir = dir
+	shims, err := readOnlyShims(filepath.Join(env.paths.Dir, "reviewer-bin"))
+	if err != nil {
+		return reviewOutcome{}, err
+	}
+	// The reviewer contract's environment (plan 030), then the command's own
+	// NAME=value words, which may name REVIEW_CLAUDE for the reviewer.
+	cmd.Env = append(append(os.Environ(),
 		"REVIEW_RESULT="+resultPath, "REVIEW_PR="+fmt.Sprint(p.Number), "REVIEW_REPO="+p.repo(),
-		"REVIEW_PR_URL="+p.URL, "REVIEW_SHA="+headSHA,
-		"REVIEW_CLAUDE="+env.paths.TonoWrap, "TONO_CLAUDE="+env.paths.TonoWrap,
-		"PATH="+shims+":"+os.Getenv("PATH"))
+		"REVIEW_PR_URL="+p.URL, "REVIEW_SHA="+headSHA, "REVIEW_CLAUDE="+env.paths.ClaudeWrap,
+		"PATH="+shims+":"+os.Getenv("PATH")), cmdEnv...)
 	// stdout and stderr go only to the log. The review comes from the result
-	// file, or from tono's verified logs, read by tonoVerified.
+	// file, or from the reviewer's logs, read by readLogs.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1152,26 +1155,26 @@ func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA st
 
 	_ = os.WriteFile(logPath, append(stderr.Bytes(), stdout.Bytes()...), 0o600)
 	if ctx.Err() == context.DeadlineExceeded {
-		return tonoOutcome{}, fmt.Errorf("timed out after %s", tonoTimeout)
+		return reviewOutcome{}, fmt.Errorf("timed out after %s", reviewTimeout)
 	}
 	var exit *exec.ExitError
-	if errors.As(err, &exit) && exit.ExitCode() == tonoSkipExit {
-		return tonoOutcome{}, tonoSkippedError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
+	if errors.As(err, &exit) && exit.ExitCode() == skipExit {
+		return reviewOutcome{}, reviewSkippedError{fmt.Errorf("%s", truncate(lastLines(stderr.String(), 1), 200))}
 	}
 	if err != nil {
-		return tonoOutcome{}, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))
+		return reviewOutcome{}, fmt.Errorf("%v: %s", err, truncate(lastLines(stderr.String()+stdout.String(), 5), 400))
 	}
 
-	if rv.Format == FormatResultJSON {
+	if rv.Logs == "" {
 		out, err := readResult(resultPath)
 		out.log = logPath
 		return out, err
 	}
-	out := tonoVerified(started, p.repo(), p.Number, rv.MarkerPrefix)
+	out := readLogs(rv.Logs, started, p.repo(), p.Number, rv.MarkerPrefix)
 	out.log = logPath
 	if !out.ran["review"] && out.passes < out.expected {
-		// tono skips the code review when its LGTM is already on the head
-		// commit. Then two passes are the whole review, not a broken one.
+		// A reviewer in the log format skips the code review when its LGTM is
+		// already on the head commit. Then two passes are the whole review.
 		if lgtm, err := lgtmOnHead(ctx, p.repo(), p.Number, rv.MarkerPrefix, headSHA); err == nil && lgtm {
 			out.expected--
 		}
@@ -1179,21 +1182,21 @@ func tonoReview(ctx context.Context, env Env, cli string, p SearchPR, headSHA st
 	return out, nil
 }
 
-// tonoOutcome is what a review left: the comments to post, and each pass's
-// verdict. A FormatResultJSON reviewer fills in comments and verdicts. For
-// FormatTonoLogs they come from tono's verified logs, one draft per pass that
-// wrote one, and the other fields say how complete the review is.
-type tonoOutcome struct {
-	format     string
+// reviewOutcome is what a review left: the comments to post, and each pass's
+// verdict. A result file fills in comments and verdicts. From the logs they
+// come one draft per pass that wrote one, and the other fields say how
+// complete the review is.
+type reviewOutcome struct {
+	fromLogs   bool // read from Reviewer.Logs, not from a result file
 	comments   []reviewComment
 	verdicts   map[string]string
 	lgtmPasses int // comments that are an LGTM
 	// expected is how many passes should have run: three, less a code review
-	// tono skipped because its LGTM is already on the head commit.
+	// skipped because its LGTM is already on the head commit.
 	expected int
 	passes   int             // passes whose verified output reads as a review
 	ran      map[string]bool // those passes, by name
-	// unreadable counts passes with a tono marker line but no draft that
+	// unreadable counts passes with a marker line but no draft that
 	// draftComment could read.
 	unreadable int
 	// broken holds the first line of each pass whose verified output is not
@@ -1202,7 +1205,11 @@ type tonoOutcome struct {
 	log    string // the worker's log of the run
 }
 
-var tonoPasses = []struct{ name string }{{"review"}, {"docs"}, {"comments"}}
+// logPasses are the passes the log format holds (plan 031).
+var logPasses = []struct{ name string }{{"review"}, {"docs"}, {"comments"}}
+
+// reviewLogPrefix starts the worker's log of each review run.
+const reviewLogPrefix = "review-"
 
 // looksLikeReview is true when a pass's verified output reads as a review:
 // at least minReviewLines lines with text, and a Markdown heading or list. A
@@ -1225,18 +1232,13 @@ func looksLikeReview(verified string) bool {
 
 const minReviewLines = 3
 
-// tonoVerified reads each pass's verified output from this run: its draft PR
-// comment, if it wrote one, and its verdict. tono's stdout also holds the raw
-// rounds, whose findings the verify step may drop.
-func tonoVerified(since time.Time, repo string, number int, prefix string) tonoOutcome {
-	dir := os.Getenv("XDG_CACHE_HOME")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".cache")
-	}
-	out := tonoOutcome{format: FormatTonoLogs, verdicts: map[string]string{}, expected: len(tonoPasses), ran: map[string]bool{}}
-	for _, pass := range tonoPasses {
-		matches, _ := filepath.Glob(filepath.Join(dir, "tono", "logs", "*-"+tonoLockKey(repo, number)+"-"+pass.name+"-merged.log"))
+// readLogs reads each pass's verified output from this run, in the folder
+// dir: its draft PR comment, if it wrote one, and its verdict. The reviewer's
+// stdout may also hold raw rounds, whose findings a verify step may drop.
+func readLogs(dir string, since time.Time, repo string, number int, prefix string) reviewOutcome {
+	out := reviewOutcome{fromLogs: true, verdicts: map[string]string{}, expected: len(logPasses), ran: map[string]bool{}}
+	for _, pass := range logPasses {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*-"+logKey(repo, number)+"-"+pass.name+"-merged.log"))
 		var newest string
 		var newestAt time.Time
 		for _, m := range matches {
@@ -1352,18 +1354,17 @@ func hasMarkerLine(verified, prefix string) bool {
 	return false
 }
 
-// lgtmComment is the worker's own comment for a clean review, for a tono that
-// writes no LGTM draft of its own. Its marker makes hasTonoComment true, so
+// lgtmComment is the worker's own comment for a clean review, for a reviewer
+// that writes no LGTM draft of its own. Its marker makes hasReviewComment true, so
 // later runs skip the PR.
 func lgtmComment(prefix, sha string) string {
 	short := sha[:min(7, len(sha))]
 	return fmt.Sprintf("<!-- %s:lgtm sha=%s -->\nLGTM 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", prefix, short, short)
 }
 
-// tonoLockKey is tono's name for one review target: "owner/repo|n" with every
-// character that is not a letter or digit turned into "_". It matches the
-// key tono builds when it is given -R.
-func tonoLockKey(repo string, number int) string {
+// logKey names one review target in the log format: "owner/repo|n" with
+// every character that is not a letter or digit turned into "_".
+func logKey(repo string, number int) string {
 	raw := fmt.Sprintf("%s|%d", repo, number)
 	return strings.Map(func(r rune) rune {
 		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {

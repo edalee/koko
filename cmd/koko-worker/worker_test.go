@@ -110,9 +110,14 @@ func TestEventTimesKeepOtherZones(t *testing.T) {
 	}
 }
 
+// testConfig is the default config, switched on, with a reviewer and a team
+// set up and the review job on.
 func testConfig() Config {
 	cfg := defaultConfig()
 	cfg.Enabled = true
+	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "acme-review {pr}", "acme"
+	cfg.Reviewer.Team = TeamScopeConfig{Enabled: true, MaxAgeDays: 4, Team: "acme/platform"}
+	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: cfg.Jobs[JobReview].Times}
 	return cfg
 }
 
@@ -350,11 +355,11 @@ func TestSudoersRuleIsNarrow(t *testing.T) {
 	}
 }
 
-func TestTonoLockKey(t *testing.T) {
-	if got := tonoLockKey("epidemicsound/kalimba", 28); got != "epidemicsound_kalimba_28" {
+func TestLogKey(t *testing.T) {
+	if got := logKey("acme/kalimba", 28); got != "acme_kalimba_28" {
 		t.Errorf("got %q", got)
 	}
-	if got := tonoLockKey("epidemicsound/youtube-data-service", 5); got != "epidemicsound_youtube_data_service_5" {
+	if got := logKey("acme/data-service", 5); got != "acme_data_service_5" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -405,7 +410,7 @@ func TestUpdateStateKeepsConcurrentChanges(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		go func(i int) {
 			done <- updateState(path, func(st *State) {
-				st.TonoReviewed[strings.Repeat("x", i+1)] = monday(9, 0)
+				st.Reviewed[strings.Repeat("x", i+1)] = monday(9, 0)
 			})
 		}(i)
 	}
@@ -414,7 +419,7 @@ func TestUpdateStateKeepsConcurrentChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := len(loadState(path).TonoReviewed); got != 20 {
+	if got := len(loadState(path).Reviewed); got != 20 {
 		t.Errorf("lost updates: %d of 20 kept", got)
 	}
 }
@@ -433,7 +438,8 @@ func TestLoadConfigKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	def := defaultConfig()
-	if cfg.Reviewer.Source != SourceManaged || cfg.Reviewer.Repo != def.Reviewer.Repo || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
+	// tonoPath makes it a config from before 0.5.4, so its reviewer is tono's.
+	if cfg.Reviewer.Source != SourceManaged || cfg.Reviewer.Repo != legacyRepo || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
 		t.Errorf("empty values not defaulted: %+v", cfg)
 	}
 	if got := strings.Join(cfg.Jobs[JobReview].Times, ","); got != "09:30,12:00,14:00" {
@@ -644,20 +650,20 @@ func TestCommentsFor(t *testing.T) {
 	draft := "<!-- tono:review n=1 sha=abc1234 -->\n## Code Review #1\n\n<sub>tono code review</sub>"
 	cases := []struct {
 		name string
-		out  tonoOutcome
+		out  reviewOutcome
 		want string // "draft", "lgtm" or "failed"
 	}{
-		{"drafts are posted", tonoOutcome{format: FormatTonoLogs, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
-		{"clean, no verdicts", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{}}, "lgtm"},
-		{"clean, ready", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
-		{"a pass did not finish", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 2, verdicts: map[string]string{}}, "failed"},
-		{"drafts, but a pass did not finish", tonoOutcome{format: FormatTonoLogs, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
-		{"follow-ups but no draft", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
-		{"not mergeable but no draft", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
+		{"drafts are posted", reviewOutcome{fromLogs: true, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
+		{"clean, no verdicts", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{}}, "lgtm"},
+		{"clean, ready", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
+		{"a pass did not finish", reviewOutcome{fromLogs: true, expected: 3, passes: 2, verdicts: map[string]string{}}, "failed"},
+		{"drafts, but a pass did not finish", reviewOutcome{fromLogs: true, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"follow-ups but no draft", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
+		{"not mergeable but no draft", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
 		// overallVerdict needs a clean code review for "ready", so a lone docs
 		// "mergeable" reads as follow-ups: no LGTM without a code verdict.
-		{"docs mergeable, no code verdict", tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
-		{"cut-short draft", tonoOutcome{format: FormatTonoLogs, expected: 3, comments: []reviewComment{{Pass: "review", Body: "<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}}, passes: 3}, "failed"},
+		{"docs mergeable, no code verdict", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
+		{"cut-short draft", reviewOutcome{fromLogs: true, expected: 3, comments: []reviewComment{{Pass: "review", Body: "<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}}, passes: 3}, "failed"},
 	}
 	for _, c := range cases {
 		comments, _, failed := commentsFor(c.out, "abc1234def", "tono")
@@ -717,9 +723,9 @@ func TestPostPending(t *testing.T) {
 	const key = "o/r#1@abc"
 	ctx := context.Background()
 	newFake := func() *fakePostEnv {
-		return &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{key: time.Now()}}}
+		return &fakePostEnv{st: &State{Results: map[string]ReviewResult{}, Reviewed: map[string]time.Time{key: time.Now()}}}
 	}
-	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc"}
+	r := ReviewResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc"}
 
 	// A failed post stops the loop, keeps the rest and counts one try.
 	f := newFake()
@@ -727,7 +733,7 @@ func TestPostPending(t *testing.T) {
 	if gaveUp, err := postPending(ctx, f.env(), key, r); err != nil || gaveUp != "" {
 		t.Fatal(gaveUp, err)
 	}
-	got := f.st.TonoResults[key]
+	got := f.st.Results[key]
 	if strings.Join(f.posted, ",") != "a" || strings.Join(got.Unposted, ",") != "fails,b" || got.PostTries != 1 {
 		t.Errorf("after one failure: posted %v, result %+v", f.posted, got)
 	}
@@ -735,15 +741,15 @@ func TestPostPending(t *testing.T) {
 	// Offline, a failed post does not count a try.
 	f.offline = true
 	var offline offlineError
-	if _, err := postPending(ctx, f.env(), key, got); !errors.As(err, &offline) || f.st.TonoResults[key].PostTries != 1 {
-		t.Errorf("offline: err %v, tries %d", err, f.st.TonoResults[key].PostTries)
+	if _, err := postPending(ctx, f.env(), key, got); !errors.As(err, &offline) || f.st.Results[key].PostTries != 1 {
+		t.Errorf("offline: err %v, tries %d", err, f.st.Results[key].PostTries)
 	}
 	f.offline = false
 
 	// The last try fails the review, drops the rest and sends a DM.
 	got.PostTries = maxPostTries - 1
 	gaveUp, err := postPending(ctx, f.env(), key, got)
-	if got = f.st.TonoResults[key]; err != nil || gaveUp == "" || got.Failed == "" || len(got.Unposted) != 0 || len(f.dms) != 1 {
+	if got = f.st.Results[key]; err != nil || gaveUp == "" || got.Failed == "" || len(got.Unposted) != 0 || len(f.dms) != 1 {
 		t.Errorf("after the last try: gaveUp %q, err %v, result %+v, dms %v", gaveUp, err, got, f.dms)
 	}
 
@@ -755,7 +761,7 @@ func TestPostPending(t *testing.T) {
 	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
-	if got = f.st.TonoResults[key]; strings.Join(f.posted, ",") != "b" || len(got.Comments) != 2 || got.Comments[0] != "https://github.com/o/r/pull/1#old" {
+	if got = f.st.Results[key]; strings.Join(f.posted, ",") != "b" || len(got.Comments) != 2 || got.Comments[0] != "https://github.com/o/r/pull/1#old" {
 		t.Errorf("retry: posted %v, comments %v", f.posted, got.Comments)
 	}
 
@@ -766,8 +772,8 @@ func TestPostPending(t *testing.T) {
 	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
-	if got = f.st.TonoResults[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.TonoReviewed) != 0 || len(f.dms) != 0 {
-		t.Errorf("changed PR: posted %v, result %+v, reviewed %v, dms %v", f.posted, got, f.st.TonoReviewed, f.dms)
+	if got = f.st.Results[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.Reviewed) != 0 || len(f.dms) != 0 {
+		t.Errorf("changed PR: posted %v, result %+v, reviewed %v, dms %v", f.posted, got, f.st.Reviewed, f.dms)
 	}
 
 	// The same, with part of the review already posted: a DM says how to
@@ -785,14 +791,14 @@ func TestPostPending(t *testing.T) {
 
 func TestPostRefusedForGood(t *testing.T) {
 	const key = "o/r#1@abc"
-	f := &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{}}}
+	f := &fakePostEnv{st: &State{Results: map[string]ReviewResult{}, Reviewed: map[string]time.Time{}}}
 	env := f.env()
 	env.post = func(context.Context, string, string) (string, error) {
 		return "", fmt.Errorf("gh pr comment: GraphQL: Repository was archived so is read-only and unable to create comment because issue is locked (addComment)")
 	}
-	r := TonoResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}}
+	r := ReviewResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}}
 	gaveUp, err := postPending(context.Background(), env, key, r)
-	got := f.st.TonoResults[key]
+	got := f.st.Results[key]
 	if err != nil || gaveUp == "" || got.PostTries != 1 || len(got.Unposted) != 0 || len(f.dms) != 1 || !strings.Contains(f.dms[0], "refuses comments") {
 		t.Errorf("gaveUp %q, err %v, result %+v, dms %q", gaveUp, err, got, f.dms)
 	}
@@ -804,18 +810,18 @@ func TestPostRefusedForGood(t *testing.T) {
 func TestReviewPingOnce(t *testing.T) {
 	const key = "o/r#1@abc"
 	ctx := context.Background()
-	f := &fakePostEnv{st: &State{TonoResults: map[string]TonoResult{}, TonoReviewed: map[string]time.Time{}}}
-	r := TonoResult{URL: "https://github.com/o/r/pull/1", Title: "Fix it", Repo: "o/r", Number: 1, SHA: "abc",
+	f := &fakePostEnv{st: &State{Results: map[string]ReviewResult{}, Reviewed: map[string]time.Time{}}}
+	r := ReviewResult{URL: "https://github.com/o/r/pull/1", Title: "Fix it", Repo: "o/r", Number: 1, SHA: "abc",
 		Verdicts: map[string]string{"review": verdictFollowUps}, Unposted: []string{"a", "b"}}
 	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
 	want := "Review worker reviewed <https://github.com/o/r/pull/1|r#1> Fix it: mergeable with follow-ups (<https://github.com/o/r/pull/1#a|review>)"
-	if len(f.dms) != 1 || f.dms[0] != want || !f.st.TonoResults[key].Pinged {
-		t.Fatalf("dms %q, pinged %v", f.dms, f.st.TonoResults[key].Pinged)
+	if len(f.dms) != 1 || f.dms[0] != want || !f.st.Results[key].Pinged {
+		t.Fatalf("dms %q, pinged %v", f.dms, f.st.Results[key].Pinged)
 	}
 	// A later call with nothing left to post sends nothing more.
-	if _, err := postPending(ctx, f.env(), key, f.st.TonoResults[key]); err != nil || len(f.dms) != 1 {
+	if _, err := postPending(ctx, f.env(), key, f.st.Results[key]); err != nil || len(f.dms) != 1 {
 		t.Errorf("second call: err %v, dms %q", err, f.dms)
 	}
 	// An LGTM says so.
@@ -834,14 +840,14 @@ func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
 		return p
 	}
 	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
-	cfg := defaultConfig()
+	cfg := testConfig()
 	env := Env{cfg: cfg, now: now, state: &State{}}
-	tally := &reviewTally{loaded: true, scope: tonoScope{
+	tally := &reviewTally{loaded: true, scope: reviewScope{
 		team: cfg.Reviewer.Team.Team, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
 	}}
 	queue := []SearchPR{pr(1, "alice"), pr(2, "bob"), pr(3, "carol")}
 	got := reviewSection(context.Background(), env, tally, queue, nil)
-	if !strings.Contains(got, "3 PRs wait for your review, 1 of them from epidemicsound/content-protection.") ||
+	if !strings.Contains(got, "3 PRs wait for your review, 1 of them from acme/platform.") ||
 		!strings.Contains(got, "2 from outside the team are not listed.") ||
 		!strings.Contains(got, "r#1") || strings.Contains(got, "r#2") || strings.Contains(got, "r#3") {
 		t.Errorf("section:\n%s", got)
@@ -851,14 +857,14 @@ func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
 func TestStandupStatusForPostingStates(t *testing.T) {
 	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
 	p.Repository.NameWithOwner = "o/r"
-	status := func(r TonoResult) (string, map[string]int) {
-		st := &State{TonoResults: map[string]TonoResult{"o/r#1@abc": r}}
+	status := func(r ReviewResult) (string, map[string]int) {
+		st := &State{Results: map[string]ReviewResult{"o/r#1@abc": r}}
 		tally := &reviewTally{loaded: true}
 		counts := map[string]int{}
 		// prDetail is not reached for these states, or fails harmlessly offline.
 		return tally.status(context.Background(), Env{state: st}, p, counts), counts
 	}
-	base := TonoResult{Repo: "o/r", Number: 1, SHA: "abc", Verdicts: map[string]string{"review": verdictReady}}
+	base := ReviewResult{Repo: "o/r", Number: 1, SHA: "abc", Verdicts: map[string]string{"review": verdictReady}}
 
 	unposted := base
 	unposted.Unposted = []string{"a"}
@@ -888,7 +894,7 @@ func TestLooksLikeReview(t *testing.T) {
 		t.Error("a clean pass must read as a review")
 	}
 	// Two clean passes and one that broke: no LGTM.
-	out := tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
+	out := reviewOutcome{fromLogs: true, expected: 3, passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
 	if c, _, failed := commentsFor(out, "abc", "tono"); c != nil || !strings.Contains(failed, "API Error") {
 		t.Errorf("broken pass: comments %v, failed %q", c, failed)
 	}
@@ -911,7 +917,7 @@ func TestDraftCommentFences(t *testing.T) {
 	if !hasMarkerLine("## Draft\n\n<!-- tono:review n=1 -->\nBody\n", "tono") || hasMarkerLine("- quoted `<!-- tono:x -->`", "tono") {
 		t.Error("hasMarkerLine")
 	}
-	out := tonoOutcome{format: FormatTonoLogs, expected: 3, passes: 3, unreadable: 1, verdicts: map[string]string{}}
+	out := reviewOutcome{fromLogs: true, expected: 3, passes: 3, unreadable: 1, verdicts: map[string]string{}}
 	if c, _, failed := commentsFor(out, "abc", "tono"); failed == "" || c != nil {
 		t.Error("an unreadable draft must fail, not post LGTM")
 	}
@@ -919,8 +925,8 @@ func TestDraftCommentFences(t *testing.T) {
 
 func TestTonoScope(t *testing.T) {
 	now := monday(9, 30)
-	s := tonoScope{
-		team: "epidemicsound/content-protection", days: 4,
+	s := reviewScope{
+		team: "acme/platform", days: 4,
 		members: map[string]bool{"jamie-r-es": true, "edalee": true},
 		since:   now.AddDate(0, 0, -4),
 	}
@@ -936,7 +942,7 @@ func TestTonoScope(t *testing.T) {
 		{pr("jamie-r-es", "2026-09-27T10:00:00Z"), ""},
 		{pr("Jamie-R-ES", "2026-09-25T08:00:00Z"), ""}, // logins are not case-sensitive
 		{pr("jamie-r-es", "2026-09-20T10:00:00Z"), "opened more than 4 days ago"},
-		{pr("someone-else", "2026-09-27T10:00:00Z"), "not opened by epidemicsound/content-protection"},
+		{pr("someone-else", "2026-09-27T10:00:00Z"), "not opened by acme/platform"},
 		{pr("edalee", "not a date"), "opened more than 4 days ago"},
 	} {
 		if got := s.outside(c.pr); got != c.want {
@@ -947,9 +953,9 @@ func TestTonoScope(t *testing.T) {
 
 func TestOneReviewPerPR(t *testing.T) {
 	st := loadState("/nonexistent")
-	st.TonoReviewed[tonoKey("o/r", 12, "aaa")] = monday(9, 0)
-	st.TonoResults[tonoKey("o/r", 12, "aaa")] = TonoResult{Repo: "o/r", Number: 12, SHA: "aaa", At: monday(9, 0)}
-	st.TonoResults[tonoKey("o/r", 12, "bbb")] = TonoResult{Repo: "o/r", Number: 12, SHA: "bbb", At: monday(12, 0)}
+	st.Reviewed[reviewKey("o/r", 12, "aaa")] = monday(9, 0)
+	st.Results[reviewKey("o/r", 12, "aaa")] = ReviewResult{Repo: "o/r", Number: 12, SHA: "aaa", At: monday(9, 0)}
+	st.Results[reviewKey("o/r", 12, "bbb")] = ReviewResult{Repo: "o/r", Number: 12, SHA: "bbb", At: monday(12, 0)}
 	if !reviewedBefore(&st, "o/r", 12) {
 		t.Error("a new commit must not bring a second review")
 	}
@@ -961,20 +967,25 @@ func TestOneReviewPerPR(t *testing.T) {
 	}
 }
 
-func TestTonoScopeConfig(t *testing.T) {
+func TestReviewScopeConfig(t *testing.T) {
 	cfg := defaultConfig()
-	if cfg.Reviewer.Team.Team != "epidemicsound/content-protection" || cfg.Reviewer.Team.MaxAgeDays != 4 {
+	if cfg.Reviewer.Team.Team != "" || cfg.Reviewer.Team.MaxAgeDays != 4 {
 		t.Errorf("defaults: %q, %d", cfg.Reviewer.Team.Team, cfg.Reviewer.Team.MaxAgeDays)
 	}
-	if !cfg.Reviewer.Mine.Enabled || !cfg.Reviewer.Team.Enabled {
-		t.Errorf("my PRs and team PRs should default on: %v, %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
+	if !cfg.Reviewer.Mine.Enabled || cfg.Reviewer.Team.Enabled {
+		t.Errorf("my PRs should default on, team PRs off: %v, %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
 	}
-	cfg.Reviewer.Team.Team = "content-protection"
+	cfg = testConfig()
+	cfg.Reviewer.Team.Team = "platform"
 	if cfg.Reviewer.problem() == nil {
 		t.Error("want an error for a team without its org")
 	}
-	cfg = defaultConfig()
-	for _, bad := range []string{"kalimba", "epidemicsound/", "a/b/c"} {
+	cfg.Reviewer.Team.Enabled = false
+	if err := cfg.Reviewer.problem(); err != nil {
+		t.Errorf("a team scope that is off needs no team: %v", err)
+	}
+	cfg = testConfig()
+	for _, bad := range []string{"kalimba", "acme/", "a/b/c"} {
 		cfg.Reviewer.Team.Repos = []string{bad}
 		if cfg.Reviewer.problem() == nil {
 			t.Errorf("want an error for repo %q", bad)
@@ -982,7 +993,7 @@ func TestTonoScopeConfig(t *testing.T) {
 	}
 }
 
-func TestLoadConfigTonoPRs(t *testing.T) {
+func TestLoadConfigLegacyPRs(t *testing.T) {
 	load := func(body string) Config {
 		t.Helper()
 		path := t.TempDir() + "/worker.json"
@@ -1003,24 +1014,24 @@ func TestLoadConfigTonoPRs(t *testing.T) {
 	if cfg := load(`{"tonoOwnPRsOnly": true}`); !cfg.Reviewer.Mine.Enabled || cfg.Reviewer.Team.Enabled {
 		t.Errorf("tonoOwnPRsOnly: mine %v, team %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
 	}
-	cfg := load(`{"tonoMine": false, "tonoRepos": [" epidemicsound/kalimba ", ""]}`)
-	if cfg.Reviewer.Mine.Enabled || strings.Join(cfg.Reviewer.Team.Repos, ",") != "epidemicsound/kalimba" {
+	cfg := load(`{"tonoMine": false, "tonoRepos": [" acme/kalimba ", ""]}`)
+	if cfg.Reviewer.Mine.Enabled || strings.Join(cfg.Reviewer.Team.Repos, ",") != "acme/kalimba" {
 		t.Errorf("mine %v, repos %q", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Repos)
 	}
 }
 
 func TestTeamSection(t *testing.T) {
 	pr := func(n int, author, created string) SearchPR {
-		p := SearchPR{URL: fmt.Sprintf("https://github.com/epidemicsound/kalimba/pull/%d", n), Number: n, Title: "Change", CreatedAt: created}
-		p.Repository.NameWithOwner = "epidemicsound/kalimba"
+		p := SearchPR{URL: fmt.Sprintf("https://github.com/acme/kalimba/pull/%d", n), Number: n, Title: "Change", CreatedAt: created}
+		p.Repository.NameWithOwner = "acme/kalimba"
 		p.Author.Login = author
 		return p
 	}
 	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
-	cfg := defaultConfig()
-	cfg.Reviewer.Team.Repos = []string{"epidemicsound/kalimba"}
+	cfg := testConfig()
+	cfg.Reviewer.Team.Repos = []string{"acme/kalimba"}
 	env := Env{cfg: cfg, now: now, state: &State{}}
-	tally := &reviewTally{loaded: true, scope: tonoScope{
+	tally := &reviewTally{loaded: true, scope: reviewScope{
 		team: cfg.Reviewer.Team.Team, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
 	}}
 	recent := "2026-09-29T10:00:00Z"

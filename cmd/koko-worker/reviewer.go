@@ -14,7 +14,8 @@ import (
 // prepareReviewer makes the reviewer CLI ready and returns its path.
 //
 // Bad reviewer settings fail only the review job, so the stand-up and focus
-// time keep running. A local reviewer runs as it is.
+// time keep running. A command without {reviewer} runs its own program, and
+// the result is "". A local reviewer runs as it is.
 //
 // A managed reviewer is the worker's own clone of Reviewer.Repo, so the
 // branch you have checked out in your own clone never changes what reviews
@@ -29,6 +30,9 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 	r := env.cfg.Reviewer
 	if err := r.problem(); err != nil {
 		return "", fmt.Errorf("review: %w. Fix it in Settings > Worker > Review worker", err)
+	}
+	if !r.usesReviewer() {
+		return "", programProblem(r.Command)
 	}
 	cli := env.cfg.reviewerCLI(env.paths)
 	if r.Source == SourceLocal {
@@ -99,6 +103,22 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 		})
 	}
 	return cli, nil
+}
+
+// programProblem says why a command's program cannot run, or nil. A bare
+// name is looked up on the worker's PATH, which under launchd is short.
+func programProblem(command string) error {
+	prog := commandProgram(command)
+	if strings.Contains(prog, "/") {
+		if !executable(prog) {
+			return fmt.Errorf("review: no reviewer program at %s", prog)
+		}
+		return nil
+	}
+	if _, err := exec.LookPath(prog); err != nil {
+		return fmt.Errorf("review: the reviewer program %s is not on the worker's PATH. Use its full path", prog)
+	}
+	return nil
 }
 
 // originIs is true when a clone's origin URL points at "owner/repo", over
