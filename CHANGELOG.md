@@ -4,6 +4,16 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-10-08
+
+### Changed
+- **PR panel**: shows your open PRs and your team's, under "My PRs" and "Team PRs". Settings > GitHub sets them like the review worker's: an age limit for each, the team (`org/team-slug`) and its repos, or one click copies the review worker's settings. A bare repo name means the team's org. The built-in list of DRM repos is gone, so with no repos set you now see your PRs and your review requests. A followed repo list carries over as the team's repos (plan 032, ADR-041)
+
+### Fixed
+- **PRs outside epidemicsound**: approve, merge, files, diffs, reviews, commits and comments used to add `epidemicsound/` to every repo. They now use the PR's own `owner/repo`
+- **Silent PR errors**: a source that fails now shows its error above the PR list, instead of an empty list
+- **Slow PR list**: one search per source, run at the same time, replaces one `gh pr list` per repo in turn
+
 ## [0.5.8] - 2026-10-08
 
 ### Changed

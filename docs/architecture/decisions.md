@@ -516,3 +516,15 @@
   - The state keys moved to `reviewed` and `results`, read from the old names on load, so no PR is reviewed twice.
 - **Files:** `cmd/koko-worker/config.go`, `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/scheduler.go`, `frontend/src/components/WorkerSettings.tsx`
 - **Plan:** `docs/plans/031-generic-reviewer.md`
+
+## ADR-041: The PR panel uses the review worker's scopes
+- **Date:** 2026-10-08
+- **Status:** Accepted
+- **Decision:** The PR panel shows your PRs and your team's, with the review worker's settings shape: `mine` and `team` (age, `org/team-slug`, repos) in `config.json` as `prPanel`. One GraphQL search per source fetches every field the panel shows, and the searches run at the same time. PRs carry the full `owner/repo`, and every PR action takes it as it is.
+- **Rationale:**
+  - A built-in list of DRM repos and an `epidemicsound/` prefix on every action made the panel wrong for anyone else, and broken for other orgs.
+  - The same scopes as the review worker mean the panel lists the PRs the worker reviews, and one click copies them.
+  - Each search takes several seconds with the detail fields, so they run in parallel. A failed source shows its error, and the others still show.
+  - Hidden PR keys move to `owner/repo#n`. The old `repo#n` keys still hide and unhide.
+- **Files:** `pr_sources.go`, `github_service.go`, `config_service.go`, `frontend/src/components/PRPanelSettings.tsx`, `frontend/src/components/PRDetailOverlay.tsx`
+- **Plan:** `docs/plans/032-pr-panel-sources.md`
