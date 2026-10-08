@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,10 +25,14 @@ func node(repo string, n int, author string) searchNode {
 func fakeSearch(t *testing.T, answers map[string][]searchNode, fail string) *[]string {
 	t.Helper()
 	var queries []string
+	var mu sync.Mutex
 	saved := searchPRs
 	t.Cleanup(func() { searchPRs = saved })
 	searchPRs = func(q string) ([]searchNode, error) {
+		mu.Lock()
 		queries = append(queries, q)
+		sort.Strings(queries)
+		mu.Unlock()
 		if fail != "" && strings.Contains(q, fail) {
 			return nil, errors.New("boom")
 		}
@@ -70,7 +76,8 @@ func TestFetchPRList(t *testing.T) {
 	if want := "mine:acme/api team:acme/web team:acme/api"; strings.Join(got, " ") != want || len(list.Errors) != 0 {
 		t.Errorf("got %q, errors %v, want %q", got, list.Errors, want)
 	}
-	if !strings.Contains((*queries)[0], "created:>=2026-09-08") || !strings.Contains((*queries)[1], "created:>=2026-09-24") {
+	all := strings.Join(*queries, "\n")
+	if !strings.Contains(all, "author:@me created:>=2026-09-08") || !strings.Contains(all, "created:>=2026-09-24 review-requested:@me") {
 		t.Errorf("ages: %q", *queries)
 	}
 	fetchPRList(cfg, &cache, now.Add(time.Minute))
@@ -92,7 +99,8 @@ func TestFetchPRListErrors(t *testing.T) {
 	cfg.Team.Repos = []string{"bare"}
 	list := fetchPRList(cfg, &memberCache{}, time.Now())
 	// A failed source is reported, and the others still show.
-	if len(list.PRs) != 1 || len(list.Errors) != 2 || !strings.HasPrefix(list.Errors[0], "My PRs: boom") || !strings.Contains(list.Errors[1], `"bare"`) {
+	errs := strings.Join(list.Errors, "\n")
+	if len(list.PRs) != 1 || len(list.Errors) != 2 || !strings.Contains(errs, "My PRs: boom") || !strings.Contains(errs, `"bare"`) {
 		t.Errorf("PRs %d, errors %q", len(list.PRs), list.Errors)
 	}
 }
@@ -105,7 +113,11 @@ func TestFetchPRListChunksRepos(t *testing.T) {
 	}
 	fetchPRList(cfg, &memberCache{}, time.Now())
 	// One review-request search, then 23 repos in queries of 10, 10 and 3.
-	if len(*queries) != 4 || strings.Count((*queries)[3], "repo:") != 3 {
+	counts := map[int]int{}
+	for _, q := range *queries {
+		counts[strings.Count(q, "repo:")]++
+	}
+	if len(*queries) != 4 || counts[10] != 2 || counts[3] != 1 {
 		t.Errorf("queries: %q", *queries)
 	}
 }

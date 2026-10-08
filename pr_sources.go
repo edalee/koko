@@ -191,62 +191,77 @@ func (c *memberCache) get(team string, now time.Time) (map[string]bool, error) {
 // maxReposPerQuery keeps a repos search under GitHub's query length limit.
 const maxReposPerQuery = 10
 
-// fetchPRList collects the panel's PRs from the sources cfg turns on. A
+// prSource is one search, the section its PRs go in, and the label for its
+// error.
+type prSource struct {
+	section, label, query string
+	team                  bool // filtered to the team's people
+}
+
+// fetchPRList collects the panel's PRs from the sources cfg turns on. The
+// searches run at the same time, because each takes several seconds. A
 // failed source is reported in Errors, and the others still show.
 func fetchPRList(cfg PRPanelConfig, members *memberCache, now time.Time) PRList {
 	list := PRList{PRs: []GitHubPR{}}
+	since := func(days int) string { return now.AddDate(0, 0, -days).Format("2006-01-02") }
+
+	var sources []prSource
+	if cfg.Mine.Enabled {
+		sources = append(sources, prSource{section: SectionMine, label: "My PRs",
+			query: fmt.Sprintf("is:pr is:open archived:false author:@me created:>=%s", since(cfg.Mine.MaxAgeDays))})
+	}
+	var team map[string]bool
+	if cfg.Team.Enabled {
+		if cfg.Team.Team != "" {
+			m, err := members.get(cfg.Team.Team, now)
+			if err != nil {
+				list.Errors = append(list.Errors, "Team PRs: "+err.Error())
+			}
+			team = m
+		}
+		if cfg.Team.Team == "" || team != nil {
+			base := fmt.Sprintf("is:pr is:open archived:false draft:false created:>=%s", since(cfg.Team.MaxAgeDays))
+			sources = append(sources, prSource{section: SectionTeam, label: "Review requests", query: base + " review-requested:@me", team: true})
+			repos, bad := teamRepos(cfg.Team)
+			for _, r := range bad {
+				list.Errors = append(list.Errors, fmt.Sprintf("Team PRs: repo %q, want owner/repo", r))
+			}
+			for i := 0; i < len(repos); i += maxReposPerQuery {
+				chunk := repos[i:min(i+maxReposPerQuery, len(repos))]
+				sources = append(sources, prSource{section: SectionTeam, label: "Team repos",
+					query: base + " repo:" + strings.Join(chunk, " repo:"), team: true})
+			}
+		}
+	}
+
+	type result struct {
+		nodes []searchNode
+		err   error
+	}
+	results := make([]result, len(sources))
+	var wg sync.WaitGroup
+	for i, src := range sources {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i].nodes, results[i].err = searchPRs(src.query)
+		}()
+	}
+	wg.Wait()
+
+	// In source order, so a PR found twice shows in the first section.
 	seen := map[string]bool{}
-	add := func(section string, nodes []searchNode, keep func(searchNode) bool) {
-		for _, n := range nodes {
-			if seen[n.URL] || (keep != nil && !keep(n)) {
+	for i, src := range sources {
+		if err := results[i].err; err != nil {
+			list.Errors = append(list.Errors, src.label+": "+err.Error())
+		}
+		for _, n := range results[i].nodes {
+			if seen[n.URL] || (src.team && (n.isBot() || (team != nil && !team[strings.ToLower(n.Author.Login)]))) {
 				continue
 			}
 			seen[n.URL] = true
-			list.PRs = append(list.PRs, n.toPR(section))
+			list.PRs = append(list.PRs, n.toPR(src.section))
 		}
-	}
-	since := func(days int) string { return now.AddDate(0, 0, -days).Format("2006-01-02") }
-
-	if cfg.Mine.Enabled {
-		nodes, err := searchPRs(fmt.Sprintf("is:pr is:open archived:false author:@me created:>=%s", since(cfg.Mine.MaxAgeDays)))
-		if err != nil {
-			list.Errors = append(list.Errors, "My PRs: "+err.Error())
-		}
-		add(SectionMine, nodes, nil)
-	}
-	if !cfg.Team.Enabled {
-		return list
-	}
-
-	var team map[string]bool
-	if cfg.Team.Team != "" {
-		m, err := members.get(cfg.Team.Team, now)
-		if err != nil {
-			list.Errors = append(list.Errors, "Team PRs: "+err.Error())
-			return list
-		}
-		team = m
-	}
-	keep := func(n searchNode) bool {
-		return !n.isBot() && (team == nil || team[strings.ToLower(n.Author.Login)])
-	}
-	base := fmt.Sprintf("is:pr is:open archived:false draft:false created:>=%s", since(cfg.Team.MaxAgeDays))
-	nodes, err := searchPRs(base + " review-requested:@me")
-	if err != nil {
-		list.Errors = append(list.Errors, "Review requests: "+err.Error())
-	}
-	add(SectionTeam, nodes, keep)
-	repos, bad := teamRepos(cfg.Team)
-	for _, r := range bad {
-		list.Errors = append(list.Errors, fmt.Sprintf("Team PRs: repo %q, want owner/repo", r))
-	}
-	for i := 0; i < len(repos); i += maxReposPerQuery {
-		chunk := repos[i:min(i+maxReposPerQuery, len(repos))]
-		nodes, err := searchPRs(base + " repo:" + strings.Join(chunk, " repo:"))
-		if err != nil {
-			list.Errors = append(list.Errors, "Team repos: "+err.Error())
-		}
-		add(SectionTeam, nodes, keep)
 	}
 	return list
 }
