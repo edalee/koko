@@ -4,6 +4,9 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Changed
+- **Reviewer command**: Settings > Worker > Review worker sets the reviewer as one command, such as `{reviewer} {pr} --all`, with an optional log folder and the comment marker. Logs off means the reviewer writes `$REVIEW_RESULT`. The worker no longer assumes tono or Epidemic Sound: a new install has no reviewer and no team until you set them, and a bare repo name means the team's org. Your current tono settings carry over as they are (plan 031, ADR-040)
+
 ## [0.5.7] - 2026-10-08
 
 ### Added

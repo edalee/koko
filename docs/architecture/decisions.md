@@ -503,3 +503,16 @@
   - Until tono writes a result file, the `tono-logs` adapter reads its logs as before. It reads `**LGTM!**` as ready, posts one LGTM instead of three, and treats a code review skipped for an LGTM on the head commit as skipped.
 - **Files:** `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/config.go`, `frontend/src/components/WorkerSettings.tsx`
 - **Plan:** `docs/plans/030-reviewer-contract.md`
+
+## ADR-040: The reviewer is one command and an optional log folder
+- **Date:** 2026-10-08
+- **Status:** Accepted
+- **Decision:** `reviewer.command` and `reviewer.logs` replace `reviewer.format` and `reviewer.args`. The command is split on spaces, with quotes, and runs without a shell. Leading `NAME=value` words set environment variables. `{reviewer}` is the CLI from the source setting, and `{claude}` is the wrapper that cannot post. An empty log folder means the result file. Nothing outside the migration names tono or Epidemic Sound, and a new install has no reviewer until you set one.
+- **Rationale:**
+  - One command says everything about how a reviewer runs. A reviewer on the PATH needs no source at all.
+  - `TONO_CLAUDE` was the last tono name the worker set on every run. A `NAME={claude}` word lets any reviewer name its own variable.
+  - The log folder is the only tono-specific reading left. Making it an optional setting keeps it for tono until tono writes a result file, without tying the worker to it.
+  - A 0.5.7 config migrates by the missing `command` key, in both the worker and the Settings tab. An empty command stays empty, so clearing it is not undone.
+  - The state keys moved to `reviewed` and `results`, read from the old names on load, so no PR is reviewed twice.
+- **Files:** `cmd/koko-worker/config.go`, `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/scheduler.go`, `frontend/src/components/WorkerSettings.tsx`
+- **Plan:** `docs/plans/031-generic-reviewer.md`
