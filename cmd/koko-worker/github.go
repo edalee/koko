@@ -278,11 +278,13 @@ func teamMembers(ctx context.Context, team string) (map[string]bool, error) {
 	return members, nil
 }
 
-// hasTonoComment is true if the PR already carries a tono comment, for
-// example from a teammate who ran tono with -c (post the findings).
-func hasTonoComment(ctx context.Context, repo string, number int) (bool, error) {
+// hasTonoComment is true if the PR already carries a comment behind the
+// reviewer's marker "<!-- prefix:", for example from a teammate who ran tono
+// with -c (post the findings). prefix is checked to be [a-z0-9-] in
+// ReviewerConfig.problem, so it is safe inside the jq filter.
+func hasTonoComment(ctx context.Context, repo string, number int, prefix string) (bool, error) {
 	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
-		"--jq", `.[] | select(.body | contains("<!-- tono:")) | .id`)
+		"--jq", `.[] | select(.body | contains("<!-- `+prefix+`:")) | .id`)
 	if err != nil {
 		return false, err
 	}

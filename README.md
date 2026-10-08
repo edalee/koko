@@ -165,7 +165,7 @@ It needs these connections. Settings > Worker checks each one and says how to fi
 - **Slack**: a bot token (`xoxb-`) with the `chat:write` scope, and your Slack user ID. The worker keeps its own Slack settings, apart from Koko's Slack bot.
 - **GitHub**: the `gh` CLI, signed in with `gh auth login`.
 - **Claude Code**: `claude` on the PATH, with the claude.ai Google Calendar and Atlassian connectors connected.
-- **Reviewer**: nothing to set by default. The review worker keeps its own clone of `epidemicsound/tonometer` at `main` and updates it before each run. To run another reviewer, set a local path in Settings > Worker > Review worker.
+- **Reviewer**: nothing to set by default. The review worker keeps its own clone of `epidemicsound/tonometer` at `main` and updates it before each run. To run another reviewer, set a local path in Settings > Worker > Review worker. Any CLI that follows the reviewer contract in `docs/plans/030-reviewer-contract.md` can review: it writes its comments as JSON to `$REVIEW_RESULT`, and the worker posts them.
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the exact line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
 
 The switch in Settings > Worker installs the launchd agent `com.koko.worker`. The same switch removes it. You can also run `koko-worker install` and `koko-worker uninstall` by hand.

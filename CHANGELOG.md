@@ -4,6 +4,15 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-10-08
+
+### Added
+- **Reviewer contract**: the review worker can run any reviewer CLI, not only tono. The reviewer writes its comments as JSON to `$REVIEW_RESULT`, and the worker posts them. Settings > Worker > Review worker > "Advanced" sets the format, the arguments and the marker prefix (plan 030, ADR-039)
+
+### Fixed
+- **tono's LGTM reviews**: a clean review's `**LGTM!**` now reads as ready to approve in the stand-up and the Slack line, and a fully clean PR gets one LGTM comment, not one per pass
+- **Skipped code review**: when tono skips the code review because its LGTM is already on the head commit, the worker no longer marks the review failed
+
 ## [0.5.6] - 2026-10-07
 
 ### Changed

@@ -490,3 +490,16 @@
   - Removal tries without `--force` first. Only when git refuses does the dialog offer a forced removal. This protects uncommitted work.
 - **Files:** `git_service.go`, `frontend/src/components/SessionDialog.tsx`, `frontend/src/components/WorktreesModule.tsx`, `frontend/src/components/WorktreeRemovalDialog.tsx`, `frontend/src/hooks/useWorktrees.ts`, `frontend/src/hooks/useSessionBranches.ts`, `worktree_cleanup.go`, `frontend/src/components/HousekeepingSettings.tsx`
 - **Plan:** `docs/plans/027-git-worktrees-for-session-isolation.md`
+
+## ADR-039: A reviewer contract for the review worker
+- **Date:** 2026-10-08
+- **Status:** Accepted
+- **Decision:** The review worker runs any reviewer CLI that follows a small contract, not only tono. The worker fills in `reviewer.args` and passes `REVIEW_RESULT`, `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` and `REVIEW_CLAUDE`. The reviewer exits 0, or 2 for nothing to review, and writes its comments as JSON to `REVIEW_RESULT`. It never posts. The worker posts each comment as written.
+- **Rationale:**
+  - Two tono changes, LGTM drafts and skipping a code review already clean at the head commit, broke a worker that read tono's private logs. A contract keeps the reviewer's internals out of the worker.
+  - The reviewer writes its own LGTM, so a clean review says what it checked, and the worker invents nothing.
+  - A skipped pass is a pass with no comment, never a failure.
+  - The marker prefix (`reviewer.markerPrefix`) is how the worker knows a PR is reviewed, so it is configurable with the reviewer.
+  - Until tono writes a result file, the `tono-logs` adapter reads its logs as before. It reads `**LGTM!**` as ready, posts one LGTM instead of three, and treats a code review skipped for an LGTM on the head commit as skipped.
+- **Files:** `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/config.go`, `frontend/src/components/WorkerSettings.tsx`
+- **Plan:** `docs/plans/030-reviewer-contract.md`

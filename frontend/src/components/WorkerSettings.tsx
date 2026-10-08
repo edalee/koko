@@ -40,6 +40,9 @@ interface ReviewerConfig {
   autoUpdate: boolean;
   script: string;
   path: string;
+  format: "tono-logs" | "result-json";
+  args: string[];
+  markerPrefix: string;
   mine: ScopeConfig;
   team: ScopeConfig & { team: string; repos: string[] };
 }
@@ -97,6 +100,9 @@ const DEFAULTS: WorkerConfig = {
     autoUpdate: true,
     script: "tono",
     path: "",
+    format: "tono-logs",
+    args: ["{pr}", "--all", "-l", "high", "-R", "{repo}"],
+    markerPrefix: "tono",
     mine: { enabled: true, maxAgeDays: 14 },
     team: { enabled: true, maxAgeDays: 4, team: "epidemicsound/content-protection", repos: [] },
   },
@@ -681,6 +687,54 @@ export default function WorkerSettings() {
                       className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
                     />
                   )}
+                  <details className="group">
+                    <summary className="cursor-pointer text-[10px] text-tertiary hover:text-muted-foreground">
+                      Advanced: use another reviewer
+                    </summary>
+                    <div className="mt-2 space-y-2 text-[10px] text-tertiary">
+                      <p>
+                        Any CLI can review, if it follows the reviewer contract in plan 030. It
+                        writes its comments as JSON to $REVIEW_RESULT and never posts.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>Format</span>
+                        <select
+                          value={cfg.reviewer.format}
+                          onChange={(e) =>
+                            saveReviewer({ format: e.target.value as ReviewerConfig["format"] })
+                          }
+                          className={cn(inputClass, "[color-scheme:dark]")}
+                        >
+                          <option value="tono-logs">tono logs (tono today)</option>
+                          <option value="result-json">result JSON (the contract)</option>
+                        </select>
+                        <span>marker</span>
+                        <input
+                          type="text"
+                          value={cfg.reviewer.markerPrefix}
+                          onChange={(e) => setReviewer({ markerPrefix: e.target.value })}
+                          onBlur={() => save(cfg)}
+                          placeholder="tono"
+                          className={cn(inputClass, "w-24 font-mono")}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span>Arguments</span>
+                        <input
+                          type="text"
+                          value={cfg.reviewer.args.join(" ")}
+                          onChange={(e) => setReviewer({ args: e.target.value.split(" ") })}
+                          onBlur={() => save(cfg)}
+                          placeholder="{pr} --all -l high -R {repo}"
+                          className={cn(inputClass, "flex-1 font-mono")}
+                        />
+                      </div>
+                      <p>
+                        {"{pr}"}, {"{repo}"}, {"{url}"} and {"{sha}"} are filled in for each PR. A
+                        PR with a comment behind the marker counts as reviewed.
+                      </p>
+                    </div>
+                  </details>
                 </div>
               )}
 

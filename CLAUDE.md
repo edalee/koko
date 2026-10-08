@@ -54,14 +54,14 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `types.go` — Shared Go types with JSON tags
 - `worker_service.go`: Wails-bound bridge to koko-worker. It edits `worker.json` and calls the binary. Methods pass JSON strings, so `models.ts` stays unchanged.
 - `cmd/koko-cli/` — CLI companion
-- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `jira.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`, `reviewer.go` (the managed reviewer clone)
+- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `jira.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`, `reviewer.go` (the managed reviewer clone), `review_contract.go` (the reviewer contract, plan 030), `logs.go` (log cap and cleanup)
 - `frontend/src/` — React app
   - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, WorktreesModule, WorktreeRemovalDialog, etc.
   - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.
   - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx` (on/off, job times, Test and Run now, checks, log)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
-- `docs/plans/` — Implementation plans (001-029)
+- `docs/plans/` — Implementation plans (001-030)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
@@ -88,6 +88,6 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **`/design` command**: screenshots running app + analyzes against design system
 
 ## Design Docs
-- Implementation plans in `docs/plans/` (001-029)
+- Implementation plans in `docs/plans/` (001-030)
 - Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation
