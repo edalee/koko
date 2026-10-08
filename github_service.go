@@ -5,78 +5,16 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
-// defaultTrackedRepos is the initial PR-watch list when the user hasn't
-// customised it via Settings. Entries may be "owner/repo" or just "repo"
-// (bare names resolve to epidemicsound/<repo>).
-var defaultTrackedRepos = []string{
-	"conductor-bot",
-	"zufolo",
-	"roneat",
-	"stylophone",
-	"mellotron",
-	"youtube-data-service",
-	"centralised-licensing-service",
-	"licensing-api",
-	"bagpipe",
-	"windchime",
-	"hackweek-video",
-	"claim-worker",
-	"tanbur",
-	"theremin",
-	"aentidote-portal",
-	"drm-claude-plugins",
-}
-
 type GitHubService struct {
-	config *ConfigService
+	config  *ConfigService
+	members memberCache
 }
 
 func NewGitHubService(config *ConfigService) *GitHubService {
 	return &GitHubService{config: config}
-}
-
-// resolveRepo normalises a tracked-repo entry to "owner/repo". Bare names
-// (no slash) are treated as belonging to the epidemicsound org for
-// backward compatibility.
-func resolveRepo(entry string) string {
-	if strings.Contains(entry, "/") {
-		return entry
-	}
-	return "epidemicsound/" + entry
-}
-
-type ghPRJSON struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Author struct {
-		Login string `json:"login"`
-	} `json:"author"`
-	ReviewDecision string `json:"reviewDecision"`
-	URL            string `json:"url"`
-	Body           string `json:"body"`
-	Additions      int    `json:"additions"`
-	Deletions      int    `json:"deletions"`
-	ChangedFiles   int    `json:"changedFiles"`
-	HeadRefName    string `json:"headRefName"`
-	BaseRefName    string `json:"baseRefName"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
-	Mergeable        string `json:"mergeable"`
-	MergeStateStatus string `json:"mergeStateStatus"`
-	IsDraft          bool   `json:"isDraft"`
-	Labels           []struct {
-		Name string `json:"name"`
-	} `json:"labels"`
-	Assignees []struct {
-		Login string `json:"login"`
-	} `json:"assignees"`
-	StatusCheckRollup []struct {
-		Name       string `json:"name"`
-		Status     string `json:"status"`
-		Conclusion string `json:"conclusion"`
-	} `json:"statusCheckRollup"`
 }
 
 type ghNotificationJSON struct {
@@ -174,8 +112,12 @@ func apiToHTMLURL(apiURL, repoHTMLURL string) string {
 
 // ApprovePR approves a pull request via gh CLI.
 func (g *GitHubService) ApprovePR(repo string, number int) error {
-	err := exec.Command("gh", "pr", "review",
-		"--repo", "epidemicsound/"+repo,
+	repo, err := ghRepo(repo)
+	if err != nil {
+		return err
+	}
+	err = exec.Command("gh", "pr", "review",
+		"--repo", repo,
 		"--approve",
 		fmt.Sprintf("%d", number),
 	).Run()
@@ -187,8 +129,12 @@ func (g *GitHubService) ApprovePR(repo string, number int) error {
 
 // MergePR merges a pull request via gh CLI using squash merge.
 func (g *GitHubService) MergePR(repo string, number int) error {
-	err := exec.Command("gh", "pr", "merge",
-		"--repo", "epidemicsound/"+repo,
+	repo, err := ghRepo(repo)
+	if err != nil {
+		return err
+	}
+	err = exec.Command("gh", "pr", "merge",
+		"--repo", repo,
 		"--squash",
 		"--delete-branch",
 		fmt.Sprintf("%d", number),
@@ -201,8 +147,12 @@ func (g *GitHubService) MergePR(repo string, number int) error {
 
 // FetchPRFiles returns the list of changed files for a specific PR.
 func (g *GitHubService) FetchPRFiles(repo string, number int) ([]PRFile, error) {
+	repo, err := ghRepo(repo)
+	if err != nil {
+		return nil, err
+	}
 	out, err := exec.Command("gh", "pr", "view",
-		"--repo", "epidemicsound/"+repo,
+		"--repo", repo,
 		"--json", "files",
 		fmt.Sprintf("%d", number),
 	).Output()
@@ -230,7 +180,10 @@ func (g *GitHubService) FetchPRFiles(repo string, number int) ([]PRFile, error) 
 
 // FetchPRFileDiff returns diff data for a single file in a PR, suitable for the code viewer.
 func (g *GitHubService) FetchPRFileDiff(repo string, number int, filePath string) (FileDiffData, error) {
-	fullRepo := "epidemicsound/" + repo
+	fullRepo, err := ghRepo(repo)
+	if err != nil {
+		return FileDiffData{}, err
+	}
 	prNum := fmt.Sprintf("%d", number)
 	lang := inferLanguage(filePath)
 
@@ -343,8 +296,12 @@ func extractFileHunks(fullDiff, filePath string) string {
 
 // FetchPRReviews returns reviews and requested reviewers for a specific PR.
 func (g *GitHubService) FetchPRReviews(repo string, number int) ([]PRReview, error) {
+	repo, err := ghRepo(repo)
+	if err != nil {
+		return nil, err
+	}
 	out, err := exec.Command("gh", "pr", "view",
-		"--repo", "epidemicsound/"+repo,
+		"--repo", repo,
 		"--json", "latestReviews,reviewRequests",
 		fmt.Sprintf("%d", number),
 	).Output()
@@ -396,8 +353,12 @@ func (g *GitHubService) FetchPRReviews(repo string, number int) ([]PRReview, err
 
 // FetchPRCommits returns the commit list for a specific PR.
 func (g *GitHubService) FetchPRCommits(repo string, number int) ([]PRCommit, error) {
+	repo, err := ghRepo(repo)
+	if err != nil {
+		return nil, err
+	}
 	out, err := exec.Command("gh", "pr", "view",
-		"--repo", "epidemicsound/"+repo,
+		"--repo", repo,
 		"--json", "commits",
 		fmt.Sprintf("%d", number),
 	).Output()
@@ -441,7 +402,10 @@ func (g *GitHubService) FetchPRCommits(repo string, number int) ([]PRCommit, err
 
 // FetchPRComments fetches both review comments and issue comments for a PR.
 func (g *GitHubService) FetchPRComments(repo string, number int) (PRCommentsData, error) {
-	fullRepo := "epidemicsound/" + repo
+	fullRepo, err := ghRepo(repo)
+	if err != nil {
+		return PRCommentsData{}, err
+	}
 	result := PRCommentsData{}
 
 	// Fetch review comments (inline on diffs)
@@ -450,9 +414,9 @@ func (g *GitHubService) FetchPRComments(repo string, number int) (PRCommentsData
 	).Output()
 	if err == nil {
 		var rawReview []struct {
-			ID           int64  `json:"id"`
-			InReplyToID  int64  `json:"in_reply_to_id"`
-			User         struct {
+			ID          int64 `json:"id"`
+			InReplyToID int64 `json:"in_reply_to_id"`
+			User        struct {
 				Login string `json:"login"`
 				Type  string `json:"type"`
 			} `json:"user"`
@@ -542,7 +506,10 @@ func (g *GitHubService) FetchPRComments(repo string, number int) (PRCommentsData
 
 // ReplyToReviewComment replies to a review comment thread.
 func (g *GitHubService) ReplyToReviewComment(repo string, number int, commentID int64, body string) (PRComment, error) {
-	fullRepo := "epidemicsound/" + repo
+	fullRepo, err := ghRepo(repo)
+	if err != nil {
+		return PRComment{}, err
+	}
 	out, err := exec.Command("gh", "api",
 		"--method", "POST",
 		fmt.Sprintf("repos/%s/pulls/%d/comments/%d/replies", fullRepo, number, commentID),
@@ -553,8 +520,8 @@ func (g *GitHubService) ReplyToReviewComment(repo string, number int, commentID 
 	}
 
 	var raw struct {
-		ID        int64  `json:"id"`
-		User      struct {
+		ID   int64 `json:"id"`
+		User struct {
 			Login string `json:"login"`
 			Type  string `json:"type"`
 		} `json:"user"`
@@ -578,7 +545,10 @@ func (g *GitHubService) ReplyToReviewComment(repo string, number int, commentID 
 
 // AddIssueComment adds a general discussion comment to a PR.
 func (g *GitHubService) AddIssueComment(repo string, number int, body string) (PRComment, error) {
-	fullRepo := "epidemicsound/" + repo
+	fullRepo, err := ghRepo(repo)
+	if err != nil {
+		return PRComment{}, err
+	}
 	out, err := exec.Command("gh", "api",
 		"--method", "POST",
 		fmt.Sprintf("repos/%s/issues/%d/comments", fullRepo, number),
@@ -589,8 +559,8 @@ func (g *GitHubService) AddIssueComment(repo string, number int, body string) (P
 	}
 
 	var raw struct {
-		ID        int64  `json:"id"`
-		User      struct {
+		ID   int64 `json:"id"`
+		User struct {
 			Login string `json:"login"`
 			Type  string `json:"type"`
 		} `json:"user"`
@@ -656,72 +626,12 @@ func (g *GitHubService) FetchBranchCI(repoSlug string, branch string) (BranchCI,
 	return result, nil
 }
 
-func (g *GitHubService) FetchPRs() ([]GitHubPR, error) {
-	repos := defaultTrackedRepos
+// FetchPRs returns the PR panel's PRs from the sources in Settings > GitHub
+// (plan 032), and an error for each source that failed.
+func (g *GitHubService) FetchPRs() PRList {
+	cfg := defaultPRPanel()
 	if g.config != nil {
-		repos = g.config.GetTrackedRepos()
+		cfg = g.config.GetPRPanel()
 	}
-	var allPRs []GitHubPR
-	for _, entry := range repos {
-		fullRepo := resolveRepo(entry)
-		// Display name = short repo (last segment) so existing PR-hide
-		// keys ("repo#number") continue to work.
-		displayRepo := fullRepo
-		if idx := strings.LastIndex(fullRepo, "/"); idx >= 0 {
-			displayRepo = fullRepo[idx+1:]
-		}
-		out, err := exec.Command("gh", "pr", "list",
-			"--repo", fullRepo,
-			"--json", "number,title,author,reviewDecision,url,body,additions,deletions,changedFiles,headRefName,baseRefName,createdAt,updatedAt,mergeable,mergeStateStatus,isDraft,labels,statusCheckRollup,assignees",
-			"--limit", "10",
-		).Output()
-		if err != nil {
-			continue
-		}
-		var prs []ghPRJSON
-		if err := json.Unmarshal(out, &prs); err != nil {
-			continue
-		}
-		for _, pr := range prs {
-			var labels []string
-			for _, l := range pr.Labels {
-				labels = append(labels, l.Name)
-			}
-			var assignees []string
-			for _, a := range pr.Assignees {
-				assignees = append(assignees, a.Login)
-			}
-			var checks []PRCheck
-			for _, c := range pr.StatusCheckRollup {
-				checks = append(checks, PRCheck{
-					Name:       c.Name,
-					Status:     c.Status,
-					Conclusion: c.Conclusion,
-				})
-			}
-			allPRs = append(allPRs, GitHubPR{
-				Repo:             displayRepo,
-				Number:           pr.Number,
-				Title:            pr.Title,
-				Author:           pr.Author.Login,
-				ReviewDecision:   pr.ReviewDecision,
-				URL:              pr.URL,
-				Body:             pr.Body,
-				Additions:        pr.Additions,
-				Deletions:        pr.Deletions,
-				ChangedFiles:     pr.ChangedFiles,
-				HeadRef:          pr.HeadRefName,
-				BaseRef:          pr.BaseRefName,
-				CreatedAt:        pr.CreatedAt,
-				UpdatedAt:        pr.UpdatedAt,
-				Mergeable:        pr.Mergeable,
-				MergeStateStatus: pr.MergeStateStatus,
-				IsDraft:          pr.IsDraft,
-				Labels:           labels,
-				Assignees:        assignees,
-				Checks:           checks,
-			})
-		}
-	}
-	return allPRs, nil
+	return fetchPRList(cfg, &g.members, time.Now())
 }
