@@ -7,17 +7,18 @@ const REFRESH_INTERVAL = 60_000; // 60 seconds
 export function useGitHub() {
   const [prs, setPRs] = useState<GitHubPR[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // One message per PR source that failed, such as "My PRs: ...".
+  const [errors, setErrors] = useState<string[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const result = await FetchPRs();
-      setPRs(result ?? []);
+      setPRs((result?.prs ?? []) as GitHubPR[]);
+      setErrors(result?.errors ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch PRs");
+      setErrors([err instanceof Error ? err.message : "Failed to fetch PRs"]);
     } finally {
       setLoading(false);
     }
@@ -31,5 +32,5 @@ export function useGitHub() {
     };
   }, [refresh]);
 
-  return { prs, loading, error, refresh };
+  return { prs, loading, errors, refresh };
 }

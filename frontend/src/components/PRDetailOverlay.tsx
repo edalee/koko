@@ -39,6 +39,7 @@ import {
   ReplyToReviewComment,
 } from "../../wailsjs/go/main/GitHubService";
 import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
+import { isHiddenPR, PR_SECTIONS } from "../lib/prs";
 import { cn } from "../lib/utils";
 import type {
   GitHubPR,
@@ -57,6 +58,7 @@ interface PRDetailOverlayProps {
   onClose: () => void;
   onRefresh: () => void;
   hiddenPRs: Set<string>;
+  errors?: string[];
   onHiddenChange: () => void;
   onOpenDiff?: (repo: string, number: number, path: string, files: PRFile[]) => void;
 }
@@ -281,6 +283,7 @@ export default function PRDetailOverlay({
   onClose,
   onRefresh,
   hiddenPRs,
+  errors = [],
   onHiddenChange,
   onOpenDiff,
 }: PRDetailOverlayProps) {
@@ -380,8 +383,8 @@ export default function PRDetailOverlay({
   const passedChecks = checks.filter((c) => c.conclusion === "SUCCESS").length;
   const failedChecks = checks.filter((c) => c.conclusion === "FAILURE").length;
 
-  const visiblePRs = prs.filter((p) => !hiddenPRs.has(`${p.repo}#${p.number}`));
-  const hiddenPRList = prs.filter((p) => hiddenPRs.has(`${p.repo}#${p.number}`));
+  const visiblePRs = prs.filter((p) => !isHiddenPR(hiddenPRs, p));
+  const hiddenPRList = prs.filter((p) => isHiddenPR(hiddenPRs, p));
 
   async function handleApprove() {
     if (!pr) return;
@@ -1104,44 +1107,73 @@ export default function PRDetailOverlay({
             </h3>
           </div>
           <div className="flex-1 overflow-auto">
-            {visiblePRs.map((p) => {
-              const isSelected = pr != null && p.repo === pr.repo && p.number === pr.number;
+            {errors.length > 0 && (
+              <div className="px-4 py-2 space-y-1 border-b border-white/[0.06]">
+                {errors.map((e) => (
+                  <p key={e} className="text-[10px] text-error break-words">
+                    {e}
+                  </p>
+                ))}
+              </div>
+            )}
+            {visiblePRs.length === 0 && errors.length === 0 && (
+              <p className="px-4 py-3 text-[11px] text-tertiary">
+                No open PRs. Settings &gt; GitHub sets which PRs show here.
+              </p>
+            )}
+            {PR_SECTIONS.map(({ key, name }) => {
+              const section = visiblePRs.filter((p) => p.section === key);
+              if (section.length === 0) return null;
               return (
-                // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR list item
-                <div
-                  key={`${p.repo}-${p.number}`}
-                  className={cn(
-                    "px-4 py-3 cursor-pointer transition-all border-l-2 group",
-                    isSelected
-                      ? "bg-white/[0.06] border-accent glow-accent"
-                      : "border-transparent hover:bg-white/[0.04]",
-                  )}
-                  onClick={() => onSelectPR(p)}
-                >
-                  <div className="flex items-center gap-2">
-                    <p
-                      className={cn(
-                        "text-sm truncate flex-1",
-                        isSelected ? "text-white" : "text-white/70",
-                      )}
-                    >
-                      {p.title}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={(e) => handleHide(p.repo, p.number, e)}
-                      className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all shrink-0"
-                      title="Hide this PR"
-                    >
-                      <EyeOff className="size-3 text-muted-foreground" />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-muted-foreground">
-                      {p.repo}#{p.number}
-                    </span>
-                    <span className="text-[10px] text-tertiary">{p.author}</span>
-                  </div>
+                <div key={key}>
+                  <p className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-wide text-tertiary">
+                    {name} <span className="ml-1">{section.length}</span>
+                  </p>
+                  {section.map((p) => {
+                    const isSelected = pr != null && p.repo === pr.repo && p.number === pr.number;
+                    return (
+                      // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: PR list item
+                      <div
+                        key={`${p.repo}-${p.number}`}
+                        className={cn(
+                          "px-4 py-3 cursor-pointer transition-all border-l-2 group",
+                          isSelected
+                            ? "bg-white/[0.06] border-accent glow-accent"
+                            : "border-transparent hover:bg-white/[0.04]",
+                        )}
+                        onClick={() => onSelectPR(p)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <p
+                            className={cn(
+                              "text-sm truncate flex-1",
+                              isSelected ? "text-white" : "text-white/70",
+                            )}
+                          >
+                            {p.title}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(e) => handleHide(p.repo, p.number, e)}
+                            className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all shrink-0"
+                            title="Hide this PR"
+                          >
+                            <EyeOff className="size-3 text-muted-foreground" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span
+                            className="text-[10px] text-muted-foreground truncate"
+                            title={p.repo}
+                          >
+                            {p.repo}#{p.number}
+                          </span>
+                          <span className="text-[10px] text-tertiary">{p.author}</span>
+                          {p.isDraft && <span className="text-[10px] text-tertiary">draft</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}

@@ -7,23 +7,20 @@ import {
   Github,
   HeartPulse,
   Loader2,
-  Plus,
   SlidersHorizontal,
   Trash2,
-  X,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
   ClearHiddenPRs,
   GetConfig,
   GetHiddenPRs,
-  GetTrackedRepos,
   SaveConfig,
-  SetTrackedRepos,
 } from "../../wailsjs/go/main/ConfigService";
 import type { SafeWorkingConfig } from "../hooks/useSafeWorking";
 import { cn } from "../lib/utils";
 import HousekeepingSettings, { type HousekeepingProps } from "./HousekeepingSettings";
+import PRPanelSettings from "./PRPanelSettings";
 import WorkerSettings from "./WorkerSettings";
 
 interface SettingsPanelProps {
@@ -68,17 +65,10 @@ export default function SettingsPanel({
   const [keyCopied, setKeyCopied] = useState(false);
   const [hiddenPRCount, setHiddenPRCount] = useState(0);
   const [prCleared, setPrCleared] = useState(false);
-  const [trackedRepos, setTrackedReposState] = useState<string[]>([]);
-  const [newRepo, setNewRepo] = useState("");
-  const [reposSaved, setReposSaved] = useState(false);
-  const [repoError, setRepoError] = useState<string | null>(null);
 
   useEffect(() => {
     GetHiddenPRs()
       .then((prs) => setHiddenPRCount(Object.keys(prs).length))
-      .catch(() => {});
-    GetTrackedRepos()
-      .then((repos) => setTrackedReposState(repos || []))
       .catch(() => {});
     GetConfig()
       .then((config) => {
@@ -94,46 +84,6 @@ export default function SettingsPanel({
       })
       .catch(() => {});
   }, []);
-
-  const persistRepos = useCallback(
-    async (next: string[]) => {
-      try {
-        await SetTrackedRepos(next);
-        setTrackedReposState(next);
-        setReposSaved(true);
-        setTimeout(() => setReposSaved(false), 1500);
-        onReposChanged?.();
-      } catch (e) {
-        setRepoError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [onReposChanged],
-  );
-
-  const handleAddRepo = useCallback(async () => {
-    const candidate = newRepo.trim();
-    setRepoError(null);
-    if (!candidate) return;
-    // Reject obvious junk early; the backend also normalises.
-    if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(candidate)) {
-      setRepoError("Use 'owner/repo' or just 'repo' (alphanumerics, dot, dash, underscore)");
-      return;
-    }
-    if (trackedRepos.includes(candidate)) {
-      setRepoError("Already in the list");
-      return;
-    }
-    await persistRepos([...trackedRepos, candidate]);
-    setNewRepo("");
-  }, [newRepo, trackedRepos, persistRepos]);
-
-  const handleRemoveRepo = useCallback(
-    async (repo: string) => {
-      setRepoError(null);
-      await persistRepos(trackedRepos.filter((r) => r !== repo));
-    },
-    [trackedRepos, persistRepos],
-  );
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -519,70 +469,12 @@ export default function SettingsPanel({
             <div>
               <h4 className="text-sm text-white font-medium">GitHub</h4>
               <p className="text-xs text-muted-foreground mt-1">
-                See Git diffs in the app for these repos and their PRs. Follow or unfollow the repos
-                you care about.
+                The PR panel shows your PRs and your team's, set the same way as the review
+                worker's.
               </p>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-white/80">
-                  Followed repos <span className="text-tertiary">({trackedRepos.length})</span>
-                </p>
-                {reposSaved && <Check className="size-3 text-accent" />}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {trackedRepos.map((repo) => (
-                  <span
-                    key={repo}
-                    className="group inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-white/[0.05] border border-white/[0.08] text-white/85 font-mono"
-                  >
-                    {repo}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveRepo(repo)}
-                      className="opacity-50 hover:opacity-100 hover:text-error transition-opacity"
-                      title={`Remove ${repo}`}
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
-                {trackedRepos.length === 0 && (
-                  <span className="text-[11px] text-tertiary">
-                    You follow no repos yet. Add one below.
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={newRepo}
-                  onChange={(e) => setNewRepo(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddRepo();
-                    }
-                  }}
-                  placeholder="owner/repo or repo (defaults to epidemicsound)"
-                  className="flex-1 px-2.5 py-1.5 text-[12px] font-mono bg-white/[0.04] border border-white/[0.08] rounded-md text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddRepo}
-                  disabled={!newRepo.trim()}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-md border border-white/[0.08] hover:bg-white/[0.06] disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Plus className="size-3" />
-                  <span className="text-white">Add</span>
-                </button>
-              </div>
-              {repoError && <p className="text-[10px] text-error">{repoError}</p>}
-              <p className="text-[10px] text-tertiary">
-                Bare names resolve to <span className="font-mono">epidemicsound/&lt;name&gt;</span>.
-                Use full <span className="font-mono">owner/repo</span> to track other orgs.
-              </p>
-            </div>
+            <PRPanelSettings onChange={onReposChanged} />
 
             <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
               <div>

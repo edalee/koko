@@ -36,10 +36,75 @@ export namespace main {
 	        this.breakMinutes = source["breakMinutes"];
 	    }
 	}
+	export class PRTeamScope {
+	    enabled: boolean;
+	    maxAgeDays: number;
+	    team: string;
+	    repos: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PRTeamScope(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.maxAgeDays = source["maxAgeDays"];
+	        this.team = source["team"];
+	        this.repos = source["repos"];
+	    }
+	}
+	export class PRScope {
+	    enabled: boolean;
+	    maxAgeDays: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PRScope(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.maxAgeDays = source["maxAgeDays"];
+	    }
+	}
+	export class PRPanelConfig {
+	    mine: PRScope;
+	    team: PRTeamScope;
+	
+	    static createFrom(source: any = {}) {
+	        return new PRPanelConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mine = this.convertValues(source["mine"], PRScope);
+	        this.team = this.convertValues(source["team"], PRTeamScope);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AppConfig {
 	    slackToken: string;
 	    slackOwnerId: string;
-	    githubRepos: string[];
+	    githubRepos?: string[];
+	    prPanel?: PRPanelConfig;
 	    safeWorking: SafeWorkingConfig;
 	    apiPort: number;
 	    apiKey: string;
@@ -55,6 +120,7 @@ export namespace main {
 	        this.slackToken = source["slackToken"];
 	        this.slackOwnerId = source["slackOwnerId"];
 	        this.githubRepos = source["githubRepos"];
+	        this.prPanel = this.convertValues(source["prPanel"], PRPanelConfig);
 	        this.safeWorking = this.convertValues(source["safeWorking"], SafeWorkingConfig);
 	        this.apiPort = source["apiPort"];
 	        this.apiKey = source["apiKey"];
@@ -194,22 +260,6 @@ export namespace main {
 	        this.sizeBytes = source["sizeBytes"];
 	    }
 	}
-	export class DeleteResult {
-	    deleted: string[];
-	    skipped: number;
-	    failed: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new DeleteResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.deleted = source["deleted"];
-	        this.skipped = source["skipped"];
-	        this.failed = source["failed"];
-	    }
-	}
 	export class CreateSessionOpts {
 	    name: string;
 	    dir: string;
@@ -232,6 +282,22 @@ export namespace main {
 	        this.claudeSessionId = source["claudeSessionId"];
 	        this.slug = source["slug"];
 	        this.replaces = source["replaces"];
+	    }
+	}
+	export class DeleteResult {
+	    deleted: string[];
+	    skipped: number;
+	    failed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeleteResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.deleted = source["deleted"];
+	        this.skipped = source["skipped"];
+	        this.failed = source["failed"];
 	    }
 	}
 	export class FileChange {
@@ -361,6 +427,7 @@ export namespace main {
 	    labels: string[];
 	    assignees: string[];
 	    checks: PRCheck[];
+	    section: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new GitHubPR(source);
@@ -388,6 +455,7 @@ export namespace main {
 	        this.labels = source["labels"];
 	        this.assignees = source["assignees"];
 	        this.checks = this.convertValues(source["checks"], PRCheck);
+	        this.section = source["section"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -559,6 +627,39 @@ export namespace main {
 	        this.deletions = source["deletions"];
 	    }
 	}
+	export class PRList {
+	    prs: GitHubPR[];
+	    errors: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PRList(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.prs = this.convertValues(source["prs"], GitHubPR);
+	        this.errors = source["errors"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class PRReview {
 	    author: string;
 	    state: string;
@@ -577,6 +678,8 @@ export namespace main {
 	        this.body = source["body"];
 	    }
 	}
+	
+	
 	export class ProcessInfo {
 	    pid: number;
 	    command: string;
@@ -641,16 +744,16 @@ export namespace main {
 	    }
 	}
 	export class SessionInfo {
-	    claudeSessionId?: string;
 	    id: string;
 	    slug: string;
 	    name: string;
 	    dir: string;
+	    claudeSessionId?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionInfo(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -726,6 +829,20 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class SkippedWorktree {
+	    path: string;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkippedWorktree(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.reason = source["reason"];
+	    }
+	}
 	export class UpdateInfo {
 	    available: boolean;
 	    version: string;
@@ -769,21 +886,6 @@ export namespace main {
 	        this.prunable = source["prunable"];
 	    }
 	}
-
-	export class SkippedWorktree {
-	    path: string;
-	    reason: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new SkippedWorktree(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.reason = source["reason"];
-	    }
-	}
 	export class WorktreeCleanup {
 	    removed: string[];
 	    gone: string[];
@@ -818,5 +920,6 @@ export namespace main {
 		    return a;
 		}
 	}
+
 }
 

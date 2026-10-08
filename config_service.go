@@ -25,15 +25,74 @@ type SafeWorkingConfig struct {
 
 // AppConfig holds all persisted application settings.
 type AppConfig struct {
-	SlackToken   string            `json:"slackToken"`
-	SlackOwnerID string            `json:"slackOwnerId"` // only respond to this Slack user ID
-	GitHubRepos  []string          `json:"githubRepos"`
-	SafeWorking  SafeWorkingConfig `json:"safeWorking"`
-	APIPort      int               `json:"apiPort"`
-	APIKey       string            `json:"apiKey"`
-	APIEnabled   bool              `json:"apiEnabled"`
-	HiddenPRs    map[string]bool   `json:"hiddenPrs,omitempty"` // key: "repo#number"
+	SlackToken   string `json:"slackToken"`
+	SlackOwnerID string `json:"slackOwnerId"` // only respond to this Slack user ID
+	// GitHubRepos is the PR panel's repo list before 0.5.9. GetPRPanel
+	// carries it over to PRPanel.
+	GitHubRepos []string          `json:"githubRepos,omitempty"`
+	PRPanel     *PRPanelConfig    `json:"prPanel,omitempty"`
+	SafeWorking SafeWorkingConfig `json:"safeWorking"`
+	APIPort     int               `json:"apiPort"`
+	APIKey      string            `json:"apiKey"`
+	APIEnabled  bool              `json:"apiEnabled"`
+	HiddenPRs   map[string]bool   `json:"hiddenPrs,omitempty"` // key: "owner/repo#number", or "repo#number" before 0.5.9
 }
+
+// PRPanelConfig is which PRs the PR panel shows (plan 032). It has the review
+// worker's two scopes: your PRs, and your team's.
+type PRPanelConfig struct {
+	Mine PRScope     `json:"mine"`
+	Team PRTeamScope `json:"team"`
+}
+
+// PRScope switches a set of PRs on, for those opened in the last MaxAgeDays.
+type PRScope struct {
+	Enabled    bool `json:"enabled"`
+	MaxAgeDays int  `json:"maxAgeDays"`
+}
+
+// PRTeamScope is the PRs that ask for your review, and every open PR in
+// Repos. With Team set, only those opened by its members.
+type PRTeamScope struct {
+	Enabled    bool     `json:"enabled"`
+	MaxAgeDays int      `json:"maxAgeDays"`
+	Team       string   `json:"team"`  // "org/team-slug", or "" for anyone
+	Repos      []string `json:"repos"` // "owner/repo". A bare name means the team's org
+}
+
+func defaultPRPanel() PRPanelConfig {
+	return PRPanelConfig{
+		Mine: PRScope{Enabled: true, MaxAgeDays: 30},
+		Team: PRTeamScope{Enabled: true, MaxAgeDays: 14},
+	}
+}
+
+// normalised fills in missing ages and trims and dedupes the repos.
+func (p PRPanelConfig) normalised() PRPanelConfig {
+	d := defaultPRPanel()
+	if p.Mine.MaxAgeDays <= 0 {
+		p.Mine.MaxAgeDays = d.Mine.MaxAgeDays
+	}
+	if p.Team.MaxAgeDays <= 0 {
+		p.Team.MaxAgeDays = d.Team.MaxAgeDays
+	}
+	p.Team.Team = strings.TrimSpace(p.Team.Team)
+	seen := map[string]bool{}
+	repos := []string{}
+	for _, r := range p.Team.Repos {
+		r = strings.TrimSpace(r)
+		if r == "" || seen[strings.ToLower(r)] {
+			continue
+		}
+		seen[strings.ToLower(r)] = true
+		repos = append(repos, r)
+	}
+	p.Team.Repos = repos
+	return p
+}
+
+// legacyRepoOrg is what a bare name in GitHubRepos meant before 0.5.9.
+const legacyRepoOrg = "epidemicsound"
 
 // ConfigService manages reading and writing the app config file.
 type ConfigService struct {
@@ -67,6 +126,11 @@ func (cs *ConfigService) SaveConfig(config AppConfig) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
+	// A config sent back from the frontend may lack the PR panel's settings,
+	// which have their own setter. Keep them.
+	if config.PRPanel == nil {
+		config.PRPanel = cs.config.PRPanel
+	}
 	cs.config = config
 
 	dir := filepath.Dir(cs.filePath)
@@ -145,8 +209,9 @@ func (cs *ConfigService) HidePR(repo string, number int) error {
 // UnhidePR removes the hidden flag from a PR.
 func (cs *ConfigService) UnhidePR(repo string, number int) error {
 	cs.mu.Lock()
-	key := fmt.Sprintf("%s#%d", repo, number)
-	delete(cs.config.HiddenPRs, key)
+	delete(cs.config.HiddenPRs, fmt.Sprintf("%s#%d", repo, number))
+	// The "repo#n" key that hid it before 0.5.9.
+	delete(cs.config.HiddenPRs, fmt.Sprintf("%s#%d", repo[strings.LastIndex(repo, "/")+1:], number))
 	cfg := cs.config
 	cs.mu.Unlock()
 	return cs.SaveConfig(cfg)
@@ -162,41 +227,34 @@ func (cs *ConfigService) ClearHiddenPRs() (int, error) {
 	return count, cs.SaveConfig(cfg)
 }
 
-// SetTrackedRepos persists the list of GitHub repos to track for PRs.
-// Empty list = "use the defaults". Entries may be "owner/repo" or just
-// "repo" (treated as epidemicsound/repo for backward compat).
-func (cs *ConfigService) SetTrackedRepos(repos []string) error {
+// GetPRPanel returns the PR panel's settings. Before 0.5.9 there were only
+// GitHubRepos: a list becomes the team's repos, with a bare name meaning
+// epidemicsound/<name> as it did then.
+func (cs *ConfigService) GetPRPanel() PRPanelConfig {
 	cs.mu.Lock()
-	// Normalise: trim, drop empties, dedupe
-	seen := make(map[string]bool)
-	normalised := make([]string, 0, len(repos))
-	for _, r := range repos {
-		r = strings.TrimSpace(r)
-		if r == "" || seen[r] {
-			continue
-		}
-		seen[r] = true
-		normalised = append(normalised, r)
+	defer cs.mu.Unlock()
+	if cs.config.PRPanel != nil {
+		return cs.config.PRPanel.normalised()
 	}
-	cs.config.GitHubRepos = normalised
+	p := defaultPRPanel()
+	for _, r := range cs.config.GitHubRepos {
+		if r = strings.TrimSpace(r); r != "" && !strings.Contains(r, "/") {
+			r = legacyRepoOrg + "/" + r
+		}
+		p.Team.Repos = append(p.Team.Repos, r)
+	}
+	return p.normalised()
+}
+
+// SetPRPanel saves the PR panel's settings, and drops the old repo list.
+func (cs *ConfigService) SetPRPanel(p PRPanelConfig) error {
+	cs.mu.Lock()
+	p = p.normalised()
+	cs.config.PRPanel = &p
+	cs.config.GitHubRepos = nil
 	cfg := cs.config
 	cs.mu.Unlock()
 	return cs.SaveConfig(cfg)
-}
-
-// GetTrackedRepos returns the configured repo list, or the built-in
-// defaults if the user hasn't customised it.
-func (cs *ConfigService) GetTrackedRepos() []string {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	if len(cs.config.GitHubRepos) > 0 {
-		out := make([]string, len(cs.config.GitHubRepos))
-		copy(out, cs.config.GitHubRepos)
-		return out
-	}
-	out := make([]string, len(defaultTrackedRepos))
-	copy(out, defaultTrackedRepos)
-	return out
 }
 
 // GetHiddenPRs returns the set of hidden PR keys.

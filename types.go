@@ -20,8 +20,8 @@ type SessionRecord struct {
 	ClaudeSessionID string `json:"claudeSessionId,omitempty"` // UUID from Claude Code JSONL
 	CreatedAt       int64  `json:"createdAt"`
 	ClosedAt        int64  `json:"closedAt,omitempty"`
-	Status          string `json:"status"`            // "active", "disconnected", "closed"
-	LastMsg         string `json:"lastMsg,omitempty"` // last assistant message snippet
+	Status          string `json:"status"`                 // "active", "disconnected", "closed"
+	LastMsg         string `json:"lastMsg,omitempty"`      // last assistant message snippet
 	WorktreePath    string `json:"worktreePath,omitempty"` // the session's worktree, created by Koko or opened from the Worktrees module
 	// WorktreeCreated is true only when Koko created the worktree. Settings
 	// removes only these in bulk, never one the user made by hand.
@@ -108,28 +108,35 @@ type FileContentData struct {
 	IsBinary bool   `json:"isBinary"`
 }
 
-// GitHubPR represents a pull request from a tracked repository.
+// GitHubPR is a pull request in the PR panel.
 type GitHubPR struct {
-	Repo           string        `json:"repo"`
-	Number         int           `json:"number"`
-	Title          string        `json:"title"`
-	Author         string        `json:"author"`
-	ReviewDecision string        `json:"reviewDecision"`
-	URL            string        `json:"url"`
-	Body           string        `json:"body"`
-	Additions      int           `json:"additions"`
-	Deletions      int           `json:"deletions"`
-	ChangedFiles   int           `json:"changedFiles"`
-	HeadRef        string        `json:"headRef"`
-	BaseRef        string        `json:"baseRef"`
-	CreatedAt      string        `json:"createdAt"`
-	UpdatedAt      string        `json:"updatedAt"`
+	Repo             string    `json:"repo"` // "owner/repo"
+	Number           int       `json:"number"`
+	Title            string    `json:"title"`
+	Author           string    `json:"author"`
+	ReviewDecision   string    `json:"reviewDecision"`
+	URL              string    `json:"url"`
+	Body             string    `json:"body"`
+	Additions        int       `json:"additions"`
+	Deletions        int       `json:"deletions"`
+	ChangedFiles     int       `json:"changedFiles"`
+	HeadRef          string    `json:"headRef"`
+	BaseRef          string    `json:"baseRef"`
+	CreatedAt        string    `json:"createdAt"`
+	UpdatedAt        string    `json:"updatedAt"`
 	Mergeable        string    `json:"mergeable"`
 	MergeStateStatus string    `json:"mergeStateStatus"` // BLOCKED, DIRTY, UNSTABLE, BEHIND, etc.
 	IsDraft          bool      `json:"isDraft"`
 	Labels           []string  `json:"labels"`
 	Assignees        []string  `json:"assignees"`
 	Checks           []PRCheck `json:"checks"`
+	Section          string    `json:"section"` // SectionMine or SectionTeam
+}
+
+// PRList is the PR panel's PRs, and an error for each source that failed.
+type PRList struct {
+	PRs    []GitHubPR `json:"prs"`
+	Errors []string   `json:"errors"`
 }
 
 // PRCheck represents a CI status check on a PR.
@@ -149,7 +156,7 @@ type PRFile struct {
 // PRReview represents a review on a PR.
 type PRReview struct {
 	Author      string `json:"author"`
-	State       string `json:"state"`       // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+	State       string `json:"state"` // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
 	SubmittedAt string `json:"submittedAt"`
 	Body        string `json:"body"`
 }
@@ -177,7 +184,7 @@ type WorkflowRun struct {
 // Worktree represents a git worktree.
 type Worktree struct {
 	Path                  string `json:"path"`
-	Branch                string `json:"branch"`     // empty if detached
+	Branch                string `json:"branch"` // empty if detached
 	HeadSHA               string `json:"headSha"`
 	IsMain                bool   `json:"isMain"`
 	IsDetached            bool   `json:"isDetached"`

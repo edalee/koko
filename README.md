@@ -59,7 +59,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 
 ### Awareness Panels
 - **GitHub PRs** — Live PR list from your repos with review status, approve/merge actions
-- **Tracked repos**: Choose the repos Koko watches for PRs in Settings > GitHub
+- **PR panel**: shows your PRs and your team's, grouped. Settings > GitHub sets them like the review worker's: an age limit for each, the team (`org/team-slug`) and its repos. One button copies the review worker's settings
 - **PR detail**: A full-screen overlay with the PR's files, diffs, reviews, commits and CI. You can read and reply to review threads and comments
 - **CI status**: GitHub Actions runs for the active branch, in the File Changes module
 - **GitHub Notifications** — Unread notifications with participating/all filter, mark-as-read
