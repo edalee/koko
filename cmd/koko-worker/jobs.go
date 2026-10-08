@@ -237,11 +237,20 @@ type reviewTally struct {
 }
 
 func (t *reviewTally) loadScope(ctx context.Context, env Env) {
-	if !t.loaded {
-		t.scope, t.scopeErr = loadScope(ctx, env.cfg, env.now)
-		t.loaded = true
+	if t.loaded {
+		return
 	}
+	t.loaded = true
+	if env.cfg.Reviewer.Team.Team == "" {
+		t.scopeErr = errNoTeam
+		return
+	}
+	t.scope, t.scopeErr = loadScope(ctx, env.cfg, env.now)
 }
+
+// errNoTeam means no review team is set, so the stand-up lists every PR and
+// has no scope to report on.
+var errNoTeam = errors.New("no review team is set")
 
 // status is the review status for one PR, counted in counts. A posted review
 // links to its first PR comment.
@@ -310,7 +319,7 @@ func (t *reviewTally) summary(env Env, counts map[string]int) string {
 			fmt.Fprintf(&b, " %d were opened more than %d days ago, so they are skipped.", counts["outside"], env.cfg.Reviewer.Team.MaxAgeDays)
 		}
 	}
-	if t.scopeErr != nil {
+	if t.scopeErr != nil && !errors.Is(t.scopeErr, errNoTeam) {
 		fmt.Fprintf(&b, " _Could not load the review scope: %s_", truncate(t.scopeErr.Error(), 150))
 	}
 	return b.String()
@@ -634,6 +643,9 @@ func runReview(ctx context.Context, env Env, onlyURL string) error {
 	if err := os.WriteFile(env.paths.ClaudeWrap, []byte(claudeWrapper), 0o700); err != nil {
 		return err
 	}
+	// The wrapper and shims had these names before 0.5.8.
+	_ = os.Remove(filepath.Join(env.paths.Dir, "tono-claude.sh"))
+	_ = os.RemoveAll(filepath.Join(env.paths.Dir, "tono-bin"))
 	var failures []string
 	if !env.test {
 		gaveUp, err := postUnposted(ctx, env)
@@ -1139,12 +1151,19 @@ func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA s
 	if err != nil {
 		return reviewOutcome{}, err
 	}
-	// The reviewer contract's environment (plan 030), then the command's own
-	// NAME=value words, which may name REVIEW_CLAUDE for the reviewer.
-	cmd.Env = append(append(os.Environ(),
+	// The command's own NAME=value words, then the reviewer contract's
+	// environment (plan 030), which they cannot override. A PATH from the
+	// command still gets the read-only gh and git in front.
+	path := os.Getenv("PATH")
+	for _, kv := range cmdEnv {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			path = v
+		}
+	}
+	cmd.Env = append(append(os.Environ(), cmdEnv...),
 		"REVIEW_RESULT="+resultPath, "REVIEW_PR="+fmt.Sprint(p.Number), "REVIEW_REPO="+p.repo(),
 		"REVIEW_PR_URL="+p.URL, "REVIEW_SHA="+headSHA, "REVIEW_CLAUDE="+env.paths.ClaudeWrap,
-		"PATH="+shims+":"+os.Getenv("PATH")), cmdEnv...)
+		"PATH="+shims+":"+path)
 	// stdout and stderr go only to the log. The review comes from the result
 	// file, or from the reviewer's logs, read by readLogs.
 	var stdout, stderr bytes.Buffer

@@ -109,6 +109,14 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 // name is looked up on the worker's PATH, which under launchd is short.
 func programProblem(command string) error {
 	prog := commandProgram(command)
+	switch {
+	case strings.Contains(prog, "{"):
+		return nil // a placeholder, such as {claude}, filled in at run time
+	case strings.Contains(prog, "/") && !filepath.IsAbs(prog):
+		// The reviewer runs in the PR's clone, so a relative path would
+		// point somewhere else at run time than here.
+		return fmt.Errorf("review: the reviewer program %s is a relative path. Use its full path", prog)
+	}
 	if strings.Contains(prog, "/") {
 		if !executable(prog) {
 			return fmt.Errorf("review: no reviewer program at %s", prog)

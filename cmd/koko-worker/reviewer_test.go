@@ -133,6 +133,12 @@ func TestProgramProblem(t *testing.T) {
 	if err := programProblem("no-such-reviewer-xyz {pr}"); err == nil || !strings.Contains(err.Error(), "not on the worker's PATH") {
 		t.Errorf("a name not on PATH: %v", err)
 	}
+	if err := programProblem("./bin/review {pr}"); err == nil || !strings.Contains(err.Error(), "relative path") {
+		t.Errorf("a relative path: %v", err)
+	}
+	if err := programProblem(`{claude} -p "review {pr}"`); err != nil {
+		t.Errorf("{claude} is filled in at run time: %v", err)
+	}
 }
 
 func TestStateMigration(t *testing.T) {

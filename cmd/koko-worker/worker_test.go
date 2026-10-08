@@ -832,6 +832,18 @@ func TestReviewPingOnce(t *testing.T) {
 	}
 }
 
+func TestReviewSectionWithoutATeam(t *testing.T) {
+	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1, Title: "Change", CreatedAt: "2026-09-29T10:00:00Z"}
+	p.Repository.NameWithOwner = "o/r"
+	p.Author.Login = "alice"
+	env := Env{cfg: defaultConfig(), now: time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm), state: &State{}}
+	got := reviewSection(context.Background(), env, &reviewTally{}, []SearchPR{p}, nil)
+	// No team means every PR is listed, with no scope error and no gh call.
+	if !strings.Contains(got, "r#1") || strings.Contains(got, "Could not load") {
+		t.Errorf("section:\n%s", got)
+	}
+}
+
 func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
 	pr := func(n int, author string) SearchPR {
 		p := SearchPR{URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), Number: n, Title: "Change", CreatedAt: "2026-09-29T10:00:00Z"}
