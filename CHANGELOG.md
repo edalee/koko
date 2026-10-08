@@ -4,6 +4,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-10-08
+
+### Fixed
+- **Scrambled terminal text**: a terminal could show a whole screen of wrong letters, often after sleep or a switch away from Koko. The terminal now redraws its letters when Koko's window comes back into focus or into view, and every 10 seconds while output streams, up from every minute. Right-click > Redraw Terminal still fixes it by hand
+
 ## [0.5.9] - 2026-10-08
 
 ### Changed

@@ -303,9 +303,13 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     // Claude TUI, `git diff`, `tree`). Most visible in WKWebView
     // (Wails on macOS).
     //
-    // Mitigation: call Terminal.clearTextureAtlas() periodically while
-    // the terminal is actively producing output, and on every resize.
-    // The clear is cheap; glyphs re-rasterize on the next render.
+    // A whole screen of wrong glyphs can also follow sleep or a switch away
+    // from Koko, when WKWebView drops GPU textures without a context loss.
+    //
+    // Mitigation: call Terminal.clearTextureAtlas() every 10 seconds while
+    // the terminal is producing output, on every resize, and when Koko's
+    // window comes back into focus or into view. The clear is cheap; glyphs
+    // re-rasterize on the next render.
     //
     // TO REMOVE once the upstream fix is released:
     //   1. Bump @xterm/xterm and @xterm/addon-webgl past the version
@@ -313,21 +317,30 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     //      the 6.x stable line and the @xterm/addon-webgl 0.19.x line).
     //   2. Delete this `atlasInterval` block (including the
     //      `hadOutputSinceFlushRef` ref and the assignment in the
-    //      pty:data handler).
+    //      pty:data handler). Keep the focus and visibility redraw if
+    //      whole-screen corruption after sleep still happens.
     //   3. Delete the `webglRef.current?.clearTextureAtlas?.()` call
     //      inside refit(), above.
     //   4. (Optional) Keep the "Redraw Terminal" context-menu action
     //      as a user-facing escape hatch; it's harmless even after
     //      the fix lands.
     // -------------------------------------------------------------------
-    const atlasInterval = setInterval(() => {
-      if (!activeRef.current) return;
-      if (!hadOutputSinceFlushRef.current) return;
+    const redraw = () => {
       webglRef.current?.clearTextureAtlas?.();
       const t = termRef.current;
       if (t) t.refresh(0, t.rows - 1);
+    };
+    const atlasInterval = setInterval(() => {
+      if (!activeRef.current) return;
+      if (!hadOutputSinceFlushRef.current) return;
+      redraw();
       hadOutputSinceFlushRef.current = false;
-    }, 60000);
+    }, 10000);
+    const onBack = () => {
+      if (activeRef.current && document.visibilityState === "visible") redraw();
+    };
+    window.addEventListener("focus", onBack);
+    document.addEventListener("visibilitychange", onBack);
 
     return () => {
       container.removeEventListener("copy", onCopy);
@@ -336,6 +349,8 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
       onBinaryDisposable.dispose();
       if (resizeTimer) clearTimeout(resizeTimer);
       clearInterval(atlasInterval);
+      window.removeEventListener("focus", onBack);
+      document.removeEventListener("visibilitychange", onBack);
       observer.disconnect();
       term.dispose();
       termRef.current = null;
