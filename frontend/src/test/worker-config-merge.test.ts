@@ -80,7 +80,7 @@ describe("merge", () => {
 
   // A real 0.5.7 reviewer section: no command, format, args or marker. The
   // worker's TestReviewerMigration checks the same shape.
-  const edward = {
+  const v057 = {
     reviewer: {
       autoUpdate: true,
       branch: "main",
@@ -94,7 +94,7 @@ describe("merge", () => {
   };
 
   it("gives a 0.5.7 config tono's command, logs and marker", () => {
-    const cfg = merge(JSON.stringify(edward));
+    const cfg = merge(JSON.stringify(v057));
     expect(cfg.reviewer.command).toBe(
       "TONO_CLAUDE={claude} {reviewer} {pr} --all -l high -R {repo}",
     );

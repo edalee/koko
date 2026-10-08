@@ -79,9 +79,9 @@ func agentStderrPath(paths Paths) string { return filepath.Join(paths.Logs, "age
 // legacyReviewLogPrefix started the review run logs before 0.5.8.
 const legacyReviewLogPrefix = "tono-"
 
-// pruneReviewLogs deletes review run logs and result files (review-*.log,
-// review-*.result.json) older than reviewLogRetention, and those from before
-// 0.5.8. worker.log and the stderr log are left alone.
+// pruneReviewLogs deletes review run logs and result files older than
+// reviewLogRetention: review-*.log and review-*.result.json, and tono-*.log
+// from before 0.5.8. worker.log and the stderr log are left alone.
 func pruneReviewLogs(dir string, now time.Time) (removed int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -413,7 +413,7 @@
 
 ## ADR-034: The reviewer stays read-only, and the worker posts
 - **Date:** 2026-09-30
-- **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR
+- **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR. Since 2026-10-08 the reviewer and its arguments are a setting (ADR-040). The guards below still apply
 - **Decision:** The review job calls the reviewer CLI as `tono <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
 - **Rationale:**
   - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
@@ -493,7 +493,7 @@
 
 ## ADR-039: A reviewer contract for the review worker
 - **Date:** 2026-10-08
-- **Status:** Accepted
+- **Status:** Accepted. Amended by ADR-040: `reviewer.command` and `reviewer.logs` replace `reviewer.args` and `reviewer.format`
 - **Decision:** The review worker runs any reviewer CLI that follows a small contract, not only tono. The worker fills in `reviewer.args` and passes `REVIEW_RESULT`, `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` and `REVIEW_CLAUDE`. The reviewer exits 0, or 2 for nothing to review, and writes its comments as JSON to `REVIEW_RESULT`. It never posts. The worker posts each comment as written.
 - **Rationale:**
   - Two tono changes, LGTM drafts and skipping a code review already clean at the head commit, broke a worker that read tono's private logs. A contract keeps the reviewer's internals out of the worker.

@@ -126,9 +126,9 @@ func TestLGTMVerdict(t *testing.T) {
 	}
 }
 
-// edwardReviewer is a real 0.5.7 reviewer section: no command, format,
+// v057Reviewer is a real 0.5.7 reviewer section: no command, format,
 // args or marker, so the tono defaults of the time applied.
-const edwardReviewer = `{"reviewer": {"autoUpdate": true, "branch": "main", "mine": {"enabled": true, "maxAgeDays": 14},
+const v057Reviewer = `{"reviewer": {"autoUpdate": true, "branch": "main", "mine": {"enabled": true, "maxAgeDays": 14},
   "path": "", "repo": "epidemicsound/tonometer", "script": "tono", "source": "managed",
   "team": {"enabled": true, "maxAgeDays": 1, "repos": [], "team": "epidemicsound/content-protection"}}}`
 
@@ -150,7 +150,7 @@ func TestReviewerMigration(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	tonoLogs := filepath.Join(home, ".cache/tono/logs")
 
-	cfg := loadTestConfig(t, edwardReviewer)
+	cfg := loadTestConfig(t, v057Reviewer)
 	r := cfg.Reviewer
 	if r.Command != "TONO_CLAUDE={claude} {reviewer} {pr} --all -l high -R {repo}" || r.Logs != tonoLogs || r.MarkerPrefix != "tono" {
 		t.Errorf("0.5.7 config: command %q, logs %q, marker %q", r.Command, r.Logs, r.MarkerPrefix)

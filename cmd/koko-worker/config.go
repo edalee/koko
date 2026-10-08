@@ -294,8 +294,8 @@ func workerPaths() Paths {
 	}
 }
 
-// reviewerCLI is the reviewer command to run: Path for a local reviewer, or
-// Script inside the managed clone.
+// reviewerCLI is the CLI that {reviewer} in the command stands for: Path for
+// a local reviewer, or Script inside the managed clone.
 func (c Config) reviewerCLI(paths Paths) string {
 	if c.Reviewer.Source == SourceLocal {
 		return c.Reviewer.Path

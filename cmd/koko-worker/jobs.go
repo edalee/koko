@@ -1102,8 +1102,8 @@ const reviewTimeout = 45 * time.Minute
 // logs it without a second DM.
 type reportedError struct{ error }
 
-// runReviewer runs the reviewer CLI, cli, at the PR head in a cache clone. It never
-// touches your working clones. One review per cache clone at a time, so a
+// runReviewer runs Reviewer.Command, with cli in place of {reviewer}, at the
+// PR head in a cache clone. It never touches your working clones. One review per cache clone at a time, so a
 // "Run now" cannot check out another PR under a review in progress.
 func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA string) (reviewOutcome, error) {
 	dir := filepath.Join(env.paths.Cache, strings.ReplaceAll(p.repo(), "/", "__"))

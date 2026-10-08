@@ -30,7 +30,7 @@ type reviewComment struct {
 	Body    string `json:"body"`    // Markdown, starting with the marker line
 }
 
-// resultFile is the file a FormatResultJSON reviewer writes. A reviewed
+// resultFile is the file a reviewer with no Reviewer.Logs writes. A reviewed
 // PR gets at least one comment: a clean review is an LGTM comment.
 type resultFile struct {
 	Status   string          `json:"status"` // reviewed, skipped or failed
@@ -62,7 +62,7 @@ func internalVerdict(v string) (verdict string, lgtm bool) {
 	return "", false
 }
 
-// splitCommand splits a command into words on spaces and tabs. Single or
+// splitCommand splits a command into words on spaces, tabs and newlines. Single or
 // double quotes keep a word with spaces together, and are dropped. Nothing
 // else is special: no shell runs the command.
 func splitCommand(command string) ([]string, error) {
