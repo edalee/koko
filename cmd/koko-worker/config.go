@@ -22,16 +22,7 @@ const (
 
 var allJobs = []string{JobStandup, JobFocus, JobReview}
 
-// Reviewer formats: how the reviewer hands back its review.
-const (
-	FormatResultJSON = "result-json" // the reviewer contract: a JSON file at $REVIEW_RESULT
-	FormatTonoLogs   = "tono-logs"   // tono's verified logs, for a tono without the contract
-)
-
 var markerPrefixRe = regexp.MustCompile(`^[a-z0-9-]+$`)
-
-// defaultReviewerArgs are tono's: every pass, at the high level, for the PR's repo.
-func defaultReviewerArgs() []string { return []string{"{pr}", "--all", "-l", "high", "-R", "{repo}"} }
 
 // Reviewer sources.
 const (
@@ -50,15 +41,15 @@ type ReviewerConfig struct {
 	AutoUpdate bool   `json:"autoUpdate"`
 	Script     string `json:"script"` // managed: the reviewer CLI, relative to the clone
 	Path       string `json:"path"`   // local: the reviewer CLI
-	// Format is how the reviewer hands back its review (plan 030):
-	// FormatResultJSON, the reviewer contract, or FormatTonoLogs, read from
-	// tono's own logs for a tono without the contract.
-	Format string `json:"format"`
-	// Args are the reviewer's arguments. {pr}, {repo}, {url} and {sha} are
-	// filled in for each PR.
-	Args []string `json:"args"`
-	// MarkerPrefix starts the reviewer's comment markers, "<!-- tono:" for
-	// "tono". A PR with a comment behind the marker counts as reviewed.
+	// Command runs the reviewer, for example "{reviewer} {pr} --all" (plan
+	// 031). See reviewerCommand for how it is split and filled in.
+	Command string `json:"command"`
+	// Logs is the folder the reviewer writes its logs to. Empty means off: the
+	// reviewer writes its result to $REVIEW_RESULT. Set, the worker reads the
+	// review from the logs, in the log format of plan 031.
+	Logs string `json:"logs"`
+	// MarkerPrefix starts the reviewer's comment markers, "<!-- acme:" for
+	// "acme". A PR with a comment behind the marker counts as reviewed.
 	MarkerPrefix string `json:"markerPrefix"`
 	// Mine is your own open PRs, whoever the team is.
 	Mine ScopeConfig `json:"mine"`
@@ -121,17 +112,17 @@ func defaultConfig() Config {
 		TimeZone:   "Europe/Stockholm",
 		CalendarID: "primary",
 		JiraSite:   "epidemicsound.atlassian.net",
+		// No reviewer is set up, so the review job starts off.
 		Reviewer: ReviewerConfig{
-			Source: SourceManaged, Repo: "epidemicsound/tonometer", Branch: "main", AutoUpdate: true, Script: "tono",
-			Format: FormatTonoLogs, Args: defaultReviewerArgs(), MarkerPrefix: "tono",
+			Source: SourceManaged, Branch: "main", AutoUpdate: true,
 			Mine: ScopeConfig{Enabled: true, MaxAgeDays: 14},
-			Team: TeamScopeConfig{Enabled: true, MaxAgeDays: 4, Team: "epidemicsound/content-protection"},
+			Team: TeamScopeConfig{MaxAgeDays: 4},
 		},
 		Focus: FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
 		Jobs: map[string]JobConfig{
 			JobStandup: {Enabled: true, Times: []string{"07:00"}},
 			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
-			JobReview:  {Enabled: true, Times: []string{"09:30", "12:00", "14:00"}},
+			JobReview:  {Enabled: false, Times: []string{"09:30", "12:00", "14:00"}},
 		},
 	}
 }
@@ -149,19 +140,47 @@ type legacyReviewer struct {
 	Repos    []string `json:"tonoRepos"`
 }
 
-// migrate carries a pre-0.5.4 worker.json over: the flat tono settings
-// become Reviewer, and the "tono" job becomes "review". It reads the raw
-// JSON, because the defaults are already filled in on cfg. An empty
-// tonoPath meant the default clone, which now means a managed reviewer.
+// legacyCommand is the reviewer settings before 0.5.8, which assumed tono.
+// Pointers tell a missing key from a zero value.
+type legacyCommand struct {
+	Command      *string  `json:"command"`
+	Format       string   `json:"format"` // "tono-logs", the default, or "result-json"
+	Args         []string `json:"args"`
+	MarkerPrefix string   `json:"markerPrefix"`
+}
+
+// The tono settings a worker.json from before 0.5.8 meant when it left them
+// out. Only migrate uses them. WorkerSettings.tsx migrates the same way.
+const (
+	legacyArgs      = "{pr} --all -l high -R {repo}"
+	legacyLogs      = "~/.cache/tono/logs"
+	legacyMarker    = "tono"
+	legacyRepo      = "epidemicsound/tonometer"
+	legacyScript    = "tono"
+	legacyTeam      = "epidemicsound/content-protection"
+	legacyClaudeEnv = "TONO_CLAUDE={claude} "
+)
+
+// migrate carries an older worker.json over. It reads the raw JSON, because
+// the defaults are already filled in on cfg.
+//
+//   - Before 0.5.4 the reviewer settings were flat tono keys, and the review
+//     job was "tono". An empty tonoPath meant the default clone, which now
+//     means a managed reviewer.
+//   - Before 0.5.8 there was no command. A reviewer section without the
+//     command key gets tono's command and logs. An empty command stays empty.
 func (c *Config) migrate(data []byte) {
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(data, &raw) != nil {
 		return
 	}
-	if _, ok := raw["reviewer"]; !ok {
-		var old legacyReviewer
-		_ = json.Unmarshal(data, &old)
-		r := &c.Reviewer
+	r := &c.Reviewer
+	rawReviewer, hasReviewer := raw["reviewer"]
+	var old legacyReviewer
+	_ = json.Unmarshal(data, &old)
+	if !hasReviewer && old.any() {
+		r.Repo, r.Script = legacyRepo, legacyScript
+		r.Team.Enabled, r.Team.Team = true, legacyTeam
 		if old.Path != nil && strings.TrimSpace(*old.Path) != "" {
 			r.Source, r.Path = SourceLocal, strings.TrimSpace(*old.Path)
 		}
@@ -187,6 +206,16 @@ func (c *Config) migrate(data []byte) {
 			r.Team.Repos = old.Repos
 		}
 	}
+	if hasReviewer || old.any() {
+		var lc legacyCommand
+		_ = json.Unmarshal(rawReviewer, &lc)
+		if lc.Command == nil {
+			r.Command, r.Logs = migratedCommand(lc.Format, lc.Args)
+			if strings.TrimSpace(lc.MarkerPrefix) == "" {
+				r.MarkerPrefix = legacyMarker
+			}
+		}
+	}
 	var jobs map[string]json.RawMessage
 	if json.Unmarshal(raw["jobs"], &jobs) == nil {
 		_, hasOld := jobs[legacyJobTono]
@@ -198,17 +227,54 @@ func (c *Config) migrate(data []byte) {
 	delete(c.Jobs, legacyJobTono)
 }
 
+// any is true when the JSON held any of the flat tono settings.
+func (o legacyReviewer) any() bool {
+	return o.Path != nil || o.Mine != nil || o.MineDays != nil || o.TeamPRs != nil ||
+		o.OwnOnly != nil || o.Team != nil || o.TeamDays != nil || o.Repos != nil
+}
+
+// migratedCommand is the command and logs folder for a reviewer from before
+// 0.5.8: tono, run with its Claude wrapper and the old arguments. Its logs
+// were read unless the format was "result-json".
+func migratedCommand(format string, args []string) (command, logs string) {
+	words := legacyArgs
+	var kept []string
+	for _, a := range args {
+		if a = strings.TrimSpace(a); a != "" {
+			kept = append(kept, quoteWord(a))
+		}
+	}
+	if len(kept) > 0 {
+		words = strings.Join(kept, " ")
+	}
+	if format != "result-json" {
+		logs = legacyLogs
+	}
+	return legacyClaudeEnv + "{reviewer} " + words, expandHome(logs)
+}
+
+// quoteWord keeps a word with spaces or quotes as one word for splitCommand.
+func quoteWord(w string) string {
+	if !strings.ContainsAny(w, " \t\"'") {
+		return w
+	}
+	if !strings.Contains(w, "'") {
+		return "'" + w + "'"
+	}
+	return `"` + w + `"`
+}
+
 // Paths the worker uses. All but Cache and Reviewer sit under ~/Library/Application
 // Support/koko, next to Koko's own files.
 type Paths struct {
-	Config   string // worker.json
-	Dir      string // worker/
-	State    string // worker/state.json
-	Logs     string // worker/logs/
-	Settings string // worker/claude-settings.json
-	TonoWrap string // worker/tono-claude.sh
-	Cache    string // ~/.cache/koko-worker/repos, cache clones of the PRs' repos
-	Reviewer string // ~/.cache/koko-worker/reviewer, the managed reviewer clone
+	Config     string // worker.json
+	Dir        string // worker/
+	State      string // worker/state.json
+	Logs       string // worker/logs/
+	Settings   string // worker/claude-settings.json
+	ClaudeWrap string // worker/reviewer-claude.sh
+	Cache      string // ~/.cache/koko-worker/repos, cache clones of the PRs' repos
+	Reviewer   string // ~/.cache/koko-worker/reviewer, the managed reviewer clone
 }
 
 func workerPaths() Paths {
@@ -217,19 +283,19 @@ func workerPaths() Paths {
 	koko := filepath.Join(configDir, "koko")
 	dir := filepath.Join(koko, "worker")
 	return Paths{
-		Config:   filepath.Join(koko, "worker.json"),
-		Dir:      dir,
-		State:    filepath.Join(dir, "state.json"),
-		Logs:     filepath.Join(dir, "logs"),
-		Settings: filepath.Join(dir, "claude-settings.json"),
-		TonoWrap: filepath.Join(dir, "tono-claude.sh"),
-		Cache:    filepath.Join(home, ".cache", "koko-worker", "repos"),
-		Reviewer: filepath.Join(home, ".cache", "koko-worker", "reviewer"),
+		Config:     filepath.Join(koko, "worker.json"),
+		Dir:        dir,
+		State:      filepath.Join(dir, "state.json"),
+		Logs:       filepath.Join(dir, "logs"),
+		Settings:   filepath.Join(dir, "claude-settings.json"),
+		ClaudeWrap: filepath.Join(dir, "reviewer-claude.sh"),
+		Cache:      filepath.Join(home, ".cache", "koko-worker", "repos"),
+		Reviewer:   filepath.Join(home, ".cache", "koko-worker", "reviewer"),
 	}
 }
 
-// reviewerCLI is the reviewer command to run: Path for a local reviewer, or
-// Script inside the managed clone.
+// reviewerCLI is the CLI that {reviewer} in the command stands for: Path for
+// a local reviewer, or Script inside the managed clone.
 func (c Config) reviewerCLI(paths Paths) string {
 	if c.Reviewer.Source == SourceLocal {
 		return c.Reviewer.Path
@@ -281,22 +347,9 @@ func (c *Config) fillDefaults() {
 	if r.Branch == "" {
 		r.Branch = d.Branch
 	}
-	if r.Format == "" {
-		r.Format = d.Format
-	}
-	var args []string
-	for _, a := range r.Args {
-		if a = strings.TrimSpace(a); a != "" {
-			args = append(args, a)
-		}
-	}
-	if len(args) == 0 {
-		args = d.Args
-	}
-	r.Args = args
-	if r.MarkerPrefix = strings.TrimSpace(r.MarkerPrefix); r.MarkerPrefix == "" {
-		r.MarkerPrefix = d.MarkerPrefix
-	}
+	r.Command = strings.TrimSpace(r.Command)
+	r.Logs = expandHome(strings.TrimSpace(r.Logs))
+	r.MarkerPrefix = strings.TrimSpace(r.MarkerPrefix)
 	if r.Script == "" {
 		r.Script = d.Script
 	}
@@ -372,28 +425,36 @@ func (c Config) validate() error {
 // problem is what is wrong with the reviewer settings, or nil. Only the
 // review job and `check reviewer` fail on it.
 func (r ReviewerConfig) problem() error {
-	if r.Format != FormatTonoLogs && r.Format != FormatResultJSON {
-		return fmt.Errorf("reviewer format %q, want %s or %s", r.Format, FormatResultJSON, FormatTonoLogs)
+	if r.Command == "" {
+		return fmt.Errorf("no reviewer command is set")
+	}
+	if _, _, err := splitEnv(r.Command); err != nil {
+		return err
+	}
+	if r.MarkerPrefix == "" {
+		return fmt.Errorf("no marker prefix is set")
 	}
 	if !markerPrefixRe.MatchString(r.MarkerPrefix) {
 		return fmt.Errorf("marker prefix %q, want letters, digits and dashes", r.MarkerPrefix)
 	}
-	switch r.Source {
-	case SourceManaged:
+	switch {
+	case !r.usesReviewer():
+		// The command names its own program, so the source is not used.
+	case r.Source == SourceManaged:
 		if !ownerRepo(r.Repo) {
 			return fmt.Errorf("reviewer repo %q, want owner/repo", r.Repo)
 		}
-		if strings.HasPrefix(r.Script, "/") || strings.Contains(r.Script, "..") {
+		if r.Script == "" || strings.HasPrefix(r.Script, "/") || strings.Contains(r.Script, "..") {
 			return fmt.Errorf("reviewer script %q, want a path inside the clone", r.Script)
 		}
-	case SourceLocal:
+	case r.Source == SourceLocal:
 		if r.Path == "" {
 			return fmt.Errorf("the reviewer source is a local path, but no path is set")
 		}
 	default:
 		return fmt.Errorf("reviewer source %q, want %s or %s", r.Source, SourceManaged, SourceLocal)
 	}
-	if org, team, ok := strings.Cut(r.Team.Team, "/"); !ok || org == "" || team == "" {
+	if org, team, ok := strings.Cut(r.Team.Team, "/"); r.Team.Enabled && (!ok || org == "" || team == "") {
 		return fmt.Errorf("review team %q, want org/team-slug", r.Team.Team)
 	}
 	for _, repo := range r.Team.Repos {
@@ -403,6 +464,9 @@ func (r ReviewerConfig) problem() error {
 	}
 	return nil
 }
+
+// usesReviewer is true when the command runs the CLI from the source setting.
+func (r ReviewerConfig) usesReviewer() bool { return strings.Contains(r.Command, "{reviewer}") }
 
 // expandHome turns a leading "~" or "~/" into your home folder. Nothing else
 // expands it: the worker runs the path as it is, without a shell.

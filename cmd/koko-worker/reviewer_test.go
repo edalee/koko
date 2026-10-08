@@ -54,6 +54,10 @@ func TestMigrateLegacyConfig(t *testing.T) {
 	if _, left := cfg.Jobs[legacyJobTono]; left {
 		t.Error("jobs.tono must be gone")
 	}
+	// It had no command, so it runs tono as before.
+	if r.Command != "TONO_CLAUDE={claude} {reviewer} {pr} --all -l high -R {repo}" || r.MarkerPrefix != "tono" || r.Script != "tono" || r.problem() != nil {
+		t.Errorf("command: %+v, %v", r, r.problem())
+	}
 }
 
 func TestMigrateLegacyLocalPathAndOwnOnly(t *testing.T) {
@@ -71,7 +75,7 @@ func TestNewConfigWins(t *testing.T) {
 	    "mine": {"enabled": false, "maxAgeDays": 0}, "team": {"enabled": true, "maxAgeDays": 3, "team": "o/t", "repos": [" o/a ", ""]}},
 	  "jobs": {"review": {"enabled": true, "times": ["11:00"]}, "tono": {"enabled": true, "times": ["09:30"]}}}`)
 	r := cfg.Reviewer
-	if r.Source != SourceManaged || r.Repo != "o/reviewer" || r.Branch != "dev" || r.AutoUpdate || r.Script != "tono" ||
+	if r.Source != SourceManaged || r.Repo != "o/reviewer" || r.Branch != "dev" || r.AutoUpdate || r.Script != "" ||
 		r.Mine.Enabled || r.Mine.MaxAgeDays != 14 || r.Team.MaxAgeDays != 3 || strings.Join(r.Team.Repos, ",") != "o/a" {
 		t.Errorf("got %+v", r)
 	}
@@ -82,14 +86,16 @@ func TestNewConfigWins(t *testing.T) {
 
 func TestReviewerValidation(t *testing.T) {
 	for _, bad := range []ReviewerConfig{
-		{Source: "git", Repo: "o/r", Script: "tono"},
-		{Source: SourceManaged, Repo: "tonometer", Script: "tono"},
+		{Source: "git", Repo: "o/r", Script: "review-cli"},
+		{Source: SourceManaged, Repo: "reviewer", Script: "review-cli"},
 		{Source: SourceManaged, Repo: "o/r", Script: "../../bin/sh"},
+		{Source: SourceManaged, Repo: "o/r"},
 	} {
 		cfg := defaultConfig()
 		team := cfg.Reviewer.Team
 		cfg.Reviewer = bad
 		cfg.Reviewer.Team = team
+		cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "{reviewer} {pr}", "acme"
 		if cfg.Reviewer.problem() == nil || cfg.validate() != nil {
 			t.Errorf("want a reviewer problem, and a valid config, for %+v", bad)
 		}
@@ -99,12 +105,58 @@ func TestReviewerValidation(t *testing.T) {
 func TestReviewerCLI(t *testing.T) {
 	paths := Paths{Reviewer: "/cache/reviewer"}
 	cfg := defaultConfig()
-	if got := cfg.reviewerCLI(paths); got != "/cache/reviewer/tono" {
+	cfg.Reviewer.Script = "review-cli"
+	if got := cfg.reviewerCLI(paths); got != "/cache/reviewer/review-cli" {
 		t.Errorf("managed: %q", got)
 	}
-	cfg.Reviewer.Source, cfg.Reviewer.Path = SourceLocal, "/opt/tono"
-	if got := cfg.reviewerCLI(paths); got != "/opt/tono" {
+	cfg.Reviewer.Source, cfg.Reviewer.Path = SourceLocal, "/opt/review-cli"
+	if got := cfg.reviewerCLI(paths); got != "/opt/review-cli" {
 		t.Errorf("local: %q", got)
+	}
+}
+
+func TestProgramProblem(t *testing.T) {
+	dir := t.TempDir()
+	prog := dir + "/acme"
+	if err := os.WriteFile(prog, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := programProblem("A=1 " + prog + " {pr}"); err != nil {
+		t.Errorf("a full path: %v", err)
+	}
+	if err := programProblem(dir + "/missing {pr}"); err == nil || !strings.Contains(err.Error(), "no reviewer program") {
+		t.Errorf("a missing path: %v", err)
+	}
+	if err := programProblem("sh -c true"); err != nil {
+		t.Errorf("a name on PATH: %v", err)
+	}
+	if err := programProblem("no-such-reviewer-xyz {pr}"); err == nil || !strings.Contains(err.Error(), "not on the worker's PATH") {
+		t.Errorf("a name not on PATH: %v", err)
+	}
+	if err := programProblem("./bin/review {pr}"); err == nil || !strings.Contains(err.Error(), "relative path") {
+		t.Errorf("a relative path: %v", err)
+	}
+	if err := programProblem(`{claude} -p "review {pr}"`); err != nil {
+		t.Errorf("{claude} is filled in at run time: %v", err)
+	}
+}
+
+func TestStateMigration(t *testing.T) {
+	path := t.TempDir() + "/state.json"
+	old := `{"tonoReviewed": {"o/r#1@abc": "2026-10-01T09:30:00Z"},
+	  "tonoResults": {"o/r#1@abc": {"url": "https://github.com/o/r/pull/1", "repo": "o/r", "number": 1, "sha": "abc", "unposted": ["<!-- tono:review -->"]}}}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := loadState(path)
+	if !reviewedBefore(&st, "o/r", 1) {
+		t.Error("a PR reviewed before 0.5.8 must not be reviewed again")
+	}
+	if r := st.Results["o/r#1@abc"]; len(r.Unposted) != 1 {
+		t.Errorf("unposted comments must survive: %+v", r)
+	}
+	if st.OldReviewed != nil || st.OldResults != nil {
+		t.Error("the old keys must be dropped on the next save")
 	}
 }
 

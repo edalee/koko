@@ -1,5 +1,7 @@
 # Plan 030: a reviewer contract for the review worker
 
+Status: done in 0.5.7. Plan 031 replaces `reviewer.format` and `reviewer.args` with `reviewer.command` and `reviewer.logs`.
+
 ## Problem
 
 The review worker ran tono and nothing else. It was tied to tono in five places:

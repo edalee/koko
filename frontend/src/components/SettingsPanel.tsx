@@ -612,7 +612,7 @@ export default function SettingsPanel({
             </div>
           </div>
 
-          {/* Scheduled jobs: stand-up, focus time and tono reviews */}
+          {/* Scheduled jobs: stand-up, focus time and PR reviews */}
           <div className={cn(shown("worker"))}>
             <WorkerSettings />
           </div>

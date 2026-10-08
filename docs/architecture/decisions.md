@@ -413,7 +413,7 @@
 
 ## ADR-034: The reviewer stays read-only, and the worker posts
 - **Date:** 2026-09-30
-- **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR
+- **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR. Since 2026-10-08 the reviewer and its arguments are a setting (ADR-040). The guards below still apply
 - **Decision:** The review job calls the reviewer CLI as `tono <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
 - **Rationale:**
   - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
@@ -493,7 +493,7 @@
 
 ## ADR-039: A reviewer contract for the review worker
 - **Date:** 2026-10-08
-- **Status:** Accepted
+- **Status:** Accepted. Amended by ADR-040: `reviewer.command` and `reviewer.logs` replace `reviewer.args` and `reviewer.format`
 - **Decision:** The review worker runs any reviewer CLI that follows a small contract, not only tono. The worker fills in `reviewer.args` and passes `REVIEW_RESULT`, `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` and `REVIEW_CLAUDE`. The reviewer exits 0, or 2 for nothing to review, and writes its comments as JSON to `REVIEW_RESULT`. It never posts. The worker posts each comment as written.
 - **Rationale:**
   - Two tono changes, LGTM drafts and skipping a code review already clean at the head commit, broke a worker that read tono's private logs. A contract keeps the reviewer's internals out of the worker.
@@ -503,3 +503,16 @@
   - Until tono writes a result file, the `tono-logs` adapter reads its logs as before. It reads `**LGTM!**` as ready, posts one LGTM instead of three, and treats a code review skipped for an LGTM on the head commit as skipped.
 - **Files:** `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/config.go`, `frontend/src/components/WorkerSettings.tsx`
 - **Plan:** `docs/plans/030-reviewer-contract.md`
+
+## ADR-040: The reviewer is one command and an optional log folder
+- **Date:** 2026-10-08
+- **Status:** Accepted
+- **Decision:** `reviewer.command` and `reviewer.logs` replace `reviewer.format` and `reviewer.args`. The command is split on spaces, with quotes, and runs without a shell. Leading `NAME=value` words set environment variables. `{reviewer}` is the CLI from the source setting, and `{claude}` is the wrapper that cannot post. An empty log folder means the result file. Nothing outside the migration names tono or Epidemic Sound, and a new install has no reviewer until you set one.
+- **Rationale:**
+  - One command says everything about how a reviewer runs. A reviewer on the PATH needs no source at all.
+  - `TONO_CLAUDE` was the last tono name the worker set on every run. A `NAME={claude}` word lets any reviewer name its own variable.
+  - The log folder is the only tono-specific reading left. Making it an optional setting keeps it for tono until tono writes a result file, without tying the worker to it.
+  - A 0.5.7 config migrates by the missing `command` key, in both the worker and the Settings tab. An empty command stays empty, so clearing it is not undone.
+  - The state keys moved to `reviewed` and `results`, read from the old names on load, so no PR is reviewed twice.
+- **Files:** `cmd/koko-worker/config.go`, `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/scheduler.go`, `frontend/src/components/WorkerSettings.tsx`
+- **Plan:** `docs/plans/031-generic-reviewer.md`

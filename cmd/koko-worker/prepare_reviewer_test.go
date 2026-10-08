@@ -21,7 +21,7 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// reviewerRemote makes a bare repo at root/owner/name.git with a "tono"
+// reviewerRemote makes a bare repo at root/owner/name.git with a "review-cli"
 // script on main and on dev, and returns a working clone for new commits.
 func reviewerRemote(t *testing.T, root, repo string) (bare, work string) {
 	t.Helper()
@@ -40,10 +40,10 @@ func reviewerRemote(t *testing.T, root, repo string) (bare, work string) {
 
 func commitScript(t *testing.T, work, body string) string {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(work, "tono"), []byte("#!/bin/sh\necho "+body+"\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "review-cli"), []byte("#!/bin/sh\necho "+body+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, work, "add", "tono")
+	gitRun(t, work, "add", "review-cli")
 	gitRun(t, work, "commit", "--quiet", "-m", body)
 	return gitRun(t, work, "rev-parse", "--short", "HEAD")
 }
@@ -66,7 +66,8 @@ func TestPrepareReviewer(t *testing.T) {
 
 	st := &State{}
 	cfg := defaultConfig()
-	cfg.Reviewer.Repo = "o/reviewer"
+	cfg.Reviewer.Repo, cfg.Reviewer.Script = "o/reviewer", "review-cli"
+	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "{reviewer} {pr}", "acme"
 	newEnv := func(test bool) Env {
 		return Env{cfg: cfg, paths: Paths{Reviewer: filepath.Join(root, "clone")}, state: st, test: test,
 			persist: func(change func(*State)) error { change(st); return nil }}
@@ -84,7 +85,7 @@ func TestPrepareReviewer(t *testing.T) {
 
 	// The first run clones and checks out main.
 	cli, err := prepareReviewer(ctx, newEnv(false))
-	if err != nil || cli != filepath.Join(root, "clone", "tono") || st.ReviewerBranch != "main" || st.ReviewerCommit != head() {
+	if err != nil || cli != filepath.Join(root, "clone", "review-cli") || st.ReviewerBranch != "main" || st.ReviewerCommit != head() {
 		t.Fatalf("first run: cli %q, err %v, state %+v", cli, err, st)
 	}
 
@@ -138,25 +139,25 @@ func TestPrepareReviewer(t *testing.T) {
 
 func TestOriginIs(t *testing.T) {
 	for _, url := range []string{
-		"git@github.com:epidemicsound/tonometer.git",
-		"https://github.com/epidemicsound/tonometer",
-		"https://github.com/Epidemicsound/Tonometer.git",
+		"git@github.com:acme/reviewer.git",
+		"https://github.com/acme/reviewer",
+		"https://github.com/Acme/Reviewer.git",
 	} {
-		if !originIs(url, "epidemicsound/tonometer") {
+		if !originIs(url, "acme/reviewer") {
 			t.Errorf("%s should match", url)
 		}
 	}
-	if originIs("git@github.com:epidemicsound/tonometer-fork.git", "epidemicsound/tonometer") {
+	if originIs("git@github.com:acme/reviewer-fork.git", "acme/reviewer") {
 		t.Error("a different repo must not match")
 	}
 }
 
 func TestExpandHome(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	if got := expandHome("~/repos/tonometer/tono"); got != filepath.Join(home, "repos/tonometer/tono") {
+	if got := expandHome("~/repos/reviewer/review-cli"); got != filepath.Join(home, "repos/reviewer/review-cli") {
 		t.Errorf("got %q", got)
 	}
-	if got := expandHome("/opt/tono"); got != "/opt/tono" {
+	if got := expandHome("/opt/review-cli"); got != "/opt/review-cli" {
 		t.Errorf("got %q", got)
 	}
 }

@@ -86,7 +86,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 - **koko-worker**: a background agent that runs scheduled work jobs on weekdays, even with the Koko window closed
 - **Stand-up (07:00)**: one Slack DM with today's meetings, your PRs ready to merge with a Jira check, and PRs waiting for your review
 - **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more
-- **Review worker (09:30, 12:00, 14:00)**: reviews each new PR once, yours from the last 14 days and the team's, and posts the review on the PR as you. A PR with nothing to report gets LGTM. One Slack line says each review is posted. The reviewer code comes from a managed clone of `epidemicsound/tonometer` at `main`, or a local path, set in Settings
+- **Review worker (09:30, 12:00, 14:00)**: reviews each new PR once, yours from the last 14 days and the team's, and posts the review on the PR as you. A PR with nothing to report gets LGTM. One Slack line says each review is posted. You set the reviewer in Settings. It starts off until you do
 - **Settings > Worker**: one switch for the worker, a switch and times per job, "Test" and "Run now" buttons, connection checks and the log
 - **Catch-up and retries**: a job missed while the Mac slept runs on wake. A job waits for the internet, and gets 3 tries for other failures
 
@@ -165,12 +165,17 @@ It needs these connections. Settings > Worker checks each one and says how to fi
 - **Slack**: a bot token (`xoxb-`) with the `chat:write` scope, and your Slack user ID. The worker keeps its own Slack settings, apart from Koko's Slack bot.
 - **GitHub**: the `gh` CLI, signed in with `gh auth login`.
 - **Claude Code**: `claude` on the PATH, with the claude.ai Google Calendar and Atlassian connectors connected.
-- **Reviewer**: nothing to set by default. The review worker keeps its own clone of `epidemicsound/tonometer` at `main` and updates it before each run. To run another reviewer, set a local path in Settings > Worker > Review worker. Any CLI that follows the reviewer contract in `docs/plans/030-reviewer-contract.md` can review: it writes its comments as JSON to `$REVIEW_RESULT`, and the worker posts them.
+- **Reviewer**: any CLI that follows the reviewer contract in `docs/plans/030-reviewer-contract.md` and `031-generic-reviewer.md`. Set it in Settings > Worker > Review worker:
+  - **Command**, for example `{reviewer} {pr} --all`. `{reviewer}` is the CLI from a managed clone of a repo (kept up to date before each run) or a local path.
+  - **Logs**, off by default. Off, the reviewer writes its comments as JSON to `$REVIEW_RESULT`. Set to a folder, the worker reads the review from the reviewer's logs there.
+  - **Marker**, the prefix of the reviewer's comment markers, `<!-- marker:`.
+
+  The reviewer never posts. The worker posts its comments.
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the exact line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
 
 The switch in Settings > Worker installs the launchd agent `com.koko.worker`. The same switch removes it. You can also run `koko-worker install` and `koko-worker uninstall` by hand.
 
-The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state and logs sit in `~/Library/Application Support/koko/worker/`. `logs/worker.log` moves to `worker.log.1` at 5 MB, so it stays under about 10 MB. Review run logs (`logs/tono-*.log`) are deleted after 60 days, when the state forgets the review. The PRs' repos are cloned to `~/.cache/koko-worker/repos`, and the managed reviewer to `~/.cache/koko-worker/reviewer`.
+The worker keeps its settings in `~/Library/Application Support/koko/worker.json`. Its state and logs sit in `~/Library/Application Support/koko/worker/`. `logs/worker.log` moves to `worker.log.1` at 5 MB, so it stays under about 10 MB. Review run logs (`logs/review-*.log`) are deleted after 60 days, when the state forgets the review. The PRs' repos are cloned to `~/.cache/koko-worker/repos`, and the managed reviewer to `~/.cache/koko-worker/reviewer`.
 
 ## Build from Source
 

@@ -101,6 +101,12 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		case rv.problem() != nil:
 			r.Detail = rv.problem().Error()
 			r.Fix = "Fix the reviewer settings in Settings > Worker > Review worker."
+		case !rv.usesReviewer():
+			r.OK, r.Detail = true, "runs "+commandProgram(rv.Command)
+			if err := programProblem(rv.Command); err != nil {
+				r.OK, r.Detail = false, strings.TrimPrefix(err.Error(), "review: ")
+				r.Fix = "Give the reviewer program's full path in the command."
+			}
 		case rv.Source == SourceLocal:
 			r.OK, r.Detail = rv.Path != "" && executable(cli), "local reviewer at "+cli
 			if !r.OK {

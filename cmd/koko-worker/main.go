@@ -125,7 +125,7 @@ func runJob(ctx context.Context, env Env, job, onlyURL string) error {
 	case JobFocus:
 		return runFocus(ctx, env)
 	case JobReview:
-		return runTono(ctx, env, onlyURL)
+		return runReview(ctx, env, onlyURL)
 	}
 	return fmt.Errorf("unknown job %q", job)
 }
@@ -370,8 +370,10 @@ func cmdStatus(paths Paths) error {
 	if !st.WakeBooked.IsZero() {
 		out["wakeBooked"] = st.WakeBooked
 	}
-	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths)}
-	if cfg.Reviewer.Source == SourceManaged {
+	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths), "command": cfg.Reviewer.Command}
+	if !cfg.Reviewer.usesReviewer() {
+		reviewer["source"], reviewer["cli"] = "command", commandProgram(cfg.Reviewer.Command)
+	} else if cfg.Reviewer.Source == SourceManaged {
 		reviewer["repo"], reviewer["branch"] = cfg.Reviewer.Repo, cfg.Reviewer.Branch
 		if st.ReviewerCommit != "" {
 			reviewer["commit"], reviewer["commitBranch"] = st.ReviewerCommit, st.ReviewerBranch

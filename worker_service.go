@@ -195,7 +195,7 @@ func (w *WorkerService) Check(name string) (string, error) {
 }
 
 // RunNow runs a job at once. With test set, it returns the message instead
-// of sending it, and books nothing. The limit is long because a tono run
+// of sending it, and books nothing. The limit is long because a review run
 // reviews each new PR in turn, up to 45 minutes each.
 func (w *WorkerService) RunNow(job string, test bool) (string, error) {
 	args := []string{"run", job}

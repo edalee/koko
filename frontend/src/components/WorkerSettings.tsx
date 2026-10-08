@@ -40,8 +40,8 @@ interface ReviewerConfig {
   autoUpdate: boolean;
   script: string;
   path: string;
-  format: "tono-logs" | "result-json";
-  args: string[];
+  command: string;
+  logs: string;
   markerPrefix: string;
   mine: ScopeConfig;
   team: ScopeConfig & { team: string; repos: string[] };
@@ -93,25 +93,26 @@ const DEFAULTS: WorkerConfig = {
   enabled: false,
   timeZone: "Europe/Stockholm",
   calendarId: "primary",
+  // No reviewer is set up, so the review job starts off.
   reviewer: {
     source: "managed",
-    repo: "epidemicsound/tonometer",
+    repo: "",
     branch: "main",
     autoUpdate: true,
-    script: "tono",
+    script: "",
     path: "",
-    format: "tono-logs",
-    args: ["{pr}", "--all", "-l", "high", "-R", "{repo}"],
-    markerPrefix: "tono",
+    command: "",
+    logs: "",
+    markerPrefix: "",
     mine: { enabled: true, maxAgeDays: 14 },
-    team: { enabled: true, maxAgeDays: 4, team: "epidemicsound/content-protection", repos: [] },
+    team: { enabled: false, maxAgeDays: 4, team: "", repos: [] },
   },
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
   jobs: {
     standup: { enabled: true, times: ["07:00"] },
     focus: { enabled: true, times: ["09:15"] },
-    review: { enabled: true, times: ["09:30", "12:00", "14:00"] },
+    review: { enabled: false, times: ["09:30", "12:00", "14:00"] },
   },
 };
 
@@ -155,6 +156,44 @@ const CONNECTION_NAMES: Record<string, string> = {
   wake: "Mac wake",
 };
 
+// The tono settings a worker.json from before 0.5.8 meant when it left them
+// out. Only the migration uses them. The worker's Config.migrate does the same.
+const LEGACY = {
+  args: "{pr} --all -l high -R {repo}",
+  logs: "~/.cache/tono/logs",
+  marker: "tono",
+  repo: "epidemicsound/tonometer",
+  script: "tono",
+  team: "epidemicsound/content-protection",
+  claudeEnv: "TONO_CLAUDE={claude} ",
+};
+
+// The reviewer settings before 0.5.8, replaced by command and logs.
+interface LegacyCommand {
+  format?: string;
+  args?: string[];
+}
+
+// quoteWord keeps a word with spaces or quotes as one word of the command.
+function quoteWord(w: string): string {
+  if (!/[ \t"']/.test(w)) return w;
+  return w.includes("'") ? `"${w}"` : `'${w}'`;
+}
+
+// migratedCommand is the command and logs folder for a reviewer from before
+// 0.5.8: tono, run with its Claude wrapper and the old arguments. Its logs were
+// read unless the format was "result-json".
+function migratedCommand(old: LegacyCommand): { command: string; logs: string } {
+  const kept = (old.args ?? [])
+    .map((a) => a.trim())
+    .filter(Boolean)
+    .map(quoteWord);
+  return {
+    command: `${LEGACY.claudeEnv}{reviewer} ${kept.length ? kept.join(" ") : LEGACY.args}`,
+    logs: old.format === "result-json" ? "" : LEGACY.logs,
+  };
+}
+
 // The flat tono settings worker.json held before 0.5.4. merge() carries them
 // over once, like the worker's Config.migrate, and the next save drops them.
 interface LegacyConfig {
@@ -173,15 +212,19 @@ function migrateReviewer(old: LegacyConfig): ReviewerConfig {
   const path = (old.tonoPath ?? "").trim();
   return {
     ...d,
+    repo: LEGACY.repo,
+    script: LEGACY.script,
+    ...migratedCommand({}),
+    markerPrefix: LEGACY.marker,
     ...(path ? { source: "local" as const, path } : {}),
     mine: {
       enabled: old.tonoMine ?? d.mine.enabled,
       maxAgeDays: old.tonoMineMaxAgeDays || d.mine.maxAgeDays,
     },
     team: {
-      enabled: old.tonoOwnPRsOnly ? false : (old.tonoTeamPRs ?? d.team.enabled),
+      enabled: old.tonoOwnPRsOnly ? false : (old.tonoTeamPRs ?? true),
       maxAgeDays: old.tonoMaxAgeDays || d.team.maxAgeDays,
-      team: old.tonoTeam || d.team.team,
+      team: old.tonoTeam || LEGACY.team,
       repos: old.tonoRepos ?? [],
     },
   };
@@ -199,27 +242,34 @@ export function merge(raw: string): WorkerConfig {
     tonoRepos,
     ...parsed
   } = JSON.parse(raw || "{}") as Partial<WorkerConfig> & LegacyConfig;
-  const r =
-    parsed.reviewer ??
-    migrateReviewer({
-      tonoPath,
-      tonoMine,
-      tonoMineMaxAgeDays,
-      tonoTeamPRs,
-      tonoOwnPRsOnly,
-      tonoTeam,
-      tonoMaxAgeDays,
-      tonoRepos,
-    });
+  const legacy = {
+    tonoPath,
+    tonoMine,
+    tonoMineMaxAgeDays,
+    tonoTeamPRs,
+    tonoOwnPRsOnly,
+    tonoTeam,
+    tonoMaxAgeDays,
+    tonoRepos,
+  };
+  const hasLegacy = Object.values(legacy).some((v) => v !== undefined);
+  let r: Partial<ReviewerConfig> & LegacyCommand =
+    parsed.reviewer ?? (hasLegacy ? migrateReviewer(legacy) : DEFAULTS.reviewer);
+  // A reviewer section without the command key is from before 0.5.8. An
+  // empty command stays empty: only a missing key counts as old.
+  if (!("command" in r)) {
+    r = { ...r, ...migratedCommand(r), markerPrefix: r.markerPrefix?.trim() || LEGACY.marker };
+  }
+  const { format: _format, args: _args, ...reviewer } = r;
   const { tono, ...jobs } = parsed.jobs ?? {};
   return {
     ...DEFAULTS,
     ...parsed,
     reviewer: {
       ...DEFAULTS.reviewer,
-      ...r,
-      mine: { ...DEFAULTS.reviewer.mine, ...r.mine },
-      team: { ...DEFAULTS.reviewer.team, ...r.team, repos: r.team?.repos ?? [] },
+      ...reviewer,
+      mine: { ...DEFAULTS.reviewer.mine, ...reviewer.mine },
+      team: { ...DEFAULTS.reviewer.team, ...reviewer.team, repos: reviewer.team?.repos ?? [] },
     },
     slack: { ...DEFAULTS.slack, ...parsed.slack },
     focus: { ...DEFAULTS.focus, ...parsed.focus },
@@ -258,8 +308,17 @@ function Toggle({ id, on, onClick }: { id: string; on: boolean; onClick: () => v
   );
 }
 
-// RepoList adds and removes "owner/repo" names. A bare name means epidemicsound/<name>.
-function RepoList({ repos, onChange }: { repos: string[]; onChange: (next: string[]) => void }) {
+// RepoList adds and removes "owner/repo" names. A bare name means <org>/<name>,
+// where org is the team's org. With no org, it needs owner/repo.
+function RepoList({
+  repos,
+  org,
+  onChange,
+}: {
+  repos: string[];
+  org: string;
+  onChange: (next: string[]) => void;
+}) {
   const [draft, setDraft] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -268,10 +327,14 @@ function RepoList({ repos, onChange }: { repos: string[]; onChange: (next: strin
     setProblem(null);
     if (!name) return;
     if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(name)) {
-      setProblem("Use owner/repo, or a bare repo name");
+      setProblem(org ? "Use owner/repo, or a bare repo name" : "Use owner/repo");
       return;
     }
-    const full = name.includes("/") ? name : `epidemicsound/${name}`;
+    if (!name.includes("/") && !org) {
+      setProblem("Use owner/repo, or set the team first");
+      return;
+    }
+    const full = name.includes("/") ? name : `${org}/${name}`;
     if (repos.some((r) => r.toLowerCase() === full.toLowerCase())) {
       setProblem("Already in the list");
       return;
@@ -315,7 +378,7 @@ function RepoList({ repos, onChange }: { repos: string[]; onChange: (next: strin
               add();
             }
           }}
-          placeholder="owner/repo, or repo for epidemicsound"
+          placeholder={org ? `owner/repo, or repo for ${org}` : "owner/repo"}
           className={cn(inputClass, "flex-1 py-1.5 font-mono placeholder:text-tertiary")}
         />
         <button
@@ -608,10 +671,62 @@ export default function WorkerSettings() {
                   <div>
                     <p className="text-xs text-white/80">Reviewer</p>
                     <p className="text-[10px] text-tertiary">
-                      The code that does the reviews. Managed: the worker keeps its own clone, so
-                      the branch you have checked out never changes what runs.
+                      Any CLI that follows the reviewer contract (plans 030 and 031). It reviews one
+                      PR and never posts. The worker posts its comments.
                     </p>
                   </div>
+                  <div className="space-y-2 text-[10px] text-tertiary">
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 shrink-0">Command</span>
+                      <input
+                        type="text"
+                        value={cfg.reviewer.command}
+                        onChange={(e) => setReviewer({ command: e.target.value })}
+                        onBlur={() => save(cfg)}
+                        placeholder="{reviewer} {pr} --all"
+                        className={cn(inputClass, "flex-1 font-mono placeholder:text-tertiary")}
+                      />
+                    </div>
+                    <p>
+                      {"{reviewer}"} is the CLI set below. {"{pr}"}, {"{repo}"}, {"{url}"} and{" "}
+                      {"{sha}"} are filled in for each PR, and {"{claude}"} is a claude that cannot
+                      post. NAME=value words at the start set environment variables.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 shrink-0">Logs</span>
+                      <input
+                        type="text"
+                        value={cfg.reviewer.logs}
+                        onChange={(e) => setReviewer({ logs: e.target.value })}
+                        onBlur={() => save(cfg)}
+                        placeholder="Off"
+                        className={cn(inputClass, "flex-1 font-mono placeholder:text-tertiary")}
+                      />
+                    </div>
+                    <p>
+                      Off: the reviewer writes its comments as JSON to $REVIEW_RESULT. A folder: the
+                      worker reads the review from the reviewer's logs there instead.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 shrink-0">Marker</span>
+                      <input
+                        type="text"
+                        value={cfg.reviewer.markerPrefix}
+                        onChange={(e) => setReviewer({ markerPrefix: e.target.value })}
+                        onBlur={() => save(cfg)}
+                        placeholder="acme"
+                        className={cn(inputClass, "w-28 font-mono placeholder:text-tertiary")}
+                      />
+                    </div>
+                    <p>
+                      Each comment starts with {"<!-- marker:"}. A PR with a comment behind the
+                      marker counts as reviewed.
+                    </p>
+                  </div>
+                  <p className="text-[10px] text-tertiary">
+                    Where {"{reviewer}"} comes from. Managed: the worker keeps its own clone, so the
+                    branch you have checked out never changes what runs.
+                  </p>
                   <div className="flex gap-1.5">
                     {(["managed", "local"] as const).map((src) => (
                       <button
@@ -683,58 +798,10 @@ export default function WorkerSettings() {
                       value={cfg.reviewer.path}
                       onChange={(e) => setReviewer({ path: e.target.value })}
                       onBlur={() => cfg.reviewer.path.trim() && save(cfg)}
-                      placeholder="Path to the reviewer CLI, for example ~/repos/tonometer/tono"
+                      placeholder="Path to the reviewer CLI, for example ~/repos/reviewer/review"
                       className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
                     />
                   )}
-                  <details className="group">
-                    <summary className="cursor-pointer text-[10px] text-tertiary hover:text-muted-foreground">
-                      Advanced: use another reviewer
-                    </summary>
-                    <div className="mt-2 space-y-2 text-[10px] text-tertiary">
-                      <p>
-                        Any CLI can review, if it follows the reviewer contract in plan 030. It
-                        writes its comments as JSON to $REVIEW_RESULT and never posts.
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span>Format</span>
-                        <select
-                          value={cfg.reviewer.format}
-                          onChange={(e) =>
-                            saveReviewer({ format: e.target.value as ReviewerConfig["format"] })
-                          }
-                          className={cn(inputClass, "[color-scheme:dark]")}
-                        >
-                          <option value="tono-logs">tono logs (tono today)</option>
-                          <option value="result-json">result JSON (the contract)</option>
-                        </select>
-                        <span>marker</span>
-                        <input
-                          type="text"
-                          value={cfg.reviewer.markerPrefix}
-                          onChange={(e) => setReviewer({ markerPrefix: e.target.value })}
-                          onBlur={() => save(cfg)}
-                          placeholder="tono"
-                          className={cn(inputClass, "w-24 font-mono")}
-                        />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span>Arguments</span>
-                        <input
-                          type="text"
-                          value={cfg.reviewer.args.join(" ")}
-                          onChange={(e) => setReviewer({ args: e.target.value.split(" ") })}
-                          onBlur={() => save(cfg)}
-                          placeholder="{pr} --all -l high -R {repo}"
-                          className={cn(inputClass, "flex-1 font-mono")}
-                        />
-                      </div>
-                      <p>
-                        {"{pr}"}, {"{repo}"}, {"{url}"} and {"{sha}"} are filled in for each PR. A
-                        PR with a comment behind the marker counts as reviewed.
-                      </p>
-                    </div>
-                  </details>
                 </div>
               )}
 
@@ -839,6 +906,7 @@ export default function WorkerSettings() {
                       </div>
                       <RepoList
                         repos={cfg.reviewer.team.repos}
+                        org={cfg.reviewer.team.team.split("/")[0].trim()}
                         onChange={(repos) =>
                           saveReviewer({ team: { ...cfg.reviewer.team, repos } })
                         }

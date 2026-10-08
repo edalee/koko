@@ -22,7 +22,7 @@ const (
 	wakeLead    = 2 * time.Minute
 )
 
-// RunRecord is the outcome of one scheduled slot, such as tono at 12:00 today.
+// RunRecord is the outcome of one scheduled slot, such as the review at 12:00 today.
 type RunRecord struct {
 	Job      string    `json:"job"`
 	Slot     time.Time `json:"slot"`
@@ -36,9 +36,13 @@ type RunRecord struct {
 
 // State is kept on disk, because launchd restarts the worker and memory is lost.
 type State struct {
-	Runs         map[string]RunRecord  `json:"runs"`         // key: slotKey
-	TonoReviewed map[string]time.Time  `json:"tonoReviewed"` // key: "owner/repo#12@sha"
-	TonoResults  map[string]TonoResult `json:"tonoResults"`  // key: "owner/repo#12@sha"
+	Runs     map[string]RunRecord    `json:"runs"`     // key: slotKey
+	Reviewed map[string]time.Time    `json:"reviewed"` // key: "owner/repo#12@sha"
+	Results  map[string]ReviewResult `json:"results"`  // key: "owner/repo#12@sha"
+	// OldReviewed and OldResults are Reviewed and Results under their names
+	// before 0.5.8. loadState moves them over, and the next save drops them.
+	OldReviewed map[string]time.Time    `json:"tonoReviewed,omitempty"`
+	OldResults  map[string]ReviewResult `json:"tonoResults,omitempty"`
 	// TimesAdded is when each active run time first appeared, keyed "job@HH:MM".
 	// A slot counts only on days when its time was active before the slot came.
 	TimesAdded map[string]time.Time `json:"timesAdded"`
@@ -56,7 +60,7 @@ func slotKey(job string, slot time.Time) string {
 }
 
 func loadState(path string) State {
-	st := State{Runs: map[string]RunRecord{}, TonoReviewed: map[string]time.Time{}}
+	st := State{Runs: map[string]RunRecord{}, Reviewed: map[string]time.Time{}}
 	data, err := os.ReadFile(path)
 	if err == nil {
 		_ = json.Unmarshal(data, &st)
@@ -64,15 +68,26 @@ func loadState(path string) State {
 	if st.Runs == nil {
 		st.Runs = map[string]RunRecord{}
 	}
-	if st.TonoReviewed == nil {
-		st.TonoReviewed = map[string]time.Time{}
+	if st.Reviewed == nil {
+		st.Reviewed = map[string]time.Time{}
 	}
 	if st.TimesAdded == nil {
 		st.TimesAdded = map[string]time.Time{}
 	}
-	if st.TonoResults == nil {
-		st.TonoResults = map[string]TonoResult{}
+	if st.Results == nil {
+		st.Results = map[string]ReviewResult{}
 	}
+	for k, v := range st.OldReviewed {
+		if _, ok := st.Reviewed[k]; !ok {
+			st.Reviewed[k] = v
+		}
+	}
+	for k, v := range st.OldResults {
+		if _, ok := st.Results[k]; !ok {
+			st.Results[k] = v
+		}
+	}
+	st.OldReviewed, st.OldResults = nil, nil
 	renameJobKeys(&st, legacyJobTono, JobReview)
 	return st
 }
@@ -100,8 +115,8 @@ func renameJobKeys(st *State, from, to string) {
 	}
 }
 
-// TonoResult is tono's outcome for one commit of one PR.
-type TonoResult struct {
+// ReviewResult is the reviewer's outcome for one commit of one PR.
+type ReviewResult struct {
 	URL      string            `json:"url"`
 	Title    string            `json:"title"`
 	Repo     string            `json:"repo"`
@@ -114,7 +129,7 @@ type TonoResult struct {
 	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
 	LGTM     bool              `json:"lgtm,omitempty"`     // no pass had anything to say
 	Pinged   bool              `json:"pinged,omitempty"`   // the one Slack line about the review went out
-	// Unposted are comments not yet posted. The next tono run posts them.
+	// Unposted are comments not yet posted. The next review run posts them.
 	Unposted []string `json:"unposted,omitempty"`
 	// PostTries counts failed tries to post. At maxPostTries the review
 	// counts as failed, and its unposted comments are dropped.
@@ -219,7 +234,7 @@ func updateState(path string, change func(*State)) error {
 	return saveState(path, st)
 }
 
-// pruneState drops run records older than a week, and tono review marks and
+// pruneState drops run records older than a week, and review marks and
 // results older than 60 days, so the file stays small.
 func pruneState(st *State, now time.Time) {
 	for k, r := range st.Runs {
@@ -227,23 +242,23 @@ func pruneState(st *State, now time.Time) {
 			delete(st.Runs, k)
 		}
 	}
-	for k, t := range st.TonoReviewed {
+	for k, t := range st.Reviewed {
 		if now.Sub(t) > 60*24*time.Hour {
-			delete(st.TonoReviewed, k)
+			delete(st.Reviewed, k)
 		}
 	}
-	for k, r := range st.TonoResults {
+	for k, r := range st.Results {
 		if now.Sub(r.At) > 60*24*time.Hour {
 			if r.Report != "" {
 				_ = os.Remove(r.Report)
 			}
-			delete(st.TonoResults, k)
+			delete(st.Results, k)
 		}
 	}
 }
 
 // DueRun is one job to run now. Slots lists every slot it covers: after a
-// long sleep, tono may have missed 09:30 and 12:00, and one run covers both.
+// long sleep, the review may have missed 09:30 and 12:00, and one run covers both.
 type DueRun struct {
 	Job   string
 	Slots []time.Time
