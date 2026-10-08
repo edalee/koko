@@ -27,6 +27,10 @@ describe("merge", () => {
     expect(cfg.reviewer.source).toBe("managed");
     expect(cfg.reviewer.repo).toBe("epidemicsound/tonometer");
     expect(cfg.reviewer.branch).toBe("main");
+    expect(cfg.reviewer.command).toBe(
+      "TONO_CLAUDE={claude} {reviewer} {pr} --all -l high -R {repo}",
+    );
+    expect(cfg.reviewer.team.enabled).toBe(true);
     // The real values survive, not the defaults.
     expect(cfg.reviewer.team.maxAgeDays).toBe(1);
     expect(cfg.reviewer.team.repos).toEqual(["epidemicsound/kalimba"]);
@@ -70,7 +74,63 @@ describe("merge", () => {
     );
     expect(cfg.reviewer.branch).toBe("dev");
     expect(cfg.reviewer.team.maxAgeDays).toBe(3);
-    expect(cfg.reviewer.team.team).toBe("epidemicsound/content-protection");
+    expect(cfg.reviewer.team.team).toBe("");
     expect(cfg.jobs.review.times).toEqual(["11:00"]);
+  });
+
+  // A real 0.5.7 reviewer section: no command, format, args or marker. The
+  // worker's TestReviewerMigration checks the same shape.
+  const edward = {
+    reviewer: {
+      autoUpdate: true,
+      branch: "main",
+      mine: { enabled: true, maxAgeDays: 14 },
+      path: "",
+      repo: "epidemicsound/tonometer",
+      script: "tono",
+      source: "managed",
+      team: { enabled: true, maxAgeDays: 1, repos: [], team: "epidemicsound/content-protection" },
+    },
+  };
+
+  it("gives a 0.5.7 config tono's command, logs and marker", () => {
+    const cfg = merge(JSON.stringify(edward));
+    expect(cfg.reviewer.command).toBe(
+      "TONO_CLAUDE={claude} {reviewer} {pr} --all -l high -R {repo}",
+    );
+    expect(cfg.reviewer.logs).toBe("~/.cache/tono/logs");
+    expect(cfg.reviewer.markerPrefix).toBe("tono");
+    expect(cfg.reviewer.repo).toBe("epidemicsound/tonometer");
+    expect(cfg.reviewer.team.team).toBe("epidemicsound/content-protection");
+    // A save writes the new shape, and loading it again changes nothing.
+    const saved = JSON.parse(JSON.stringify(cfg));
+    expect(saved.reviewer).not.toHaveProperty("format");
+    expect(saved.reviewer).not.toHaveProperty("args");
+    expect(merge(JSON.stringify(saved))).toEqual(cfg);
+  });
+
+  it("keeps a 0.5.7 result-json reviewer off the logs", () => {
+    const cfg = merge(
+      JSON.stringify({
+        reviewer: { format: "result-json", args: ["{url}", "a b"], markerPrefix: "acme" },
+      }),
+    );
+    expect(cfg.reviewer.command).toBe("TONO_CLAUDE={claude} {reviewer} {url} 'a b'");
+    expect(cfg.reviewer.logs).toBe("");
+    expect(cfg.reviewer.markerPrefix).toBe("acme");
+  });
+
+  it("leaves an empty command empty", () => {
+    const cfg = merge(JSON.stringify({ reviewer: { command: "", logs: "" } }));
+    expect(cfg.reviewer.command).toBe("");
+    expect(cfg.reviewer.markerPrefix).toBe("");
+  });
+
+  it("names no reviewer and no team on a new install", () => {
+    const cfg = merge("{}");
+    expect(cfg.reviewer.command).toBe("");
+    expect(cfg.reviewer.repo).toBe("");
+    expect(cfg.reviewer.team).toEqual({ enabled: false, maxAgeDays: 4, team: "", repos: [] });
+    expect(cfg.jobs.review.enabled).toBe(false);
   });
 });
