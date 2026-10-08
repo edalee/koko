@@ -824,14 +824,27 @@ func commentsFor(out reviewOutcome, sha, prefix string) (comments []string, lgtm
 			return nil, false, "a draft PR comment has no footer, so it may be cut short, see " + out.log
 		}
 	}
+	// A clean pass may write no draft (tono's docs and comments passes do
+	// not), so an LGTM needs only that no pass's verdict asks for changes.
+	clean := true
+	for _, v := range out.verdicts {
+		if v == verdictFollowUps || v == verdictNotMergeable {
+			clean = false
+		}
+	}
 	if len(out.comments) > 0 {
-		if out.lgtmPasses == len(out.comments) && out.passes == len(out.comments) {
+		if out.lgtmPasses == len(out.comments) && clean {
 			return []string{out.comments[0].Body}, true, ""
 		}
 		for _, c := range out.comments {
 			comments = append(comments, c.Body)
 		}
 		return comments, false, ""
+	}
+	// The code review was skipped for the LGTM already on the head commit,
+	// and the other passes found nothing: that LGTM stands, with nothing new.
+	if out.lgtmOnHead && clean {
+		return nil, true, ""
 	}
 	// The fallback LGTM needs no verdicts at all, or a ready code review. A
 	// docs "mergeable" alone, with no code verdict, is not enough.
@@ -1184,6 +1197,7 @@ func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA s
 		// already on the head commit. Then two passes are the whole review.
 		if lgtm, err := lgtmOnHead(ctx, p.repo(), p.Number, rv.MarkerPrefix, headSHA); err == nil && lgtm {
 			out.expected--
+			out.lgtmOnHead = true
 		}
 	}
 	return out, nil
@@ -1223,9 +1237,10 @@ type reviewOutcome struct {
 	lgtmPasses int // comments that are an LGTM
 	// expected is how many passes should have run: three, less a code review
 	// skipped because its LGTM is already on the head commit.
-	expected int
-	passes   int             // passes whose verified output reads as a review
-	ran      map[string]bool // those passes, by name
+	expected   int
+	lgtmOnHead bool            // the code review was skipped for that reason
+	passes     int             // passes whose verified output reads as a review
+	ran        map[string]bool // those passes, by name
 	// unreadable counts passes with a marker line but no draft that
 	// draftComment could read.
 	unreadable int
@@ -1389,7 +1404,7 @@ func hasMarkerLine(verified, prefix string) bool {
 // later runs skip the PR.
 func lgtmComment(prefix, sha string) string {
 	short := sha[:min(7, len(sha))]
-	return fmt.Sprintf("<!-- %s:lgtm sha=%s -->\nLGTM 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", prefix, short, short)
+	return fmt.Sprintf("<!-- %s:review sha=%s -->\n> **LGTM!** 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", prefix, short, short)
 }
 
 // logKey names one review target in the log format: "owner/repo|n" with

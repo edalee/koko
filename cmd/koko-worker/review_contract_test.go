@@ -230,3 +230,36 @@ func TestReviewerEnv(t *testing.T) {
 		t.Errorf("PATH: %q", last(env, "PATH"))
 	}
 }
+
+func TestCommentsForTonoCleanPR(t *testing.T) {
+	// tono 0.5.x after tonometer #5: a clean code review writes an LGTM, and
+	// clean docs and comments passes write nothing.
+	out := reviewOutcome{fromLogs: true, expected: 3, passes: 3, lgtmPasses: 1,
+		verdicts: map[string]string{"review": verdictReady},
+		comments: []reviewComment{{Pass: "review", Verdict: contractLGTM, Body: lgtmDraft}}}
+	if c, lgtm, failed := commentsFor(out, "e41b9a2", "tono"); failed != "" || !lgtm || len(c) != 1 {
+		t.Errorf("clean PR: %d comments, lgtm %v, %q", len(c), lgtm, failed)
+	}
+	// An LGTM code review with a docs pass that wants changes is not an LGTM.
+	out.verdicts["docs"] = verdictFollowUps
+	if _, lgtm, failed := commentsFor(out, "e41b9a2", "tono"); lgtm || failed != "" {
+		t.Errorf("docs follow-ups: lgtm %v, %q", lgtm, failed)
+	}
+
+	// A rerun at a head tono already LGTM'd: the code review is skipped and
+	// the clean docs and comments passes write nothing. Nothing new to post.
+	rerun := reviewOutcome{fromLogs: true, expected: 2, passes: 2, lgtmOnHead: true,
+		ran: map[string]bool{"docs": true, "comments": true}, verdicts: map[string]string{"docs": verdictReady}}
+	if c, lgtm, failed := commentsFor(rerun, "e41b9a2", "tono"); failed != "" || !lgtm || len(c) != 0 {
+		t.Errorf("rerun: %d comments, lgtm %v, %q", len(c), lgtm, failed)
+	}
+}
+
+func TestHasHeadMarker(t *testing.T) {
+	if !hasHeadMarker("Some text\n<!-- tono:review n=2 sha=e41b9a2 -->\n> **LGTM!**", "tono", "e41b9a2") {
+		t.Error("a marker below the first line counts, as in tono")
+	}
+	if hasHeadMarker("<!-- tono:review n=2 sha=0000000 -->", "tono", "e41b9a2") || hasHeadMarker("<!-- tono:docs-check sha=e41b9a2 -->", "tono", "e41b9a2") {
+		t.Error("another commit or pass must not count")
+	}
+}

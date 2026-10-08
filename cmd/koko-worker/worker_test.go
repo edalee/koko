@@ -641,7 +641,8 @@ func TestDraftComment(t *testing.T) {
 		t.Errorf("want no draft, got %q", got)
 	}
 	lgtm := lgtmComment("tono", "55d37455abcdef")
-	if !strings.HasPrefix(lgtm, "<!-- tono:lgtm sha=55d3745 -->\nLGTM 😃⭐😸") {
+	// tono's LGTM check must recognise it, so a later run skips the code review.
+	if !strings.HasPrefix(lgtm, "<!-- tono:review sha=55d3745 -->\n> **LGTM!** 😃⭐😸") || !isLGTMDraft(lgtm) || !hasHeadMarker(lgtm, "tono", "55d3745") {
 		t.Errorf("lgtm = %q", lgtm)
 	}
 }
@@ -672,7 +673,7 @@ func TestCommentsFor(t *testing.T) {
 		case failed != "" && len(comments) > 0:
 			t.Errorf("%s: both comments and a failure", c.name)
 		case failed != "":
-		case len(comments) == 1 && strings.HasPrefix(comments[0], "<!-- tono:lgtm"):
+		case len(comments) == 1 && comments[0] == lgtmComment("tono", "abc1234def"):
 			got = "lgtm"
 		case len(comments) > 0:
 			got = "draft"

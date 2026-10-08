@@ -202,10 +202,21 @@ func lgtmOnHead(ctx context.Context, repo string, number int, prefix, sha string
 	short := sha[:min(7, len(sha))]
 	for _, line := range strings.Split(string(out), "\n") {
 		body := strings.ReplaceAll(line, `\n`, "\n")
-		first := firstLine(body)
-		if strings.HasPrefix(first, "<!-- "+prefix+":review") && strings.Contains(first, "sha="+short) && isLGTMDraft(body) {
+		if hasHeadMarker(body, prefix, short) && isLGTMDraft(body) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// hasHeadMarker is true when a line of body is the code review marker for
+// the commit short. tono accepts the marker on any line, so this does too.
+func hasHeadMarker(body, prefix, short string) bool {
+	for _, l := range strings.Split(body, "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "<!-- "+prefix+":review") && strings.Contains(l, "sha="+short) {
+			return true
+		}
+	}
+	return false
 }
