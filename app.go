@@ -24,6 +24,7 @@ type App struct {
 	git *GitService
 	// started is when Koko started, with its monotonic reading, for Activity.
 	started time.Time
+	idle    idleWatch
 }
 
 func NewApp(tm *TerminalManager, cfg *ConfigService, api *APIServer, git *GitService) *App {
@@ -35,6 +36,7 @@ func (a *App) startup(ctx context.Context) {
 	a.tm.setContext(ctx)
 	a.seedSlugs()
 	a.installStatusLine()
+	go a.watchIdle(ctx)
 
 	// Ensure API key exists and start API server
 	a.cfg.EnsureAPIKey()

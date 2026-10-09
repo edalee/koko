@@ -2,6 +2,7 @@ export namespace main {
 	
 	export class Activity {
 	    idleSeconds: number;
+	    peakIdleSeconds: number;
 	    sleptSeconds: number;
 	
 	    static createFrom(source: any = {}) {
@@ -11,6 +12,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.idleSeconds = source["idleSeconds"];
+	        this.peakIdleSeconds = source["peakIdleSeconds"];
 	        this.sleptSeconds = source["sleptSeconds"];
 	    }
 	}

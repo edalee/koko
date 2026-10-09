@@ -40,3 +40,23 @@ func TestActivity(t *testing.T) {
 		t.Errorf("IdleSeconds = %v, want -1 or more", got.IdleSeconds)
 	}
 }
+
+func TestIdleWatch(t *testing.T) {
+	var w idleWatch
+	for _, idle := range []float64{1, 2, 900, 901, 0.5} {
+		w.observe(idle)
+	}
+	// A time away of 901 seconds ended between two calls.
+	if got := w.take(1); got != 901 {
+		t.Errorf("take = %v, want 901", got)
+	}
+	// The next period starts from the last reading.
+	if got := w.take(2); got != 2 {
+		t.Errorf("take = %v, want 2", got)
+	}
+	// A time away still under way carries on.
+	w.observe(30)
+	if got := w.take(31); got != 31 {
+		t.Errorf("take = %v, want 31", got)
+	}
+}

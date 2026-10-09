@@ -120,6 +120,38 @@ describe("stepBreak", () => {
     expect(s.workSeconds).toBe(3000 + 20 * 60);
   });
 
+  it("starts a new cycle after a time away that a late timer missed", () => {
+    // Koko is hidden, so the timer fires 20 minutes late. You were away for
+    // 16 of them and came back before it fired.
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 1 },
+      { ...tick, elapsed: 20 * 60, idle: 30, peakIdle: 16 * 60, seen: false },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(0);
+  });
+
+  it("does not count a missed time away as work", () => {
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 1 },
+      { ...tick, elapsed: 10 * 60, idle: 30, peakIdle: 5 * 60, seen: false },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(3000 + 5 * 60);
+  });
+
+  it("counts a late gap as work when the peak idle was short", () => {
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 1 },
+      { ...tick, elapsed: 10 * 60, idle: 3, peakIdle: 20 },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(3000 + 10 * 60);
+  });
+
   it("does not count sleep as work", () => {
     const s = stepBreak(
       { ...NEW_CYCLE, workSeconds: 100 },

@@ -69,7 +69,7 @@ vi.mock("../../wailsjs/go/main/App", () => ({
   DeleteConversation: vi.fn().mockResolvedValue(undefined),
   DeleteConversations: vi.fn().mockResolvedValue({ deleted: [], skipped: 0 }),
   RemoveWorktrees: vi.fn().mockResolvedValue({ removed: [], skipped: [] }),
-  Activity: vi.fn().mockResolvedValue({ idleSeconds: 0, sleptSeconds: 0 }),
+  Activity: vi.fn().mockResolvedValue({ idleSeconds: 0, peakIdleSeconds: 0, sleptSeconds: 0 }),
 }));
 
 vi.mock("../../wailsjs/go/main/GitHubService", () => ({

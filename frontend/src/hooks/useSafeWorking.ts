@@ -54,6 +54,16 @@ function quietHoursResumeTime(end: string): Date {
   return resume;
 }
 
+// withDefaults fills missing fields from the defaults. The backend saves 0
+// for minutes it never had, and a 0-minute break would restart the cycle
+// every second, so 0 also takes the default.
+export function withDefaults(saved: Partial<SafeWorkingConfig>): SafeWorkingConfig {
+  const config = { ...DEFAULT_CONFIG, ...saved };
+  if (!(config.workMinutes > 0)) config.workMinutes = DEFAULT_CONFIG.workMinutes;
+  if (!(config.breakMinutes > 0)) config.breakMinutes = DEFAULT_CONFIG.breakMinutes;
+  return config;
+}
+
 export interface UseSafeWorkingResult {
   config: SafeWorkingConfig;
   updateConfig: (config: SafeWorkingConfig) => Promise<void>;
@@ -81,10 +91,7 @@ export function useSafeWorking(): UseSafeWorkingResult {
   useEffect(() => {
     GetConfig()
       .then((appConfig) => {
-        if (appConfig.safeWorking) {
-          // Merge with defaults to handle missing/zero fields
-          setConfig({ ...DEFAULT_CONFIG, ...appConfig.safeWorking });
-        }
+        if (appConfig.safeWorking) setConfig(withDefaults(appConfig.safeWorking));
       })
       .catch(() => {});
   }, []);
@@ -139,9 +146,9 @@ export function useSafeWorking(): UseSafeWorkingResult {
   }, []);
 
   // Break timer (plan 033). It samples every second, but measures wall-clock
-  // time, so a slowed or stopped timer loses nothing. Work is time you are
-  // active at the computer, in any app, from the backend's idle time. Time away
-  // as long as a break, sleep included, counts as the break.
+  // time, so a slowed or stopped timer loses no time. Activity() gives the idle
+  // time, the longest idle time since the last sample, and the time slept.
+  // stepBreak in lib/breaks.ts applies the rules.
   useEffect(() => {
     if (!config.breakEnabled) {
       breakRef.current = NEW_CYCLE;
@@ -169,6 +176,7 @@ export function useSafeWorking(): UseSafeWorkingResult {
             elapsed: (now - last) / 1000,
             slept: lastSlept === null ? 0 : sleptSeconds - lastSlept,
             idle: activity?.idleSeconds ?? -1,
+            peakIdle: activity?.peakIdleSeconds,
             seen: document.visibilityState === "visible" && document.hasFocus(),
             quiet: isQuietHoursRef.current,
           },

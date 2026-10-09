@@ -532,10 +532,10 @@
 ## ADR-042: Breaks follow your activity, not a tick count
 - **Date:** 2026-10-09
 - **Status:** Accepted
-- **Decision:** The break timer measures wall-clock time and counts work only while you are active at the computer, in any app. The backend's `App.Activity()` gives the idle time from IOKit's `HIDIdleTime`, and the time slept as wall-clock minus monotonic time. Time away as long as a break, sleep included, counts as the break. A break counts down only while Koko has focus or you are away.
+- **Decision:** The break timer measures wall-clock time and counts work only while you are active at the computer, in any app. The backend's `App.Activity()` gives the idle time from IOKit's `HIDIdleTime`, the longest idle time since the last call, and the time slept as wall-clock minus monotonic time. Time away as long as a break, sleep included, counts as the break. A break counts down only while Koko has focus or you are away.
 - **Rationale:**
   - A break is a rest for your eyes, away from the keyboard, so screen time in any app matters, not Koko's sessions.
-  - WKWebView slows timers in a hidden window, so counting ticks lost work time. Wall-clock time loses nothing.
+  - WKWebView slows timers in a hidden window, so counting ticks lost work time. Wall-clock time loses nothing. The backend reads the idle time every second, so a time away that ended between two late samples still counts.
   - `HIDIdleTime` needs no permission, so Koko asks for nothing new.
   - Go's monotonic clock on macOS stops during sleep, so the gap to the wall clock is the time slept, with no sleep notifications.
   - A break that runs out while Koko is hidden is never seen, so it waits.
