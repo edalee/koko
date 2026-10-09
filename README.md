@@ -76,7 +76,7 @@ Each session launches Claude Code in a directory you choose. The left sidebar sh
 
 ### Safe Working
 - **Quiet Hours** — Set a time window (e.g. 23:00–07:00) when the app blocks access with a full-screen overlay
-- **Break Reminders** — Configure a work/break cycle (e.g. 90 min work, 15 min break) with visual nudges
+- **Break Reminders**: a break to rest your eyes after a set time at the computer (e.g. 90 min work, 15 min break). Work is time you are active in any app. Time away as long as a break, sleep included, counts as one
 
 <p align="center">
   <img src="docs/screenshots/quiet-hours.png" alt="Kõkõ — Quiet hours blocker encouraging rest" width="800" />
