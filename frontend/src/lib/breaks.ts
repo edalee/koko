@@ -57,13 +57,20 @@ export function stepBreak(
   // the idle time. Fresh input restarts it at the idle time. With no idle
   // time, only sleep counts as away.
   let awaySeconds: number;
+  // ended is the away run that fresh input just ended. Sleep before the input
+  // still counts, as when a key press wakes the Mac. A gap without sleep does
+  // not, because you may have been working elsewhere.
+  let ended = 0;
   if (!known) awaySeconds = slept > 0 ? s.awaySeconds + slept : 0;
   else if (x.idle >= s.lastIdle + awake - Math.min(SLACK, awake / 2)) {
     awaySeconds = Math.max(s.awaySeconds + elapsed, x.idle);
-  } else awaySeconds = x.idle;
+  } else {
+    ended = s.awaySeconds + slept;
+    awaySeconds = x.idle;
+  }
   const lastIdle = known ? x.idle : 0;
 
-  if (awaySeconds >= breakMinutes * 60) {
+  if (awaySeconds >= breakMinutes * 60 || ended >= breakMinutes * 60) {
     return { ...NEW_CYCLE, awaySeconds, lastIdle };
   }
   if (x.quiet) return { ...s, awaySeconds, lastIdle };

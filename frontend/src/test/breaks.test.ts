@@ -84,6 +84,42 @@ describe("stepBreak", () => {
     expect(s.workSeconds).toBe(0);
   });
 
+  it("starts a new cycle when a key press wakes the Mac after idle then sleep", () => {
+    let s = run({ ...NEW_CYCLE, workSeconds: 3000 }, 6 * 60, {}, (i) => i);
+    s = stepBreak(s, { ...tick, elapsed: 10 * 60, slept: 10 * 60, idle: 1 }, WORK, BREAK);
+    expect(s.workSeconds).toBe(0);
+  });
+
+  it("starts a new cycle when a key press wakes the Mac after a long sleep", () => {
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 10, awaySeconds: 10 },
+      { ...tick, elapsed: 20 * 60, slept: 20 * 60, idle: 1 },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(0);
+  });
+
+  it("keeps the cycle when a key press wakes the Mac after a short sleep", () => {
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 10, awaySeconds: 10 },
+      { ...tick, elapsed: 5 * 60, slept: 5 * 60, idle: 1 },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(3000);
+  });
+
+  it("does not count a long gap without sleep as a break", () => {
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 10, awaySeconds: 10 },
+      { ...tick, elapsed: 20 * 60, slept: 0, idle: 1 },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(3000 + 20 * 60);
+  });
+
   it("does not count sleep as work", () => {
     const s = stepBreak(
       { ...NEW_CYCLE, workSeconds: 100 },

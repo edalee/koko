@@ -9,7 +9,7 @@ package main
 
 // hidIdleNanos returns IOHIDSystem's HIDIdleTime: nanoseconds since the last
 // key press, click or mouse move, in any app. It returns -1 if it cannot be
-// read. It needs no permission, unlike the CGEventSource calls.
+// read. It needs no permission.
 static long long hidIdleNanos(void) {
 	io_service_t service = IOServiceGetMatchingService(MACH_PORT_NULL, IOServiceMatching("IOHIDSystem"));
 	if (service == IO_OBJECT_NULL) return -1;
