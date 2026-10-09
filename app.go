@@ -14,7 +14,7 @@ import (
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const version = "0.5.11"
+const version = "0.5.12"
 
 type App struct {
 	ctx context.Context
@@ -22,10 +22,12 @@ type App struct {
 	cfg *ConfigService
 	api *APIServer
 	git *GitService
+	// started is when Koko started, with its monotonic reading, for Activity.
+	started time.Time
 }
 
 func NewApp(tm *TerminalManager, cfg *ConfigService, api *APIServer, git *GitService) *App {
-	return &App{tm: tm, cfg: cfg, api: api, git: git}
+	return &App{tm: tm, cfg: cfg, api: api, git: git, started: time.Now()}
 }
 
 func (a *App) startup(ctx context.Context) {

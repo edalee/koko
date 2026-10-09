@@ -4,6 +4,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-10-09
+
+### Fixed
+- **Break reminders**: the timer now follows you, not a count of timer ticks. Work is time you are active at the computer, in any app, so a hidden Koko window no longer slows it. Time away as long as a break, sleep included, counts as the break and starts a new cycle. A break waits while Koko is hidden and you work elsewhere, and counts down once you see it or step away. No open session is needed (plan 033, ADR-042)
+
 ## [0.5.11] - 2026-10-08
 
 ### Changed

@@ -126,7 +126,7 @@ export default function App() {
     breakSecondsLeft,
     skipBreak,
     delayQuietHours,
-  } = useSafeWorking(!!activeTabId);
+  } = useSafeWorking();
   const { update, dismiss: dismissUpdate } = useUpdateCheck();
 
   const dialogOpen = showNewSession || reconnectTarget !== undefined;

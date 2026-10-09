@@ -1,6 +1,6 @@
 # Plan 016: Safe Working Mode
 
-**Status:** Implemented
+**Status:** Implemented. Plan 033 changes the break timer to follow your activity.
 
 ## Context
 

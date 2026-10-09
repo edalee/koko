@@ -291,7 +291,10 @@ export default function SettingsPanel({
                   />
                 </button>
               </div>
-              <p className="text-[10px] text-tertiary">Scheduled breaks at regular intervals.</p>
+              <p className="text-[10px] text-tertiary">
+                A break to rest your eyes after this much time at the computer, in any app. Time
+                away as long as a break counts as one.
+              </p>
               {safeWorkingConfig.breakEnabled && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">

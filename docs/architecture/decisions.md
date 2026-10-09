@@ -528,3 +528,16 @@
   - Hidden PR keys move to `owner/repo#n`. The old `repo#n` keys still hide and unhide.
 - **Files:** `pr_sources.go`, `github_service.go`, `config_service.go`, `frontend/src/components/PRPanelSettings.tsx`, `frontend/src/components/PRDetailOverlay.tsx`
 - **Plan:** `docs/plans/032-pr-panel-sources.md`
+
+## ADR-042: Breaks follow your activity, not a tick count
+- **Date:** 2026-10-09
+- **Status:** Accepted
+- **Decision:** The break timer measures wall-clock time and counts work only while you are active at the computer, in any app. The backend's `App.Activity()` gives the idle time from IOKit's `HIDIdleTime`, and the time slept as wall-clock minus monotonic time. Time away as long as a break, sleep included, counts as the break. A break counts down only while Koko has focus or you are away.
+- **Rationale:**
+  - A break is a rest for your eyes, away from the keyboard, so screen time in any app matters, not Koko's sessions.
+  - WKWebView slows timers in a hidden window, so counting ticks lost work time. Wall-clock time loses nothing.
+  - `HIDIdleTime` needs no permission. The CGEventSource calls can ask for Input Monitoring.
+  - Go's monotonic clock on macOS stops during sleep, so the gap to the wall clock is the time slept, with no sleep notifications.
+  - A break that runs out while Koko is hidden is never seen, so it waits.
+- **Files:** `activity.go`, `idle_darwin.go`, `idle_other.go`, `frontend/src/lib/breaks.ts`, `frontend/src/hooks/useSafeWorking.ts`
+- **Plan:** `docs/plans/033-idle-aware-breaks.md`

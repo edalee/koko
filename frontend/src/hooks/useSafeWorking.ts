@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Activity } from "../../wailsjs/go/main/App";
 import { GetConfig, SaveConfig } from "../../wailsjs/go/main/ConfigService";
+import { type BreakState, NEW_CYCLE, stepBreak } from "../lib/breaks";
 
 export interface SafeWorkingConfig {
   quietHoursEnabled: boolean;
@@ -64,16 +66,14 @@ export interface UseSafeWorkingResult {
   delayQuietHours: () => void;
 }
 
-export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult {
+export function useSafeWorking(): UseSafeWorkingResult {
   const [config, setConfig] = useState<SafeWorkingConfig>(DEFAULT_CONFIG);
   const [isQuietHours, setIsQuietHours] = useState(false);
   const [quietResumeTime, setQuietResumeTime] = useState<Date | null>(null);
   const [isBreakTime, setIsBreakTime] = useState(false);
   const [breakSecondsLeft, setBreakSecondsLeft] = useState(0);
   const [workSecondsLeft, setWorkSecondsLeft] = useState(0);
-  const workElapsedRef = useRef(0);
-  const breakElapsedRef = useRef(0);
-  const isBreakTimeRef = useRef(false);
+  const breakRef = useRef<BreakState>(NEW_CYCLE);
   const isQuietHoursRef = useRef(false);
   const delayUntilRef = useRef(0);
 
@@ -126,64 +126,70 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
 
   // Keep refs in sync with state
   useEffect(() => {
-    isBreakTimeRef.current = isBreakTime;
-  }, [isBreakTime]);
-  useEffect(() => {
     isQuietHoursRef.current = isQuietHours;
   }, [isQuietHours]);
 
-  // Break timer — ticks every second, uses refs to avoid stale closures
+  // show publishes the break state to React.
+  const show = useCallback((b: BreakState, workMinutes: number, breakMinutes: number) => {
+    setIsBreakTime(b.phase === "break");
+    setWorkSecondsLeft(Math.max(0, Math.round(workMinutes * 60 - b.workSeconds)));
+    setBreakSecondsLeft(
+      b.phase === "break" ? Math.max(0, Math.round(breakMinutes * 60 - b.breakSeconds)) : 0,
+    );
+  }, []);
+
+  // Break timer (plan 033). It samples every second, but measures wall-clock
+  // time, so a slowed or stopped timer loses nothing. Work is time you are
+  // active at the computer, in any app, from the backend's idle time. Time away
+  // as long as a break, sleep included, counts as the break.
   useEffect(() => {
-    if (!config.breakEnabled || !hasActiveSession) {
-      if (!config.breakEnabled) {
-        workElapsedRef.current = 0;
-        breakElapsedRef.current = 0;
-        isBreakTimeRef.current = false;
-        setIsBreakTime(false);
-        setBreakSecondsLeft(0);
-        setWorkSecondsLeft(0);
-      }
+    if (!config.breakEnabled) {
+      breakRef.current = NEW_CYCLE;
+      show(NEW_CYCLE, config.workMinutes, config.breakMinutes);
       return;
     }
 
-    const workDuration = config.workMinutes * 60;
-    const breakDuration = config.breakMinutes * 60;
+    let last = Date.now();
+    let lastSlept: number | null = null;
+    let busy = false;
+    let stopped = false;
+    show(breakRef.current, config.workMinutes, config.breakMinutes);
 
-    // Initialize display
-    setWorkSecondsLeft(workDuration - workElapsedRef.current);
-
-    const id = setInterval(() => {
-      if (isQuietHoursRef.current) return;
-
-      if (!isBreakTimeRef.current) {
-        // Working phase
-        workElapsedRef.current += 1;
-        const remaining = workDuration - workElapsedRef.current;
-        setWorkSecondsLeft(Math.max(0, remaining));
-
-        if (workElapsedRef.current >= workDuration) {
-          isBreakTimeRef.current = true;
-          setIsBreakTime(true);
-          breakElapsedRef.current = 0;
-          setBreakSecondsLeft(breakDuration);
-        }
-      } else {
-        // Break phase
-        breakElapsedRef.current += 1;
-        const remaining = breakDuration - breakElapsedRef.current;
-        setBreakSecondsLeft(Math.max(0, remaining));
-
-        if (breakElapsedRef.current >= breakDuration) {
-          isBreakTimeRef.current = false;
-          setIsBreakTime(false);
-          workElapsedRef.current = 0;
-          setWorkSecondsLeft(workDuration);
-        }
+    const sample = async () => {
+      if (busy || stopped) return;
+      busy = true;
+      try {
+        const activity = await Activity().catch(() => null);
+        if (stopped) return;
+        const now = Date.now();
+        const sleptSeconds = activity?.sleptSeconds ?? lastSlept ?? 0;
+        const next = stepBreak(
+          breakRef.current,
+          {
+            elapsed: (now - last) / 1000,
+            slept: lastSlept === null ? 0 : sleptSeconds - lastSlept,
+            idle: activity?.idleSeconds ?? -1,
+            seen: document.visibilityState === "visible" && document.hasFocus(),
+            quiet: isQuietHoursRef.current,
+          },
+          config.workMinutes,
+          config.breakMinutes,
+        );
+        last = now;
+        lastSlept = sleptSeconds;
+        breakRef.current = next;
+        show(next, config.workMinutes, config.breakMinutes);
+      } finally {
+        busy = false;
       }
-    }, 1000);
+    };
 
-    return () => clearInterval(id);
-  }, [config.breakEnabled, config.workMinutes, config.breakMinutes, hasActiveSession]);
+    const id = setInterval(sample, 1000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [config.breakEnabled, config.workMinutes, config.breakMinutes, show]);
 
   const delayQuietHours = useCallback(() => {
     delayUntilRef.current = Date.now() + 30 * 60 * 1000;
@@ -192,13 +198,9 @@ export function useSafeWorking(hasActiveSession: boolean): UseSafeWorkingResult 
   }, []);
 
   const skipBreak = useCallback(() => {
-    isBreakTimeRef.current = false;
-    setIsBreakTime(false);
-    workElapsedRef.current = 0;
-    breakElapsedRef.current = 0;
-    setWorkSecondsLeft(config.workMinutes * 60);
-    setBreakSecondsLeft(0);
-  }, [config.workMinutes]);
+    breakRef.current = { ...NEW_CYCLE, lastIdle: breakRef.current.lastIdle };
+    show(breakRef.current, config.workMinutes, config.breakMinutes);
+  }, [config.workMinutes, config.breakMinutes, show]);
 
   return {
     config,

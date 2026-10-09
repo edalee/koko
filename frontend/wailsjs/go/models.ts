@@ -1,5 +1,19 @@
 export namespace main {
 	
+	export class Activity {
+	    idleSeconds: number;
+	    sleptSeconds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Activity(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.idleSeconds = source["idleSeconds"];
+	        this.sleptSeconds = source["sleptSeconds"];
+	    }
+	}
 	export class AgentInfo {
 	    name: string;
 	    model: string;

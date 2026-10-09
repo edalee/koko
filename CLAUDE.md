@@ -46,6 +46,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `mcp_server.go` + `mcp_tools.go` — MCP server, 8 tools
 - `github_service.go` — PR fetching, file diffs, reviews, commits, comments, CI status (Wails-bound)
 - `pr_sources.go`: the PR panel's sources, mine and team, as GraphQL searches run at the same time (plan 032)
+- `activity.go`, `idle_darwin.go`, `idle_other.go`: `App.Activity()`, the idle time and the time slept, for the break timer (plan 033)
 - `git_service.go` — Branch name, file changes, file diffs, repo slug detection
 - `process_monitor.go`: child process tree scan for the subagent monitor
 - `config_service.go` — Atomic writes, API key, hidden PRs
@@ -62,7 +63,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
   - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx` (on/off, job times, Test and Run now, checks, log)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
-- `docs/plans/` — Implementation plans (001-032)
+- `docs/plans/` — Implementation plans (001-033)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
@@ -89,6 +90,6 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **`/design` command**: screenshots running app + analyzes against design system
 
 ## Design Docs
-- Implementation plans in `docs/plans/` (001-032)
+- Implementation plans in `docs/plans/` (001-033)
 - Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation
