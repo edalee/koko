@@ -41,10 +41,16 @@ export const NEW_CYCLE: BreakState = {
   lastIdle: 0,
 };
 
-// Timers and clocks are not exact, so idle can grow a little less than the
-// awake time between samples, with no input. SLACK is that shortfall, capped
-// at half the awake time, so idle that stands still always means fresh input.
+// Timers and clocks are not exact, so with no input, idle can grow a little
+// less than the awake time between samples. SLACK is the largest shortfall
+// allowed, in seconds. The allowance is capped at half the awake time, so if
+// any awake time passed, idle that has not grown means fresh input.
 const SLACK = 2;
+
+// The wall clock drifts against the monotonic clock by microseconds a second,
+// so a sample shows a tiny slept time with no sleep at all. Less than this
+// many seconds is not sleep.
+const MIN_SLEEP = 1;
 
 /** stepBreak returns the timer state after one sample. */
 export function stepBreak(
@@ -54,7 +60,7 @@ export function stepBreak(
   breakMinutes: number,
 ): BreakState {
   const elapsed = Math.max(0, x.elapsed);
-  const slept = Math.min(elapsed, Math.max(0, x.slept));
+  const slept = x.slept >= MIN_SLEEP ? Math.min(elapsed, x.slept) : 0;
   const awake = elapsed - slept;
   const known = x.idle >= 0;
   const peak = Math.max(x.idle, x.peakIdle ?? x.idle);
@@ -68,15 +74,17 @@ export function stepBreak(
   // time. This sample's awake time does not count, because you may have been
   // working in another app.
   let ended = 0;
-  // missed is the idle time inside this sample that fresh input ended, so it
-  // does not count as work.
+  // missed is the idle time inside this sample that fresh input ended, if the
+  // run reached ACTIVE_WITHIN. It does not count as work. A shorter pause
+  // counts. The part of the run before this sample was already counted, so
+  // only its growth since the last sample is missed.
   let missed = 0;
   if (!known) awaySeconds = slept > 0 ? s.awaySeconds + slept : 0;
   else if (x.idle >= s.lastIdle + awake - Math.min(SLACK, awake / 2)) {
     awaySeconds = Math.max(s.awaySeconds + elapsed, x.idle);
   } else {
     ended = Math.max(s.awaySeconds + slept, peak);
-    if (peak >= ACTIVE_WITHIN) missed = Math.min(awake, peak);
+    if (peak >= ACTIVE_WITHIN) missed = Math.min(awake, Math.max(0, peak - s.lastIdle));
     awaySeconds = x.idle;
   }
   const lastIdle = known ? x.idle : 0;
@@ -98,8 +106,9 @@ export function stepBreak(
   }
 
   // A break counts down while Koko has focus, or while you are away. If
-  // another app has focus and you are active, the break waits.
-  const away = !active || slept > 0 || missed > 0;
+  // another app has focus and you are active, the break waits. If the idle
+  // time is unknown, Koko cannot tell, so the break always counts down.
+  const away = !known || !active || slept > 0 || missed > 0;
   const breakSeconds = s.breakSeconds + (x.seen || away ? elapsed : 0);
   if (breakSeconds >= breakMinutes * 60) {
     return { ...NEW_CYCLE, awaySeconds, lastIdle };
