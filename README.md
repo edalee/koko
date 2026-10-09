@@ -179,7 +179,7 @@ The worker keeps its settings in `~/Library/Application Support/koko/worker.json
 
 ## Build from Source
 
-Requires Go 1.24+, Node.js 22+, and the [Wails CLI](https://wails.io/docs/gettingstarted/installation).
+Requires Go 1.25+, Node.js 22+, and the [Wails CLI](https://wails.io/docs/gettingstarted/installation) v2.16+.
 
 ```bash
 git clone https://github.com/edalee/koko.git
@@ -256,7 +256,7 @@ Kõkõ is built with [Wails v2](https://wails.io/) — a Go backend connected to
 | Layer | Technology |
 |-------|-----------|
 | Desktop shell | Wails v2 |
-| Backend | Go 1.24 |
+| Backend | Go 1.25 |
 | Frontend | React 19, TypeScript |
 | Terminal | xterm.js v6 + WebGL |
 | Styling | Tailwind CSS v4, OKLCH dark theme |

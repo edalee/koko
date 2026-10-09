@@ -4,6 +4,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.11] - 2026-10-08
+
+### Changed
+- **Wails 2.16.0**: up from 2.11.0. It fixes a WebView crash on macOS 26 (Tahoe) during rapid UI updates, and a memory leak in dialogs, menus and window setup. Builds now need Go 1.25 and the Wails CLI 2.16
+
 ## [0.5.10] - 2026-10-08
 
 ### Fixed
