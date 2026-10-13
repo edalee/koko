@@ -122,7 +122,7 @@ The session sidebar groups sessions under their directory name with nested inden
     Bug fix            ○ disconnected
 ▾ api
     Session 1          ● active
-▸ baldrick (1 closed)
+▸ web (1 closed)
 ```
 
 - Directory header: folder icon + last path component, collapsible

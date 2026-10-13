@@ -14,17 +14,17 @@ Status: merged to `main` in #20 (commit `e9d32b4`, 30 Sep). The wake test and th
 - **Deny list:** it is wider than the plan's list. It also refuses `Write`, `Edit`, `NotebookEdit`, Jira issue creation, and calendar delete, update and respond.
 
 See ADR-029 to ADR-035 in `docs/architecture/decisions.md` for the decisions behind the build.
-Replaces `baldrick-work/docs/plans/001-scheduled-jobs.md`.
+Replaces an older scheduled-jobs plan in a private repo.
 
 ## Problem
 
-The work assistant lives in a separate Python repo, `baldrick-work`. It has its own Slack app and its own settings in `.env`. It reads the calendar through EventKit (the macOS calendar framework), which a launchd job can use only through a signed helper binary.
+The work assistant lives in a separate private Python repo. It has its own Slack app and its own settings in `.env`. It reads the calendar through EventKit (the macOS calendar framework), which a launchd job can use only through a signed helper binary.
 
 Koko already has a Slack connection, a settings panel and a Claude session model. Two tools do half the job each.
 
 ## Goal
 
-- The baldrick-work code moves into Koko and becomes **koko-worker**.
+- That code moves into Koko and becomes **koko-worker**.
 - koko-worker is built into Koko. One switch in the UI turns it on or off.
 - Each job has its own switch and times in the UI.
 - Connections (Slack, Google Calendar, GitHub, Jira) are set up and checked in the UI.
@@ -48,7 +48,7 @@ The times are defaults. The UI can change them.
 
 ### Stand-up
 
-1. **Today's meetings.** This replaces the 08:30 calendar DM from baldrick-work.
+1. **Today's meetings.** This replaces the 08:30 calendar DM from the old assistant.
 2. **Ready to merge:** your open PRs that are approved, not drafts, mergeable, with every check green. Claude reads each Jira ticket and says whether the PR covers it. If it does, the ticket can be closed after the merge. For approved PRs that are not ready, it says what blocks them.
 3. **Follow-up steps** for each ready PR.
 4. **Needs your review:** open, non-draft PRs that request your review, oldest first. Your own PRs and bot PRs (Dependabot, Renovate) are hidden.
@@ -58,7 +58,7 @@ The times are defaults. The UI can change them.
 
 **Layout:** the DM uses Slack blocks, with a divider between sections. Long sections are split at line breaks under Slack's 3,000-character limit per block, and a message that needs more than 50 blocks continues in a second message.
 
-Go fetches the PR lists with `gh`, so the links are exact. Claude only does the judgement: ticket coverage and follow-up steps. (In the baldrick-work test, Claude built the list and gave one PR the wrong link.)
+Go fetches the PR lists with `gh`, so the links are exact. Claude only does the judgement: ticket coverage and follow-up steps. (In a test of the old assistant, Claude built the list and gave one PR the wrong link.)
 
 ### Focus
 
@@ -80,7 +80,7 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 - The verdict comes from the draft PR comment in each verified pass: mergeable, mergeable with follow-ups, or not mergeable. "Ready to approve" means every pass says mergeable or mergeable with follow-ups, and the code review says mergeable.
 - Results are keyed `repo#number@sha`, so the stand-up can say when a PR has new commits since its review.
 - The review runs in a cache clone at the PR head, never in your working clones.
-- It calls the reviewer CLI directly: `<reviewer> <number> --all -l high`. The CLI posts nothing to GitHub without `-c`.
+- It calls the reviewer CLI directly: `<reviewer> <number>`. The CLI posts nothing to GitHub without `-c`.
 - The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its Claude wrapper denies the posting commands as a second guard.
 - **Posting:** the worker's Go code posts the review, not the reviewer's Claude. It takes the draft PR comment from each pass's verified output (the reviewer's `*-merged.log` files), found by its `<!-- reviewer:` marker, and posts each draft as its own comment with `gh pr comment`.
   - If all three passes ran and none wrote a draft, it posts "LGTM 😃⭐😸" behind `<!-- reviewer:lgtm sha=… -->`.
@@ -146,7 +146,7 @@ Koko app (UI)                      koko-worker (background)
 ### Slack
 
 - Koko's own `slackToken` and `slackOwnerId` are empty, so the worker has its own Slack settings.
-- You enter a bot token and your Slack user ID in the Worker UI. The baldrick-work Slack app's bot token works for this.
+- You enter a bot token and your Slack user ID in the Worker UI. The old assistant's Slack app bot token works for this.
 - They are stored in the worker's own config file, mode 0600, like Koko's config.
 
 ### Waking the Mac
@@ -195,9 +195,9 @@ A new **Worker** section in `SettingsPanel.tsx`:
 - **Worker config** is read from and written to `worker.json` through `worker_service.go`.
 - **Connections:** one row each for Slack, Google Calendar, GitHub (`gh`), Jira and Mac wake. Each has a "Check" button with a plain result, such as "Google Calendar: connected, 6 events today". Where a connection is missing, the row says how to fix it.
 
-## What moves from baldrick-work
+## What moves from the old assistant
 
-| baldrick-work part | In Koko |
+| Old assistant part | In Koko |
 |---|---|
 | Scheduled jobs (unbuilt draft) | Rewritten in Go as koko-worker. The Python draft is reference only. |
 | 08:30 calendar DM | Replaced by the stand-up. |
@@ -205,7 +205,7 @@ A new **Worker** section in `SettingsPanel.tsx`:
 | Slack DM chat bot, `/today`, `/koko`, Claude brain, SQLite memory | Out of scope. A possible follow-up plan. |
 | EventKit calendar reader | Dropped, replaced by the Google connector. |
 
-Your uncommitted work in baldrick-work (the 08:30 briefing loop) stays there until baldrick-work is retired.
+Your uncommitted work in the old assistant (the 08:30 briefing loop) stays there until the old assistant is retired.
 
 ## Testing
 
@@ -230,7 +230,7 @@ Done since:
 - The Worker section shows in Settings, with fields for the reviewer's team and window, and focus time's minimum gap.
 - `make build-worker`, `make test-worker`, and the worker in `make dev`, `make test` and `make lint`.
 - `make build` puts `koko-worker` inside `Koko.app`, next to Koko's own binary.
-- The Slack bot token and user ID are copied from baldrick-work.
+- The Slack bot token and user ID are copied from the old assistant.
 - End-to-end test of the serve loop: one stand-up slot, one DM, one state record.
 
 Done on 30 Sep:
@@ -285,7 +285,7 @@ Done on 7 Oct: log retention.
 
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
-2. Turn off baldrick-work's launchd agent.
+2. Turn off the old assistant's launchd agent.
 3. Drop or rebuild the old Slack DM bot (`slack_commands.go`). See the last item under "Out of scope". The Slack tab stays hidden until then.
 4. Make the GitHub tab in Settings easier to use. It holds the followed repos and the hidden PRs.
 
@@ -297,7 +297,7 @@ Still to do:
 4. Add the review job.
 5. Add wake booking and the sudoers check.
 6. Add the Koko app side (`worker_service.go`, `WorkerSettings.tsx`). Hook it into shared files after the other branch merges.
-7. Turn off baldrick-work's launchd agent when you say so. Its chat bot stays until the follow-up plan decides.
+7. Turn off the old assistant's launchd agent when you say so. Its chat bot stays until the follow-up plan decides.
 
 ## Decisions taken
 

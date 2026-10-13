@@ -16,7 +16,7 @@ You set up any reviewer with one command and an optional log folder. Nothing out
 
 ## Settings
 
-`reviewer.command` is the whole command, for example `{reviewer} {pr} --all`.
+`reviewer.command` is the whole command, for example `{reviewer} {pr}`.
 
 - The worker splits it on spaces. Single or double quotes keep a word with spaces together. No shell runs it.
 - Leading `NAME=value` words set environment variables, as in a shell.

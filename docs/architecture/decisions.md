@@ -414,7 +414,7 @@
 ## ADR-034: The reviewer stays read-only, and the worker posts
 - **Date:** 2026-09-30
 - **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR. Since 2026-10-08 the reviewer and its arguments are a setting (ADR-040). The guards below still apply
-- **Decision:** The review job calls the reviewer CLI as `<reviewer> <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
+- **Decision:** The review job calls the reviewer CLI as `<reviewer> <number>` with its own arguments and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
 - **Rationale:**
   - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
   - The reviewer's Claude variable points to a wrapper. It adds `--no-session-persistence` and denies the posting commands.

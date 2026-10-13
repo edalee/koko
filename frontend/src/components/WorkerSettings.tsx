@@ -348,7 +348,7 @@ export default function WorkerSettings() {
           value={cfg.slack.userId}
           onChange={(e) => setCfg({ ...cfg, slack: { ...cfg.slack, userId: e.target.value } })}
           onBlur={() => save(cfg)}
-          placeholder="Your Slack member ID, U02F4AZV2"
+          placeholder="Your Slack member ID, U0123456789"
           className={cn(inputClass, "w-full py-1.5 font-mono placeholder:text-tertiary")}
         />
         <p className="text-[10px] text-tertiary">It needs the chat:write scope.</p>
@@ -503,7 +503,7 @@ export default function WorkerSettings() {
                         value={cfg.reviewer.command}
                         onChange={(e) => setReviewer({ command: e.target.value })}
                         onBlur={() => save(cfg)}
-                        placeholder="{reviewer} {pr} --all"
+                        placeholder="{reviewer} {pr}"
                         className={cn(inputClass, "flex-1 font-mono placeholder:text-tertiary")}
                       />
                     </div>

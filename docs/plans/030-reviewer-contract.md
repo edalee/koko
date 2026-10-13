@@ -6,7 +6,7 @@ Status: done in 0.5.7. Plan 031 replaces `reviewer.format` and `reviewer.args` w
 
 The review worker ran one reviewer CLI and nothing else. It was tied to that reviewer in five places:
 
-- the arguments, `<n> --all -l high -R <repo>`
+- the arguments, `<n>` plus the reviewer's own flags
 - the reviewer's own Claude wrapper variable
 - the reviewer's private logs, `~/.cache/reviewer/logs/*-<pass>-merged.log`, read for drafts and verdicts
 - exactly three passes, named review, docs and comments
@@ -25,7 +25,7 @@ Any reviewer can do the reviews, if it follows a small contract. The current rev
 
 The worker runs the reviewer CLI in a clone of the PR's repo, checked out at the PR head.
 
-**Arguments.** `reviewer.args`, default `{pr} --all -l high -R {repo}`. The worker fills in `{pr}`, `{repo}`, `{url}` and `{sha}`.
+**Arguments.** `reviewer.args`, default `{pr}`. The worker fills in `{pr}`, `{repo}`, `{url}` and `{sha}`.
 
 **Environment:**
 

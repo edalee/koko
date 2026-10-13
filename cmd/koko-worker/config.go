@@ -38,7 +38,7 @@ type ReviewerConfig struct {
 	AutoUpdate bool   `json:"autoUpdate"`
 	Script     string `json:"script"` // managed: the reviewer CLI, relative to the clone
 	Path       string `json:"path"`   // local: the reviewer CLI
-	// Command runs the reviewer, for example "{reviewer} {pr} --all" (plan
+	// Command runs the reviewer, for example "{reviewer} {pr}" (plan
 	// 031). See reviewerCommand for how it is split and filled in.
 	Command string `json:"command"`
 	// Logs is the folder the reviewer writes its logs to. Empty means off: the

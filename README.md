@@ -166,7 +166,7 @@ It needs these connections. Settings > Worker checks each one and says how to fi
 - **GitHub**: the `gh` CLI, signed in with `gh auth login`.
 - **Claude Code**: `claude` on the PATH, with the claude.ai Google Calendar and Atlassian connectors connected.
 - **Reviewer**: any CLI that follows the reviewer contract in `docs/plans/030-reviewer-contract.md` and `031-generic-reviewer.md`. Set it in Settings > Worker > Review worker:
-  - **Command**, for example `{reviewer} {pr} --all`. `{reviewer}` is the CLI from a managed clone of a repo (kept up to date before each run) or a local path.
+  - **Command**, for example `{reviewer} {pr}`. `{reviewer}` is the CLI from a managed clone of a repo (kept up to date before each run) or a local path.
   - **Logs**, off by default. Off, the reviewer writes its comments as JSON to `$REVIEW_RESULT`. Set to a folder, the worker reads the review from the reviewer's logs there.
   - **Marker**, the prefix of the reviewer's comment markers, `<!-- marker:`.
 

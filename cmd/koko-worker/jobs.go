@@ -1402,7 +1402,7 @@ func hasMarkerLine(verified, prefix string) bool {
 // later runs skip the PR.
 func lgtmComment(prefix, sha string) string {
 	short := sha[:min(7, len(sha))]
-	return fmt.Sprintf("<!-- %s:review sha=%s -->\n> **LGTM!** 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", prefix, short, short)
+	return fmt.Sprintf("<!-- %s:review sha=%s -->\n> **LGTM!** 😃⭐😸\n\n<sub>Koko review worker: no findings at `%s`, run with Claude</sub>", prefix, short, short)
 }
 
 // logKey names one review target in the log format: "owner/repo|n" with

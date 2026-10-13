@@ -48,7 +48,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ## [0.5.8] - 2026-10-08
 
 ### Changed
-- **Reviewer command**: Settings > Worker > Review worker sets the reviewer as one command, such as `{reviewer} {pr} --all`, with an optional log folder and the comment marker. Logs off means the reviewer writes `$REVIEW_RESULT`. The worker no longer assumes one reviewer CLI or org: a new install has no reviewer and no team until you set them, and a bare repo name means the team's org. Your current reviewer settings carry over as they are (plan 031, ADR-040)
+- **Reviewer command**: Settings > Worker > Review worker sets the reviewer as one command, such as `{reviewer} {pr}`, with an optional log folder and the comment marker. Logs off means the reviewer writes `$REVIEW_RESULT`. The worker no longer assumes one reviewer CLI or org: a new install has no reviewer and no team until you set them, and a bare repo name means the team's org. Your current reviewer settings carry over as they are (plan 031, ADR-040)
 
 ### Fixed
 - **Clean PRs from the reviewer**: the reviewer's docs and comments passes write nothing when clean, so a PR with only the reviewer's code review LGTM now counts as LGTM in the stand-up and the Slack line. A rerun at a commit the reviewer already approved no longer fails. The worker's own LGTM uses the reviewer's code review marker and `**LGTM!**`, so the reviewer recognises it
