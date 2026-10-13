@@ -325,7 +325,7 @@ func (h *SlackCommandHandler) handleCommand(text string) string {
 			"`files <slug>` — Git file changes\n" +
 			"`output [slug]` — Last ~50 lines of output\n" +
 			"`help` — This message\n" +
-			"_Slugs look like `koko-1`, `drumstick-2`_"
+			"_Slugs look like `koko-1`, `api-2`_"
 
 	default:
 		return fmt.Sprintf("Unknown command: `%s`. Type `help` for available commands.", cmd)

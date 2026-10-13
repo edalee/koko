@@ -53,6 +53,7 @@ interface WorkerConfig {
   enabled: boolean;
   timeZone: string;
   calendarId: string;
+  jiraSite: string;
   reviewer: ReviewerConfig;
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
@@ -93,8 +94,9 @@ interface CheckResult {
 
 const DEFAULTS: WorkerConfig = {
   enabled: false,
-  timeZone: "Europe/Stockholm",
+  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   calendarId: "primary",
+  jiraSite: "",
   // No reviewer is set up, so the review job starts off.
   reviewer: {
     source: "managed",
@@ -158,112 +160,9 @@ const CONNECTION_NAMES: Record<string, string> = {
   wake: "Mac wake",
 };
 
-// The tono settings a worker.json from before 0.5.8 meant when it left them
-// out. Only the migration uses them. The worker's Config.migrate does the same.
-const LEGACY = {
-  args: "{pr} --all -l high -R {repo}",
-  logs: "~/.cache/tono/logs",
-  marker: "tono",
-  repo: "epidemicsound/tonometer",
-  script: "tono",
-  team: "epidemicsound/content-protection",
-  claudeEnv: "TONO_CLAUDE={claude} ",
-};
-
-// The reviewer settings before 0.5.8, replaced by command and logs.
-interface LegacyCommand {
-  format?: string;
-  args?: string[];
-}
-
-// quoteWord keeps a word with spaces or quotes as one word of the command.
-function quoteWord(w: string): string {
-  if (!/[ \t"']/.test(w)) return w;
-  return w.includes("'") ? `"${w}"` : `'${w}'`;
-}
-
-// migratedCommand is the command and logs folder for a reviewer from before
-// 0.5.8: tono, run with its Claude wrapper and the old arguments. Its logs were
-// read unless the format was "result-json".
-function migratedCommand(old: LegacyCommand): { command: string; logs: string } {
-  const kept = (old.args ?? [])
-    .map((a) => a.trim())
-    .filter(Boolean)
-    .map(quoteWord);
-  return {
-    command: `${LEGACY.claudeEnv}{reviewer} ${kept.length ? kept.join(" ") : LEGACY.args}`,
-    logs: old.format === "result-json" ? "" : LEGACY.logs,
-  };
-}
-
-// The flat tono settings worker.json held before 0.5.4. merge() carries them
-// over once, like the worker's Config.migrate, and the next save drops them.
-interface LegacyConfig {
-  tonoPath?: string;
-  tonoMine?: boolean;
-  tonoMineMaxAgeDays?: number;
-  tonoTeamPRs?: boolean;
-  tonoOwnPRsOnly?: boolean;
-  tonoTeam?: string;
-  tonoMaxAgeDays?: number;
-  tonoRepos?: string[];
-}
-
-function migrateReviewer(old: LegacyConfig): ReviewerConfig {
-  const d = DEFAULTS.reviewer;
-  const path = (old.tonoPath ?? "").trim();
-  return {
-    ...d,
-    repo: LEGACY.repo,
-    script: LEGACY.script,
-    ...migratedCommand({}),
-    markerPrefix: LEGACY.marker,
-    ...(path ? { source: "local" as const, path } : {}),
-    mine: {
-      enabled: old.tonoMine ?? d.mine.enabled,
-      maxAgeDays: old.tonoMineMaxAgeDays || d.mine.maxAgeDays,
-    },
-    team: {
-      enabled: old.tonoOwnPRsOnly ? false : (old.tonoTeamPRs ?? true),
-      maxAgeDays: old.tonoMaxAgeDays || d.team.maxAgeDays,
-      team: old.tonoTeam || LEGACY.team,
-      repos: old.tonoRepos ?? [],
-    },
-  };
-}
-
 export function merge(raw: string): WorkerConfig {
-  const {
-    tonoPath,
-    tonoMine,
-    tonoMineMaxAgeDays,
-    tonoTeamPRs,
-    tonoOwnPRsOnly,
-    tonoTeam,
-    tonoMaxAgeDays,
-    tonoRepos,
-    ...parsed
-  } = JSON.parse(raw || "{}") as Partial<WorkerConfig> & LegacyConfig;
-  const legacy = {
-    tonoPath,
-    tonoMine,
-    tonoMineMaxAgeDays,
-    tonoTeamPRs,
-    tonoOwnPRsOnly,
-    tonoTeam,
-    tonoMaxAgeDays,
-    tonoRepos,
-  };
-  const hasLegacy = Object.values(legacy).some((v) => v !== undefined);
-  let r: Partial<ReviewerConfig> & LegacyCommand =
-    parsed.reviewer ?? (hasLegacy ? migrateReviewer(legacy) : DEFAULTS.reviewer);
-  // A reviewer section without the command key is from before 0.5.8. An
-  // empty command stays empty: only a missing key counts as old.
-  if (!("command" in r)) {
-    r = { ...r, ...migratedCommand(r), markerPrefix: r.markerPrefix?.trim() || LEGACY.marker };
-  }
-  const { format: _format, args: _args, ...reviewer } = r;
-  const { tono, ...jobs } = parsed.jobs ?? {};
+  const parsed = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
+  const reviewer: Partial<ReviewerConfig> = parsed.reviewer ?? {};
   return {
     ...DEFAULTS,
     ...parsed,
@@ -275,7 +174,7 @@ export function merge(raw: string): WorkerConfig {
     },
     slack: { ...DEFAULTS.slack, ...parsed.slack },
     focus: { ...DEFAULTS.focus, ...parsed.focus },
-    jobs: { ...DEFAULTS.jobs, ...(tono && !jobs.review ? { review: tono } : {}), ...jobs },
+    jobs: { ...DEFAULTS.jobs, ...parsed.jobs },
   };
 }
 
@@ -453,6 +352,34 @@ export default function WorkerSettings() {
           className={cn(inputClass, "w-full py-1.5 font-mono placeholder:text-tertiary")}
         />
         <p className="text-[10px] text-tertiary">It needs the chat:write scope.</p>
+      </div>
+
+      {/* Calendar and Jira */}
+      <div className="space-y-2">
+        <p className="text-xs text-white/80">Calendar and Jira</p>
+        {(
+          [
+            ["timeZone", "Time zone", "Europe/London"],
+            ["calendarId", "Calendar", "primary"],
+            ["jiraSite", "Jira site", "example.atlassian.net"],
+          ] as const
+        ).map(([key, label, placeholder]) => (
+          <label key={key} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span className="w-16 shrink-0">{label}</span>
+            <input
+              type="text"
+              value={cfg[key]}
+              onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
+              onBlur={() => save(cfg)}
+              placeholder={placeholder}
+              className={cn(inputClass, "flex-1 font-mono placeholder:text-tertiary")}
+            />
+          </label>
+        ))}
+        <p className="text-[10px] text-tertiary">
+          The time zone is an IANA name. The calendar is a Google Calendar ID. Leave the Jira site
+          empty and the stand-up reads no tickets.
+        </p>
       </div>
 
       {/* Jobs */}

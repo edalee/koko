@@ -11,11 +11,11 @@ import (
 	"time"
 )
 
-var stockholm, _ = time.LoadLocation("Europe/Stockholm")
+var cet, _ = time.LoadLocation("Europe/Paris")
 
 // Monday 28 September 2026.
 func monday(hour, minute int) time.Time {
-	return time.Date(2026, 9, 28, hour, minute, 0, 0, stockholm)
+	return time.Date(2026, 9, 28, hour, minute, 0, 0, cet)
 }
 
 var focusCfg = FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30}
@@ -84,7 +84,7 @@ func TestFindFocusGaps(t *testing.T) {
 		{"run at 09:15 starts at 09:15", nil, monday(9, 15), "09:15-17:00"},
 		{"late run rounds up to 5 minutes", nil, monday(11, 2), "11:05-17:00"},
 		{"after the window nothing", nil, monday(17, 10), ""},
-		{"weekend nothing", nil, time.Date(2026, 9, 26, 7, 0, 0, 0, stockholm), ""},
+		{"weekend nothing", nil, time.Date(2026, 9, 26, 7, 0, 0, 0, cet), ""},
 		{"all-day time off blocks the day", []GCalEvent{ev("", "", allDay, free, title("OOO"))}, monday(7, 0), ""},
 		{"all-day busy blocks the day", []GCalEvent{ev("", "", allDay)}, monday(7, 0), ""},
 		{"all-day free event does not block", []GCalEvent{ev("", "", allDay, free, title("Offsite week"))}, monday(7, 0), "09:00-17:00"},
@@ -102,9 +102,9 @@ func TestFindFocusGaps(t *testing.T) {
 }
 
 func TestEventTimesKeepOtherZones(t *testing.T) {
-	// Google returns some events in their organiser's zone. 11:00 Berlin is 11:00 Stockholm.
+	// Google returns some events in their organiser's zone. 11:00 Berlin is 11:00 Paris.
 	e := GCalEvent{Start: gcalTime{DateTime: "2026-09-28T11:00:00+02:00"}, End: gcalTime{DateTime: "2026-09-28T11:30:00+02:00"}}
-	s, _, err := e.times(stockholm)
+	s, _, err := e.times(cet)
 	if err != nil || s.Format("15:04") != "11:00" {
 		t.Fatalf("got %v %v", s, err)
 	}
@@ -179,7 +179,7 @@ func TestDueRuns(t *testing.T) {
 		}
 	})
 	t.Run("weekend nothing", func(t *testing.T) {
-		if got := dueRuns(cfg, empty, time.Date(2026, 9, 26, 13, 0, 0, 0, stockholm)); got != nil {
+		if got := dueRuns(cfg, empty, time.Date(2026, 9, 26, 13, 0, 0, 0, cet)); got != nil {
 			t.Errorf("got %v", got)
 		}
 	})
@@ -217,7 +217,7 @@ func TestNextWake(t *testing.T) {
 		{monday(9, 20), "Mon 09:28"},
 		{monday(9, 30), "Mon 11:58"},
 		{monday(14, 0), "Tue 06:58"},
-		{time.Date(2026, 10, 2, 15, 0, 0, 0, stockholm), "Mon 06:58"}, // Friday afternoon
+		{time.Date(2026, 10, 2, 15, 0, 0, 0, cet), "Mon 06:58"}, // Friday afternoon
 	}
 	for _, tt := range tests {
 		w, ok := nextWake(cfg, tt.now)
@@ -329,7 +329,7 @@ func TestMeetings(t *testing.T) {
 			e.End = gcalTime{Date: "2026-09-29"}
 		}),
 	}
-	got := strings.Join(meetings(events, stockholm), " | ")
+	got := strings.Join(meetings(events, cet), " | ")
 	want := "09:30–09:45 Standup | 13:00–14:00 Planning _(not answered)_ | " +
 		"All day: Time report _(not answered)_ | All day: Holiday"
 	if got != want {
@@ -356,7 +356,7 @@ func TestSudoersRuleIsNarrow(t *testing.T) {
 }
 
 func TestLogKey(t *testing.T) {
-	if got := logKey("acme/kalimba", 28); got != "acme_kalimba_28" {
+	if got := logKey("acme/api", 28); got != "acme_api_28" {
 		t.Errorf("got %q", got)
 	}
 	if got := logKey("acme/data-service", 5); got != "acme_data_service_5" {
@@ -370,10 +370,10 @@ func TestManualSlots(t *testing.T) {
 	if got := manualSlots(cfg, JobStandup, monday(6, 55)); len(got) != 1 || got[0].Format("15:04") != "07:00" {
 		t.Errorf("stand-up: got %v", got)
 	}
-	// Tono run by hand at 12:05 covers 09:30 and 12:00, not 14:00.
+	// The review run by hand at 12:05 covers 09:30 and 12:00, not 14:00.
 	got := manualSlots(cfg, JobReview, monday(12, 5))
 	if len(got) != 2 || got[1].Format("15:04") != "12:00" {
-		t.Errorf("tono: got %v", got)
+		t.Errorf("acme: got %v", got)
 	}
 	st := readyState(cfg)
 	recordRun(&st, DueRun{Job: JobStandup, Slots: manualSlots(cfg, JobStandup, monday(6, 55))}, StatusOK, "run by hand", monday(6, 56))
@@ -427,9 +427,9 @@ func TestUpdateStateKeepsConcurrentChanges(t *testing.T) {
 func TestLoadConfigKeepsDefaults(t *testing.T) {
 	path := t.TempDir() + "/worker.json"
 	// What the Koko UI sends when you only fill in Slack, plus a hand-edited job.
-	body := `{"enabled": true, "tonoPath": "", "timeZone": "", "focus": {"windowStart": ""},
+	body := `{"enabled": true, "timeZone": "", "jiraSite": " https://acme.atlassian.net/ ", "focus": {"windowStart": ""},
 		"slack": {"botToken": "x", "userId": "U1"},
-		"jobs": {"tono": {"enabled": true}, "focus": {"enabled": false, "times": [""]}}}`
+		"jobs": {"review": {"enabled": true}, "focus": {"enabled": false, "times": [""]}}}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -438,12 +438,14 @@ func TestLoadConfigKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	def := defaultConfig()
-	// tonoPath makes it a config from before 0.5.4, so its reviewer is tono's.
-	if cfg.Reviewer.Source != SourceManaged || cfg.Reviewer.Repo != legacyRepo || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
+	if cfg.Reviewer.Source != SourceManaged || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
 		t.Errorf("empty values not defaulted: %+v", cfg)
 	}
 	if got := strings.Join(cfg.Jobs[JobReview].Times, ","); got != "09:30,12:00,14:00" {
 		t.Errorf("review times = %q", got)
+	}
+	if cfg.JiraSite != "acme.atlassian.net" {
+		t.Errorf("jira site = %q, want the host only", cfg.JiraSite)
 	}
 	if cfg.Jobs[JobFocus].Enabled || strings.Join(cfg.Jobs[JobFocus].Times, ",") != "09:15" {
 		t.Errorf("focus = %+v", cfg.Jobs[JobFocus])
@@ -460,12 +462,12 @@ func TestWorkerPATH(t *testing.T) {
 	}
 }
 
-// A timed-out tono must run its trap, which removes its lock. A plain kill
+// A timed-out reviewer must run its trap, which removes its lock. A plain kill
 // would leave the lock and block every later review of that PR.
 func TestGroupCommandRunsTrapOnTimeout(t *testing.T) {
 	dir := t.TempDir()
 	lock := dir + "/review.lock"
-	script := dir + "/fake-tono"
+	script := dir + "/fake-reviewer"
 	body := "#!/bin/bash\nmkdir " + lock + "\ntrap 'rmdir " + lock + "' EXIT INT TERM\nsleep 30 &\nwait\n"
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
@@ -505,8 +507,8 @@ func TestJobSwitchedOnLateWaitsForTomorrow(t *testing.T) {
 	st := readyState(cfg)
 	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}}
 	syncTimes(cfg, &st, monday(10, 0))
-	if got := dueString(dueRuns(cfg, st, monday(10, 0))); strings.Contains(got, "tono") {
-		t.Errorf("tono ran straight after being switched on: %q", got)
+	if got := dueString(dueRuns(cfg, st, monday(10, 0))); strings.Contains(got, JobReview) {
+		t.Errorf("review ran straight after being switched on: %q", got)
 	}
 }
 
@@ -602,18 +604,7 @@ func TestBuildBlocks(t *testing.T) {
 	}
 }
 
-func TestParseVerdict(t *testing.T) {
-	for text, want := range map[string]string{
-		"blah\n> **Mergeable with follow-ups.** Six findings":     verdictFollowUps,
-		"> **Not mergeable.** Seven findings":                     verdictNotMergeable,
-		"PR is mergeable\n```\n> **Mergeable.** No findings\n```": verdictReady,
-		"1. **Not mergeable** says the round":                     verdictNotMergeable,
-		"nothing here":                                            "",
-	} {
-		if got := parseVerdict(text); got != want {
-			t.Errorf("parseVerdict(%q) = %q, want %q", text, got, want)
-		}
-	}
+func TestOverallVerdictByPass(t *testing.T) {
 	for _, c := range []struct {
 		in   map[string]string
 		want string
@@ -625,61 +616,6 @@ func TestParseVerdict(t *testing.T) {
 	} {
 		if got := overallVerdict(c.in); got != c.want {
 			t.Errorf("overallVerdict(%v) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-func TestDraftComment(t *testing.T) {
-	// The shape of a real verified log: the heading above the block varies.
-	verified := "## Findings\n\n- one\n\n## Draft comment (not posted)\n\n```\n<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>\n```\n\nTwo MCP servers failed.\n"
-	want := "<!-- tono:review n=1 sha=6ec793f -->\n## Code Review #1\n\n> **Mergeable.** One finding.\n\n<sub>tono code review</sub>"
-	if got := draftComment(verified, "tono"); got != want {
-		t.Errorf("got %q", got)
-	}
-	// A fenced block without a marker is not a draft.
-	if got := draftComment("## Checked\n\n```json\n[]\n```\n", "tono"); got != "" {
-		t.Errorf("want no draft, got %q", got)
-	}
-	lgtm := lgtmComment("tono", "55d37455abcdef")
-	// tono's LGTM check must recognise it, so a later run skips the code review.
-	if !strings.HasPrefix(lgtm, "<!-- tono:review sha=55d3745 -->\n> **LGTM!** 😃⭐😸") || !isLGTMDraft(lgtm) || !hasHeadMarker(lgtm, "tono", "55d3745") {
-		t.Errorf("lgtm = %q", lgtm)
-	}
-}
-
-func TestCommentsFor(t *testing.T) {
-	draft := "<!-- tono:review n=1 sha=abc1234 -->\n## Code Review #1\n\n<sub>tono code review</sub>"
-	cases := []struct {
-		name string
-		out  reviewOutcome
-		want string // "draft", "lgtm" or "failed"
-	}{
-		{"drafts are posted", reviewOutcome{fromLogs: true, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "draft"},
-		{"clean, no verdicts", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{}}, "lgtm"},
-		{"clean, ready", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictReady}}, "lgtm"},
-		{"a pass did not finish", reviewOutcome{fromLogs: true, expected: 3, passes: 2, verdicts: map[string]string{}}, "failed"},
-		{"drafts, but a pass did not finish", reviewOutcome{fromLogs: true, expected: 3, comments: []reviewComment{{Pass: "review", Body: draft}}, passes: 2, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
-		{"follow-ups but no draft", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictFollowUps}}, "failed"},
-		{"not mergeable but no draft", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"review": verdictNotMergeable}}, "failed"},
-		// overallVerdict needs a clean code review for "ready", so a lone docs
-		// "mergeable" reads as follow-ups: no LGTM without a code verdict.
-		{"docs mergeable, no code verdict", reviewOutcome{fromLogs: true, expected: 3, passes: 3, verdicts: map[string]string{"docs": verdictReady}}, "failed"},
-		{"cut-short draft", reviewOutcome{fromLogs: true, expected: 3, comments: []reviewComment{{Pass: "review", Body: "<!-- tono:review n=1 -->\n## Code Review #1\n\n- **HIGH**: see"}}, passes: 3}, "failed"},
-	}
-	for _, c := range cases {
-		comments, _, failed := commentsFor(c.out, "abc1234def", "tono")
-		got := "failed"
-		switch {
-		case failed != "" && len(comments) > 0:
-			t.Errorf("%s: both comments and a failure", c.name)
-		case failed != "":
-		case len(comments) == 1 && comments[0] == lgtmComment("tono", "abc1234def"):
-			got = "lgtm"
-		case len(comments) > 0:
-			got = "draft"
-		}
-		if got != c.want {
-			t.Errorf("%s: got %s, want %s (failed %q)", c.name, got, c.want, failed)
 		}
 	}
 }
@@ -757,8 +693,8 @@ func TestPostPending(t *testing.T) {
 	// A comment already on the PR, from a post that timed out or a --pr run
 	// at the same commit, is not posted twice.
 	f = newFake()
-	r.Unposted = []string{"<!-- tono:review n=1 sha=abc -->\nbody", "b"}
-	f.onGitHub = map[string]string{"<!-- tono:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
+	r.Unposted = []string{"<!-- acme:review n=1 sha=abc -->\nbody", "b"}
+	f.onGitHub = map[string]string{"<!-- acme:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
 	if _, err := postPending(ctx, f.env(), key, r); err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +773,7 @@ func TestReviewSectionWithoutATeam(t *testing.T) {
 	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1, Title: "Change", CreatedAt: "2026-09-29T10:00:00Z"}
 	p.Repository.NameWithOwner = "o/r"
 	p.Author.Login = "alice"
-	env := Env{cfg: defaultConfig(), now: time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm), state: &State{}}
+	env := Env{cfg: defaultConfig(), now: time.Date(2026, 9, 30, 8, 0, 0, 0, cet), state: &State{}}
 	got := reviewSection(context.Background(), env, &reviewTally{}, []SearchPR{p}, nil)
 	// No team means every PR is listed, with no scope error and no gh call.
 	if !strings.Contains(got, "r#1") || strings.Contains(got, "Could not load") {
@@ -852,7 +788,7 @@ func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
 		p.Author.Login = author
 		return p
 	}
-	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, cet)
 	cfg := testConfig()
 	env := Env{cfg: cfg, now: now, state: &State{}}
 	tally := &reviewTally{loaded: true, scope: reviewScope{
@@ -891,56 +827,11 @@ func TestStandupStatusForPostingStates(t *testing.T) {
 	}
 }
 
-func TestLooksLikeReview(t *testing.T) {
-	for _, broken := range []string{
-		"API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)\n",
-		"Not logged in · Please run /login\n",
-		"stub: ok\n",
-		"",
-	} {
-		if looksLikeReview(broken) {
-			t.Errorf("%q reads as a review", broken)
-		}
-	}
-	clean := "## What I checked\n\n- Every comment in the diff.\n\n## PR comment\n\nNone. The pass found nothing.\n"
-	if !looksLikeReview(clean) {
-		t.Error("a clean pass must read as a review")
-	}
-	// Two clean passes and one that broke: no LGTM.
-	out := reviewOutcome{fromLogs: true, expected: 3, passes: 2, broken: []string{"review: API Error"}, verdicts: map[string]string{}}
-	if c, _, failed := commentsFor(out, "abc", "tono"); c != nil || !strings.Contains(failed, "API Error") {
-		t.Errorf("broken pass: comments %v, failed %q", c, failed)
-	}
-}
-
-func TestDraftCommentFences(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"tildes", "## Draft\n\n~~~\n<!-- tono:docs-check n=1 -->\nBody\n<sub>f</sub>\n~~~\n", "<!-- tono:docs-check n=1 -->\nBody\n<sub>f</sub>"},
-		{"indented", "1. Draft:\n\n   ```\n   <!-- tono:review n=1 -->\n   Body\n   <sub>f</sub>\n   ```\n", "<!-- tono:review n=1 -->\nBody\n<sub>f</sub>"},
-		{"inner code block", "```\n<!-- tono:review n=1 -->\nFix:\n```go\nx := 1\n```\n<sub>f</sub>\n```\n", "<!-- tono:review n=1 -->\nFix:\n```go\nx := 1\n```\n<sub>f</sub>"},
-		{"longer outer fence", "````\n<!-- tono:review n=1 -->\n```\ncode\n```\n<sub>f</sub>\n````\n", "<!-- tono:review n=1 -->\n```\ncode\n```\n<sub>f</sub>"},
-		{"marker only quoted in prose", "- The docs quote `<!-- tono:... -->` as an example.\n", ""},
-	}
-	for _, c := range cases {
-		if got := draftComment(c.in, "tono"); got != c.want {
-			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
-		}
-	}
-	// A marker line outside any fence the finder can read is not clean.
-	if !hasMarkerLine("## Draft\n\n<!-- tono:review n=1 -->\nBody\n", "tono") || hasMarkerLine("- quoted `<!-- tono:x -->`", "tono") {
-		t.Error("hasMarkerLine")
-	}
-	out := reviewOutcome{fromLogs: true, expected: 3, passes: 3, unreadable: 1, verdicts: map[string]string{}}
-	if c, _, failed := commentsFor(out, "abc", "tono"); failed == "" || c != nil {
-		t.Error("an unreadable draft must fail, not post LGTM")
-	}
-}
-
-func TestTonoScope(t *testing.T) {
+func TestReviewScope(t *testing.T) {
 	now := monday(9, 30)
 	s := reviewScope{
 		team: "acme/platform", days: 4,
-		members: map[string]bool{"jamie-r-es": true, "edalee": true},
+		members: map[string]bool{"jdoe": true, "edalee": true},
 		since:   now.AddDate(0, 0, -4),
 	}
 	pr := func(login, created string) SearchPR {
@@ -952,9 +843,9 @@ func TestTonoScope(t *testing.T) {
 		pr   SearchPR
 		want string
 	}{
-		{pr("jamie-r-es", "2026-09-27T10:00:00Z"), ""},
-		{pr("Jamie-R-ES", "2026-09-25T08:00:00Z"), ""}, // logins are not case-sensitive
-		{pr("jamie-r-es", "2026-09-20T10:00:00Z"), "opened more than 4 days ago"},
+		{pr("jdoe", "2026-09-27T10:00:00Z"), ""},
+		{pr("JDoe", "2026-09-25T08:00:00Z"), ""}, // logins are not case-sensitive
+		{pr("jdoe", "2026-09-20T10:00:00Z"), "opened more than 4 days ago"},
 		{pr("someone-else", "2026-09-27T10:00:00Z"), "not opened by acme/platform"},
 		{pr("edalee", "not a date"), "opened more than 4 days ago"},
 	} {
@@ -998,7 +889,7 @@ func TestReviewScopeConfig(t *testing.T) {
 		t.Errorf("a team scope that is off needs no team: %v", err)
 	}
 	cfg = testConfig()
-	for _, bad := range []string{"kalimba", "acme/", "a/b/c"} {
+	for _, bad := range []string{"api", "acme/", "a/b/c"} {
 		cfg.Reviewer.Team.Repos = []string{bad}
 		if cfg.Reviewer.problem() == nil {
 			t.Errorf("want an error for repo %q", bad)
@@ -1006,43 +897,16 @@ func TestReviewScopeConfig(t *testing.T) {
 	}
 }
 
-func TestLoadConfigLegacyPRs(t *testing.T) {
-	load := func(body string) Config {
-		t.Helper()
-		path := t.TempDir() + "/worker.json"
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		cfg, err := loadConfig(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return cfg
-	}
-	// A config from before the split keeps both kinds on.
-	if cfg := load(`{"tonoTeam": "epidemicsound/content-protection"}`); !cfg.Reviewer.Mine.Enabled || !cfg.Reviewer.Team.Enabled {
-		t.Errorf("old config: %+v", cfg)
-	}
-	// The old "own PRs only" switch turns team PRs off.
-	if cfg := load(`{"tonoOwnPRsOnly": true}`); !cfg.Reviewer.Mine.Enabled || cfg.Reviewer.Team.Enabled {
-		t.Errorf("tonoOwnPRsOnly: mine %v, team %v", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Enabled)
-	}
-	cfg := load(`{"tonoMine": false, "tonoRepos": [" acme/kalimba ", ""]}`)
-	if cfg.Reviewer.Mine.Enabled || strings.Join(cfg.Reviewer.Team.Repos, ",") != "acme/kalimba" {
-		t.Errorf("mine %v, repos %q", cfg.Reviewer.Mine.Enabled, cfg.Reviewer.Team.Repos)
-	}
-}
-
 func TestTeamSection(t *testing.T) {
 	pr := func(n int, author, created string) SearchPR {
-		p := SearchPR{URL: fmt.Sprintf("https://github.com/acme/kalimba/pull/%d", n), Number: n, Title: "Change", CreatedAt: created}
-		p.Repository.NameWithOwner = "acme/kalimba"
+		p := SearchPR{URL: fmt.Sprintf("https://github.com/acme/api/pull/%d", n), Number: n, Title: "Change", CreatedAt: created}
+		p.Repository.NameWithOwner = "acme/api"
 		p.Author.Login = author
 		return p
 	}
-	now := time.Date(2026, 9, 30, 8, 0, 0, 0, stockholm)
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, cet)
 	cfg := testConfig()
-	cfg.Reviewer.Team.Repos = []string{"acme/kalimba"}
+	cfg.Reviewer.Team.Repos = []string{"acme/api"}
 	env := Env{cfg: cfg, now: now, state: &State{}}
 	tally := &reviewTally{loaded: true, scope: reviewScope{
 		team: cfg.Reviewer.Team.Team, days: 4, members: map[string]bool{"alice": true}, since: now.AddDate(0, 0, -4),
@@ -1055,8 +919,8 @@ func TestTeamSection(t *testing.T) {
 		pr(4, "alice", "2026-09-01T10:00:00Z"), // too old
 	}
 	got := teamSection(context.Background(), env, tally, prs, nil, prs[1:2])
-	if !strings.Contains(got, "1 open team PRs") || !strings.Contains(got, "kalimba#1") ||
-		strings.Contains(got, "kalimba#2") || strings.Contains(got, "kalimba#3") || strings.Contains(got, "kalimba#4") {
+	if !strings.Contains(got, "1 open team PRs") || !strings.Contains(got, "api#1") ||
+		strings.Contains(got, "api#2") || strings.Contains(got, "api#3") || strings.Contains(got, "api#4") {
 		t.Errorf("team section:\n%s", got)
 	}
 	env.cfg.Reviewer.Team.Enabled = false

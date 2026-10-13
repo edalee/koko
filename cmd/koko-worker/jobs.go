@@ -123,7 +123,8 @@ func runStandup(ctx context.Context, env Env) error {
 
 	verdicts := map[string]ticketVerdict{}
 	var jiraErr error
-	if len(judged) > 0 {
+	// With no Jira site set, the stand-up reads no tickets.
+	if len(judged) > 0 && env.cfg.JiraSite != "" {
 		var keys []string
 		seen := map[string]bool{}
 		for _, j := range judged {
@@ -643,9 +644,6 @@ func runReview(ctx context.Context, env Env, onlyURL string) error {
 	if err := os.WriteFile(env.paths.ClaudeWrap, []byte(claudeWrapper), 0o700); err != nil {
 		return err
 	}
-	// The wrapper and shims had these names before 0.5.8.
-	_ = os.Remove(filepath.Join(env.paths.Dir, "tono-claude.sh"))
-	_ = os.RemoveAll(filepath.Join(env.paths.Dir, "tono-bin"))
 	var failures []string
 	if !env.test {
 		gaveUp, err := postUnposted(ctx, env)
@@ -824,7 +822,7 @@ func commentsFor(out reviewOutcome, sha, prefix string) (comments []string, lgtm
 			return nil, false, "a draft PR comment has no footer, so it may be cut short, see " + out.log
 		}
 	}
-	// A clean pass may write no draft (tono's docs and comments passes do
+	// A clean pass may write no draft (a reviewer's docs or comments pass may
 	// not), so an LGTM needs only that no pass's verdict asks for changes.
 	clean := true
 	for _, v := range out.verdicts {

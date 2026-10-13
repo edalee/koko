@@ -48,13 +48,13 @@ The Summary panel aggregates counts from GitHub + Slack into a short scrollable 
 
 ### GitHub data via `gh` CLI
 
-Run `gh pr list --repo epidemicsound/<repo> --json number,title,author,reviewDecision --limit 10` in a goroutine. Parse JSON response. This avoids managing GitHub tokens — `gh` handles auth.
+Run `gh pr list --repo acme/<repo> --json number,title,author,reviewDecision --limit 10` in a goroutine. Parse JSON response. This avoids managing GitHub tokens — `gh` handles auth.
 
 Tracked repos (configurable later, hardcoded for now):
-- `drumstick2`
-- `drumstick-ui`
-- `trigon`
-- `conductor-bot`
+- `api`
+- `web`
+- `worker`
+- `infra`
 
 ### Slack panel stays mock (structured)
 
@@ -135,11 +135,11 @@ func (m Model) Init() tea.Cmd {
 ```go
 func fetchPRs() tea.Cmd {
     return func() tea.Msg {
-        repos := []string{"drumstick2", "drumstick-ui", "trigon", "conductor-bot"}
+        repos := []string{"api", "web", "worker", "infra"}
         var allPRs []GitHubPR
         for _, repo := range repos {
             out, err := exec.Command("gh", "pr", "list",
-                "--repo", "epidemicsound/"+repo,
+                "--repo", "acme/"+repo,
                 "--json", "number,title,author,reviewDecision",
                 "--limit", "10",
             ).Output()
@@ -155,8 +155,8 @@ func fetchPRs() tea.Cmd {
 
 Single-line items for narrow sidebar:
 ```
-#142 Fix claim batch processing  ← truncated to fit width
-#139 Add retry logic for YDS     ← repo name as dim prefix if space
+#142 Fix batch job processing    ← truncated to fit width
+#139 Add retry logic for uploads ← repo name as dim prefix if space
 ```
 
 ### Slack Panel (`slack/model.go`)
@@ -165,9 +165,9 @@ Same `list.Model` pattern as GitHub but populated with mock data:
 ```go
 func New() Model {
     items := []list.Item{
-        SlackItem{Channel: "#product-drm-internal", Count: 3, Type: "DM"},
-        SlackItem{Channel: "#product-drm", Count: 1, Type: "thread"},
-        SlackItem{Channel: "#drm", Count: 2, Type: "mention"},
+        SlackItem{Channel: "#team-internal", Count: 3, Type: "DM"},
+        SlackItem{Channel: "#team", Count: 1, Type: "thread"},
+        SlackItem{Channel: "#dev", Count: 2, Type: "mention"},
     }
     l := list.New(items, newCompactDelegate(), 0, 0)
     l.Title = "Slack"

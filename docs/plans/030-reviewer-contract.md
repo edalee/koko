@@ -4,22 +4,22 @@ Status: done in 0.5.7. Plan 031 replaces `reviewer.format` and `reviewer.args` w
 
 ## Problem
 
-The review worker ran tono and nothing else. It was tied to tono in five places:
+The review worker ran one reviewer CLI and nothing else. It was tied to that reviewer in five places:
 
 - the arguments, `<n> --all -l high -R <repo>`
-- the `TONO_CLAUDE` wrapper
-- tono's private logs, `~/.cache/tono/logs/*-<pass>-merged.log`, read for drafts and verdicts
+- the reviewer's own Claude wrapper variable
+- the reviewer's private logs, `~/.cache/reviewer/logs/*-<pass>-merged.log`, read for drafts and verdicts
 - exactly three passes, named review, docs and comments
-- `<!-- tono:` markers and tono's verdict wording
+- `<!-- reviewer:` markers and the reviewer's verdict wording
 
-Two tono changes then broke the worker:
+Two reviewer changes then broke the worker:
 
 1. A clean review now writes an LGTM draft, `> **LGTM!**` with emojis. The worker read no verdict from it, and a clean PR would have got three LGTM comments, one per pass.
-2. tono skips the code review when its LGTM is already on the head commit. With `--all`, the docs and comments passes still run. The worker saw 2 of 3 passes and marked the review failed.
+2. The reviewer skips the code review when its LGTM is already on the head commit. With `--all`, the docs and comments passes still run. The worker saw 2 of 3 passes and marked the review failed.
 
 ## Goal
 
-Any reviewer can do the reviews, if it follows a small contract. tono keeps working as it is today.
+Any reviewer can do the reviews, if it follows a small contract. The current reviewer keeps working as it is today.
 
 ## The contract
 
@@ -33,7 +33,7 @@ The worker runs the reviewer CLI in a clone of the PR's repo, checked out at the
 |---|---|
 | `REVIEW_RESULT` | Where the reviewer writes its result |
 | `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` | The PR number, `owner/repo`, URL and head commit |
-| `REVIEW_CLAUDE` | A `claude` wrapper with posting turned off. tono reads it as `TONO_CLAUDE`. |
+| `REVIEW_CLAUDE` | A `claude` wrapper with posting turned off. The current reviewer reads it under its own variable name. |
 | `PATH` | Starts with read-only `gh` and `git`, which refuse anything that changes GitHub |
 
 **Exit code.** 0 means done. 2 means nothing to review: the PR is closed or a draft, it was already reviewed, or another run holds it. Anything else means the review failed.
@@ -58,15 +58,15 @@ The worker runs the reviewer CLI in a clone of the PR's repo, checked out at the
 
 The reviewer never posts. The worker posts each comment, records the verdicts for the stand-up, and sends the one Slack line.
 
-## tono today: the `tono-logs` adapter
+## The current reviewer: the log adapter
 
-`reviewer.format` defaults to `tono-logs` until tono writes a result file. The adapter reads tono's verified logs as before, with three fixes:
+`reviewer.format` defaults to the log adapter until the reviewer writes a result file. The adapter reads the reviewer's verified logs as before, with three fixes:
 
 - `> **LGTM!**` reads as ready to approve.
 - When every pass is an LGTM, only the code review's comment is posted, so a clean PR gets one LGTM, not three.
-- A missing code review pass counts as skipped, not broken, when the PR already has a `<!-- tono:review` LGTM for the head commit. That's the case where tono skips it.
+- A missing code review pass counts as skipped, not broken, when the PR already has a `<!-- reviewer:review` LGTM for the head commit. That's the case where the reviewer skips it.
 
-The worker's own LGTM ("LGTM 😃⭐😸") stays only as a fallback, for a tono that writes no LGTM draft.
+The worker's own LGTM ("LGTM 😃⭐😸") stays only as a fallback, for a reviewer that writes no LGTM draft.
 
 ## Settings
 
@@ -74,9 +74,9 @@ Settings > Worker > Review worker > "Advanced: use another reviewer" sets the fo
 
 ## Next steps
 
-1. tono writes `REVIEW_RESULT` when it is set. That's a tonometer change.
-2. The default `reviewer.format` switches to `result-json`, and the `tono-logs` adapter can then go.
+1. The reviewer writes `REVIEW_RESULT` when it is set. That's a change in the reviewer's repo.
+2. The default `reviewer.format` switches to `result-json`, and the log adapter can then go.
 
 ## Files
 
-`cmd/koko-worker/review_contract.go` (contract types, `readResult`, `expandArgs`, LGTM detection), `cmd/koko-worker/jobs.go` (`tonoReview`, `commentsFor`, `tonoVerified`), `cmd/koko-worker/config.go` (`reviewer.format`, `args`, `markerPrefix`), `frontend/src/components/WorkerSettings.tsx`.
+`cmd/koko-worker/review_contract.go` (contract types, `readResult`, `expandArgs`, LGTM detection), `cmd/koko-worker/jobs.go` (`commentsFor` and the review and log reading functions), `cmd/koko-worker/config.go` (`reviewer.format`, `args`, `markerPrefix`), `frontend/src/components/WorkerSettings.tsx`.

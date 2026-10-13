@@ -1,18 +1,18 @@
-# Plan 031: a reviewer that is not tied to tono
+# Plan 031: a reviewer that is not tied to one CLI
 
 ## Problem
 
-Plan 030 added a reviewer contract, but the review worker still assumed tono:
+Plan 030 added a reviewer contract, but the review worker still assumed one reviewer CLI:
 
-- The defaults named tono: the `epidemicsound/tonometer` repo, the `tono` script, the `tono` marker and tono's arguments.
-- The default `tono-logs` format read tono's logs from a fixed folder, `~/.cache/tono/logs`.
-- Every run set `TONO_CLAUDE`.
-- The team scope defaulted to `epidemicsound/content-protection`, and a bare repo name meant `epidemicsound/<name>`.
-- The code, the state file and the run logs used tono's name: `runTono`, `tonoResults`, `tono-*.log`, `tono-claude.sh`, `tono-bin`.
+- The defaults named that reviewer: its repo, its script, its marker and its arguments.
+- The default log format read that reviewer's logs from a fixed folder.
+- Every run set that reviewer's own Claude variable.
+- The team scope defaulted to one org's team, and a bare repo name meant a repo in that org.
+- The code, the state file and the run logs used that reviewer's name.
 
 ## Goal
 
-You set up any reviewer with one command and an optional log folder. Nothing outside the migration names tono or Epidemic Sound.
+You set up any reviewer with one command and an optional log folder. Nothing outside the migration names one reviewer CLI or org.
 
 ## Settings
 
@@ -42,7 +42,7 @@ The worker prepares the managed clone only when the command uses `{reviewer}`.
 
 ## The log format
 
-Log mode reads one layout, tono's. It is not reviewer-agnostic:
+Log mode reads one layout, the old reviewer's. It is not reviewer-agnostic:
 
 - three passes, named review, docs and comments
 - one file per pass, `*-<key>-<pass>-merged.log`, where `<key>` is `owner/repo|n` with every character that is not a letter or digit turned into `_`
@@ -61,25 +61,25 @@ A new reviewer should use the result file.
 
 A `reviewer` section without a `command` key is from 0.5.7 or older. The worker and the Settings tab migrate it the same way:
 
-- `command` becomes `TONO_CLAUDE={claude} {reviewer} ` plus the old `args`, or tono's arguments if there were none.
-- `logs` becomes `~/.cache/tono/logs`, unless `format` was `result-json`.
-- `markerPrefix` becomes `tono` if it was not set.
+- `command` becomes the old reviewer's Claude variable set to `{claude}`, then `{reviewer} `, plus the old `args`, or the old default arguments if there were none.
+- `logs` becomes the old reviewer's log folder, unless `format` was `result-json`.
+- `markerPrefix` becomes the old reviewer's marker if it was not set.
 
 An empty `command` stays empty. Only a missing key counts as old.
 
-The state file's `tonoReviewed` and `tonoResults` become `reviewed` and `results` on load, so no PR is reviewed twice. Old `tono-*.log` run logs are still deleted after 60 days.
+The state file's old reviewed and results keys become `reviewed` and `results` on load, so no PR is reviewed twice. Old run logs are still deleted after 60 days.
 
-These strings name tono only in the migration code and in your own `worker.json`.
+The old reviewer's name appears only in the migration code and in your own `worker.json`.
 
 ## Renames
 
 | Before | After |
 |---|---|
-| `runTono`, `tonoReview`, `tonoOutcome`, `TonoResult` | `runReview`, `runReviewer`, `reviewOutcome`, `ReviewResult` |
-| `tonoVerified`, `tonoLockKey`, `tonoPasses` | `readLogs`, `logKey`, `logPasses` |
-| `hasTonoComment`, `tonoScope`, `tonoTargets` | `hasReviewComment`, `reviewScope`, `reviewTargets` |
-| `tono-*.log`, `tono-claude.sh`, `tono-bin` | `review-*.log`, `reviewer-claude.sh`, `reviewer-bin` |
+| Run, outcome and result names | `runReview`, `runReviewer`, `reviewOutcome`, `ReviewResult` |
+| Log reading names | `readLogs`, `logKey`, `logPasses` |
+| Comment and scope names | `hasReviewComment`, `reviewScope`, `reviewTargets` |
+| Run log, wrapper and binary names | `review-*.log`, `reviewer-claude.sh`, `reviewer-bin` |
 
 ## Not in scope
 
-The stand-up's Jira site and Koko's own PR panel still default to Epidemic Sound. Neither is part of the reviewer.
+The stand-up's Jira site and Koko's own PR panel still default to one org. Neither is part of the reviewer.

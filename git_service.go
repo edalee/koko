@@ -65,7 +65,7 @@ func (gs *GitService) GetBranchName(dir string) (string, error) {
 }
 
 // GetRepoSlug returns the owner/repo slug from the git remote origin URL.
-// e.g. "epidemicsound/drumstick2" from "git@github.com:epidemicsound/drumstick2.git"
+// e.g. "acme/api" from "git@github.com:acme/api.git"
 func (gs *GitService) GetRepoSlug(dir string) (string, error) {
 	out, err := gs.runGit(dir, "remote", "get-url", "origin")
 	if err != nil {

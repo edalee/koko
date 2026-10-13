@@ -91,9 +91,6 @@ func (p PRPanelConfig) normalised() PRPanelConfig {
 	return p
 }
 
-// legacyRepoOrg is what a bare name in GitHubRepos meant before 0.5.9.
-const legacyRepoOrg = "epidemicsound"
-
 // ConfigService manages reading and writing the app config file.
 type ConfigService struct {
 	mu           sync.Mutex
@@ -228,8 +225,8 @@ func (cs *ConfigService) ClearHiddenPRs() (int, error) {
 }
 
 // GetPRPanel returns the PR panel's settings. Before 0.5.9 there were only
-// GitHubRepos: a list becomes the team's repos, with a bare name meaning
-// epidemicsound/<name> as it did then.
+// GitHubRepos: a list becomes the team's repos. A bare name has no owner, so
+// it is dropped.
 func (cs *ConfigService) GetPRPanel() PRPanelConfig {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
@@ -238,10 +235,9 @@ func (cs *ConfigService) GetPRPanel() PRPanelConfig {
 	}
 	p := defaultPRPanel()
 	for _, r := range cs.config.GitHubRepos {
-		if r = strings.TrimSpace(r); r != "" && !strings.Contains(r, "/") {
-			r = legacyRepoOrg + "/" + r
+		if r = strings.TrimSpace(r); strings.Contains(r, "/") {
+			p.Team.Repos = append(p.Team.Repos, r)
 		}
-		p.Team.Repos = append(p.Team.Repos, r)
 	}
 	return p.normalised()
 }

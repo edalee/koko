@@ -2,11 +2,11 @@
 
 ## Problem
 
-The PR panel (the PR overlay and the PR count in the sidebar) works badly outside one team at Epidemic Sound:
+The PR panel (the PR overlay and the PR count in the sidebar) works badly outside one team in one org:
 
-- With no repos set, it lists a built-in set of 16 DRM repos, whatever team you are in.
+- With no repos set, it lists a built-in set of 16 repos from one team, whatever team you are in.
 - It lists open PRs per repo only. Your own PRs and PRs waiting for your review in other repos are missing.
-- Every action (approve, merge, files, diff, reviews, commits, comments) prefixes `epidemicsound/`, so a PR in any other org breaks.
+- Every action (approve, merge, files, diff, reviews, commits, comments) prefixes one fixed org, so a PR in any other org breaks.
 - It runs one `gh pr list` per repo, one after another, every 60 seconds.
 - A failed repo is skipped without a word, so an empty list looks the same as no PRs.
 
@@ -41,7 +41,7 @@ The team's members are cached for an hour. A PR found by more than one source sh
 
 ## Full repo names
 
-`GitHubPR.repo` is `owner/repo`. Every action takes it as it is. A bare name is an error, not `epidemicsound/<name>`. Hidden PR keys become `owner/repo#n`. The panel also checks the old `repo#n` key, so PRs hidden before stay hidden.
+`GitHubPR.repo` is `owner/repo`. Every action takes it as it is. A bare name is an error, not a repo in a fixed org. Hidden PR keys become `owner/repo#n`. The panel also checks the old `repo#n` key, so PRs hidden before stay hidden.
 
 ## Sections
 
@@ -49,7 +49,7 @@ The PR list groups PRs under "My PRs" and "Team PRs", with a count each.
 
 ## Migration
 
-A non-empty `githubRepos` from before becomes `prPanel.team.repos`. Bare names there meant `epidemicsound/<name>`, so they become that. An empty one meant the DRM default list, which goes: you now see your own PRs and your review requests instead.
+A non-empty `githubRepos` from before becomes `prPanel.team.repos`. Bare names there meant a repo in one fixed org, so they become that full name. An empty one meant the built-in team list, which goes: you now see your own PRs and your review requests instead.
 
 ## Files
 

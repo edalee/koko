@@ -15,9 +15,6 @@ const (
 	JobStandup = "standup"
 	JobFocus   = "focus"
 	JobReview  = "review"
-	// legacyJobTono is the review job's name before 0.5.4. Config, state and
-	// the CLI still accept it.
-	legacyJobTono = "tono"
 )
 
 var allJobs = []string{JobStandup, JobFocus, JobReview}
@@ -98,7 +95,8 @@ type Config struct {
 	Enabled    bool   `json:"enabled"`
 	TimeZone   string `json:"timeZone"`
 	CalendarID string `json:"calendarId"`
-	// JiraSite is the Atlassian site the stand-up reads tickets from.
+	// JiraSite is the Atlassian site the stand-up reads tickets from, such as
+	// example.atlassian.net. Empty means the stand-up reads no tickets.
 	JiraSite string               `json:"jiraSite"`
 	Reviewer ReviewerConfig       `json:"reviewer"`
 	Slack    SlackConfig          `json:"slack"`
@@ -109,9 +107,8 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{
 		Enabled:    false,
-		TimeZone:   "Europe/Stockholm",
+		TimeZone:   localZone(),
 		CalendarID: "primary",
-		JiraSite:   "epidemicsound.atlassian.net",
 		// No reviewer is set up, so the review job starts off.
 		Reviewer: ReviewerConfig{
 			Source: SourceManaged, Branch: "main", AutoUpdate: true,
@@ -125,143 +122,6 @@ func defaultConfig() Config {
 			JobReview:  {Enabled: false, Times: []string{"09:30", "12:00", "14:00"}},
 		},
 	}
-}
-
-// legacyReviewer is the flat tono settings worker.json held before 0.5.4.
-// Pointers tell a missing key from a zero value.
-type legacyReviewer struct {
-	Path     *string  `json:"tonoPath"`
-	Mine     *bool    `json:"tonoMine"`
-	MineDays *int     `json:"tonoMineMaxAgeDays"`
-	TeamPRs  *bool    `json:"tonoTeamPRs"`
-	OwnOnly  *bool    `json:"tonoOwnPRsOnly"`
-	Team     *string  `json:"tonoTeam"`
-	TeamDays *int     `json:"tonoMaxAgeDays"`
-	Repos    []string `json:"tonoRepos"`
-}
-
-// legacyCommand is the reviewer settings before 0.5.8, which assumed tono.
-// Pointers tell a missing key from a zero value.
-type legacyCommand struct {
-	Command      *string  `json:"command"`
-	Format       string   `json:"format"` // "tono-logs", the default, or "result-json"
-	Args         []string `json:"args"`
-	MarkerPrefix string   `json:"markerPrefix"`
-}
-
-// The tono settings a worker.json from before 0.5.8 meant when it left them
-// out. Only migrate uses them. WorkerSettings.tsx migrates the same way.
-const (
-	legacyArgs      = "{pr} --all -l high -R {repo}"
-	legacyLogs      = "~/.cache/tono/logs"
-	legacyMarker    = "tono"
-	legacyRepo      = "epidemicsound/tonometer"
-	legacyScript    = "tono"
-	legacyTeam      = "epidemicsound/content-protection"
-	legacyClaudeEnv = "TONO_CLAUDE={claude} "
-)
-
-// migrate carries an older worker.json over. It reads the raw JSON, because
-// the defaults are already filled in on cfg.
-//
-//   - Before 0.5.4 the reviewer settings were flat tono keys, and the review
-//     job was "tono". An empty tonoPath meant the default clone, which now
-//     means a managed reviewer.
-//   - Before 0.5.8 there was no command. A reviewer section without the
-//     command key gets tono's command and logs. An empty command stays empty.
-func (c *Config) migrate(data []byte) {
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(data, &raw) != nil {
-		return
-	}
-	r := &c.Reviewer
-	rawReviewer, hasReviewer := raw["reviewer"]
-	var old legacyReviewer
-	_ = json.Unmarshal(data, &old)
-	if !hasReviewer && old.any() {
-		r.Repo, r.Script = legacyRepo, legacyScript
-		r.Team.Enabled, r.Team.Team = true, legacyTeam
-		if old.Path != nil && strings.TrimSpace(*old.Path) != "" {
-			r.Source, r.Path = SourceLocal, strings.TrimSpace(*old.Path)
-		}
-		if old.Mine != nil {
-			r.Mine.Enabled = *old.Mine
-		}
-		if old.MineDays != nil {
-			r.Mine.MaxAgeDays = *old.MineDays
-		}
-		if old.TeamPRs != nil {
-			r.Team.Enabled = *old.TeamPRs
-		}
-		if old.OwnOnly != nil && *old.OwnOnly {
-			r.Team.Enabled = false
-		}
-		if old.Team != nil {
-			r.Team.Team = *old.Team
-		}
-		if old.TeamDays != nil {
-			r.Team.MaxAgeDays = *old.TeamDays
-		}
-		if old.Repos != nil {
-			r.Team.Repos = old.Repos
-		}
-	}
-	if hasReviewer || old.any() {
-		var lc legacyCommand
-		_ = json.Unmarshal(rawReviewer, &lc)
-		if lc.Command == nil {
-			r.Command, r.Logs = migratedCommand(lc.Format, lc.Args)
-			if strings.TrimSpace(lc.MarkerPrefix) == "" {
-				r.MarkerPrefix = legacyMarker
-			}
-		}
-	}
-	var jobs map[string]json.RawMessage
-	if json.Unmarshal(raw["jobs"], &jobs) == nil {
-		_, hasOld := jobs[legacyJobTono]
-		_, hasNew := jobs[JobReview]
-		if hasOld && !hasNew {
-			c.Jobs[JobReview] = c.Jobs[legacyJobTono]
-		}
-	}
-	delete(c.Jobs, legacyJobTono)
-}
-
-// any is true when the JSON held any of the flat tono settings.
-func (o legacyReviewer) any() bool {
-	return o.Path != nil || o.Mine != nil || o.MineDays != nil || o.TeamPRs != nil ||
-		o.OwnOnly != nil || o.Team != nil || o.TeamDays != nil || o.Repos != nil
-}
-
-// migratedCommand is the command and logs folder for a reviewer from before
-// 0.5.8: tono, run with its Claude wrapper and the old arguments. Its logs
-// were read unless the format was "result-json".
-func migratedCommand(format string, args []string) (command, logs string) {
-	words := legacyArgs
-	var kept []string
-	for _, a := range args {
-		if a = strings.TrimSpace(a); a != "" {
-			kept = append(kept, quoteWord(a))
-		}
-	}
-	if len(kept) > 0 {
-		words = strings.Join(kept, " ")
-	}
-	if format != "result-json" {
-		logs = legacyLogs
-	}
-	return legacyClaudeEnv + "{reviewer} " + words, expandHome(logs)
-}
-
-// quoteWord keeps a word with spaces or quotes as one word for splitCommand.
-func quoteWord(w string) string {
-	if !strings.ContainsAny(w, " \t\"'") {
-		return w
-	}
-	if !strings.Contains(w, "'") {
-		return "'" + w + "'"
-	}
-	return `"` + w + `"`
 }
 
 // Paths the worker uses. All but Cache and Reviewer sit under ~/Library/Application
@@ -317,7 +177,6 @@ func loadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("invalid %s: %w", path, err)
 	}
-	cfg.migrate(data)
 	cfg.fillDefaults()
 	return cfg, cfg.validate()
 }
@@ -330,9 +189,7 @@ func (c *Config) fillDefaults() {
 	if c.TimeZone == "" {
 		c.TimeZone = def.TimeZone
 	}
-	if c.JiraSite == "" {
-		c.JiraSite = def.JiraSite
-	}
+	c.JiraSite = jiraHost(c.JiraSite)
 	if c.CalendarID == "" {
 		c.CalendarID = def.CalendarID
 	}
@@ -479,6 +336,29 @@ func expandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, strings.TrimPrefix(path, "~"))
+}
+
+// localZone is the Mac's time zone name, such as Europe/London, from the
+// /etc/localtime link. time.Local has no name to give the calendar, so this
+// falls back to UTC.
+func localZone() string {
+	target, err := os.Readlink("/etc/localtime")
+	if err != nil {
+		return "UTC"
+	}
+	_, name, ok := strings.Cut(target, "zoneinfo/")
+	if _, err := time.LoadLocation(name); !ok || err != nil {
+		return "UTC"
+	}
+	return name
+}
+
+// jiraHost keeps only the host of a Jira site: no scheme, path or slash.
+func jiraHost(site string) string {
+	site = strings.TrimSpace(site)
+	site = strings.TrimPrefix(strings.TrimPrefix(site, "https://"), "http://")
+	host, _, _ := strings.Cut(site, "/")
+	return host
 }
 
 func ownerRepo(s string) bool {

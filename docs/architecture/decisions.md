@@ -358,7 +358,7 @@
 - **Rationale:**
   - The scheduler reloads `worker.json` every 30 seconds. A time change in the UI needs no plist rewrite.
   - It runs any of today's slots that have come round and not run. A job missed while the Mac slept runs on wake.
-  - One run covers every missed slot of a job. After a long sleep, tono runs once for 09:30 and 12:00. A slot from an earlier day is dropped.
+  - One run covers every missed slot of a job. After a long sleep, the review job runs once for 09:30 and 12:00. A slot from an earlier day is dropped.
   - `state.json` records each slot's outcome, because a launchd restart loses memory. It is changed under a file lock, so the scheduler and "Run now" never overwrite each other.
   - `TimesAdded` records when each run time first appeared. A slot counts only if its time was set before the slot came round. A time set earlier than now, or a job switched on after its time, waits for the next day.
   - Each job has a lock file, shared by the scheduler and "Run now". A "Run now" is recorded against today's slots, so the scheduler does not repeat it.
@@ -414,17 +414,17 @@
 ## ADR-034: The reviewer stays read-only, and the worker posts
 - **Date:** 2026-09-30
 - **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR. Since 2026-10-08 the reviewer and its arguments are a setting (ADR-040). The guards below still apply
-- **Decision:** The review job calls the reviewer CLI as `tono <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
+- **Decision:** The review job calls the reviewer CLI as `<reviewer> <number> --all -l high -R <repo>` and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
 - **Rationale:**
   - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
-  - `TONO_CLAUDE` points to a wrapper. It adds `--no-session-persistence` and denies the posting commands.
-  - Read-only `gh` and `git` stand-ins go first on tono's PATH. They refuse any command that changes GitHub, including `gh api` calls that send data, and any `git push`. A deny list alone matches only command prefixes.
-  - A review is capped at 45 minutes. On timeout the whole process group gets SIGTERM, so tono removes its own lock.
-  - One review per PR: a PR reviewed once, or one that already has a tono comment, is not reviewed again.
+  - The reviewer's Claude variable points to a wrapper. It adds `--no-session-persistence` and denies the posting commands.
+  - Read-only `gh` and `git` stand-ins go first on the reviewer's PATH. They refuse any command that changes GitHub, including `gh api` calls that send data, and any `git push`. A deny list alone matches only command prefixes.
+  - A review is capped at 45 minutes. On timeout the whole process group gets SIGTERM, so the reviewer removes its own lock.
+  - One review per PR: a PR reviewed once, or one that already has a reviewer comment, is not reviewed again.
   - Results are keyed `repo#number@sha`, so the stand-up can say when a PR has new commits since its review.
 - **Amendments:**
-  - 2026-10-01: the worker's own Go code posts each pass's draft PR comment, or an LGTM. Tono's Claude stays read-only, so the guards above still hold.
-  - 2026-10-05: the job is now the review worker, `review`. The reviewer CLI is a managed clone of `reviewer.repo` at `reviewer.branch` under `~/.cache/koko-worker/reviewer`, fast-forwarded before each run, or a local path. Your own tonometer checkout no longer decides which code runs.
+  - 2026-10-01: the worker's own Go code posts each pass's draft PR comment, or an LGTM. The reviewer's Claude stays read-only, so the guards above still hold.
+  - 2026-10-05: the job is now the review worker, `review`. The reviewer CLI is a managed clone of `reviewer.repo` at `reviewer.branch` under `~/.cache/koko-worker/reviewer`, fast-forwarded before each run, or a local path. Your own reviewer checkout no longer decides which code runs.
 - **Files:** `cmd/koko-worker/jobs.go`, `cmd/koko-worker/reviewer.go`
 - **Plan:** `docs/plans/029-koko-worker.md`
 
@@ -494,24 +494,24 @@
 ## ADR-039: A reviewer contract for the review worker
 - **Date:** 2026-10-08
 - **Status:** Accepted. Amended by ADR-040: `reviewer.command` and `reviewer.logs` replace `reviewer.args` and `reviewer.format`
-- **Decision:** The review worker runs any reviewer CLI that follows a small contract, not only tono. The worker fills in `reviewer.args` and passes `REVIEW_RESULT`, `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` and `REVIEW_CLAUDE`. The reviewer exits 0, or 2 for nothing to review, and writes its comments as JSON to `REVIEW_RESULT`. It never posts. The worker posts each comment as written.
+- **Decision:** The review worker runs any reviewer CLI that follows a small contract, not only one. The worker fills in `reviewer.args` and passes `REVIEW_RESULT`, `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` and `REVIEW_CLAUDE`. The reviewer exits 0, or 2 for nothing to review, and writes its comments as JSON to `REVIEW_RESULT`. It never posts. The worker posts each comment as written.
 - **Rationale:**
-  - Two tono changes, LGTM drafts and skipping a code review already clean at the head commit, broke a worker that read tono's private logs. A contract keeps the reviewer's internals out of the worker.
+  - Two reviewer changes, LGTM drafts and skipping a code review already clean at the head commit, broke a worker that read the reviewer's private logs. A contract keeps the reviewer's internals out of the worker.
   - The reviewer writes its own LGTM, so a clean review says what it checked, and the worker invents nothing.
   - A skipped pass is a pass with no comment, never a failure.
   - The marker prefix (`reviewer.markerPrefix`) is how the worker knows a PR is reviewed, so it is configurable with the reviewer.
-  - Until tono writes a result file, the `tono-logs` adapter reads its logs as before. It reads `**LGTM!**` as ready, posts one LGTM instead of three, and treats a code review skipped for an LGTM on the head commit as skipped.
+  - Until the reviewer writes a result file, the log adapter reads its logs as before. It reads `**LGTM!**` as ready, posts one LGTM instead of three, and treats a code review skipped for an LGTM on the head commit as skipped.
 - **Files:** `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/config.go`, `frontend/src/components/WorkerSettings.tsx`
 - **Plan:** `docs/plans/030-reviewer-contract.md`
 
 ## ADR-040: The reviewer is one command and an optional log folder
 - **Date:** 2026-10-08
 - **Status:** Accepted
-- **Decision:** `reviewer.command` and `reviewer.logs` replace `reviewer.format` and `reviewer.args`. The command is split on spaces, with quotes, and runs without a shell. Leading `NAME=value` words set environment variables. `{reviewer}` is the CLI from the source setting, and `{claude}` is the wrapper that cannot post. An empty log folder means the result file. Nothing outside the migration names tono or Epidemic Sound, and a new install has no reviewer until you set one.
+- **Decision:** `reviewer.command` and `reviewer.logs` replace `reviewer.format` and `reviewer.args`. The command is split on spaces, with quotes, and runs without a shell. Leading `NAME=value` words set environment variables. `{reviewer}` is the CLI from the source setting, and `{claude}` is the wrapper that cannot post. An empty log folder means the result file. Nothing outside the migration names one reviewer CLI or org, and a new install has no reviewer until you set one.
 - **Rationale:**
   - One command says everything about how a reviewer runs. A reviewer on the PATH needs no source at all.
-  - `TONO_CLAUDE` was the last tono name the worker set on every run. A `NAME={claude}` word lets any reviewer name its own variable.
-  - The log folder is the only tono-specific reading left. Making it an optional setting keeps it for tono until tono writes a result file, without tying the worker to it.
+  - The old reviewer-specific Claude variable was the last reviewer name the worker set on every run. A `NAME={claude}` word lets any reviewer name its own variable.
+  - The log folder is the only reviewer-specific reading left. Making it an optional setting keeps it for that reviewer until it writes a result file, without tying the worker to it.
   - A 0.5.7 config migrates by the missing `command` key, in both the worker and the Settings tab. An empty command stays empty, so clearing it is not undone.
   - The state keys moved to `reviewed` and `results`, read from the old names on load, so no PR is reviewed twice.
 - **Files:** `cmd/koko-worker/config.go`, `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/jobs.go`, `cmd/koko-worker/scheduler.go`, `frontend/src/components/WorkerSettings.tsx`
@@ -522,7 +522,7 @@
 - **Status:** Accepted
 - **Decision:** The PR panel shows your PRs and your team's, with the review worker's settings shape: `mine` and `team` (age, `org/team-slug`, repos) in `config.json` as `prPanel`. One GraphQL search per source fetches every field the panel shows, and the searches run at the same time. PRs carry the full `owner/repo`, and every PR action takes it as it is.
 - **Rationale:**
-  - A built-in list of DRM repos and an `epidemicsound/` prefix on every action made the panel wrong for anyone else, and broken for other orgs.
+  - A built-in list of one team's repos and a fixed org prefix on every action made the panel wrong for anyone else, and broken for other orgs.
   - The same scopes as the review worker mean the panel lists the PRs the worker reviews, and one click copies them.
   - Each search takes several seconds with the detail fields, so they run in parallel. A failed source shows its error, and the others still show.
   - Hidden PR keys move to `owner/repo#n`. The old `repo#n` keys still hide and unhide.
