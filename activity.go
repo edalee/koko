@@ -15,7 +15,8 @@ type Activity struct {
 	// late frontend timer can miss a time away that ended between its checks,
 	// so the backend watches for it.
 	PeakIdleSeconds float64 `json:"peakIdleSeconds"`
-	// SleptSeconds is the time the computer has slept since Koko started.
+	// SleptSeconds is the time the computer has slept since Koko started. It
+	// drops if the clock is set back, so use only its growth between calls.
 	SleptSeconds float64 `json:"sleptSeconds"`
 }
 
@@ -77,15 +78,10 @@ func (a *App) watchIdle(ctx context.Context) {
 // Mac sleeps. The wall clock does not stop. So wall time minus monotonic time
 // is the time asleep. Both times need their monotonic reading, as time.Now
 // gives them.
+//
+// It is not clamped. Setting the clock back makes it drop, and a clamp at 0
+// would then hide the next sleep up to that size. The frontend uses only the
+// growth between samples, and ignores a drop.
 func sleptSince(start, now time.Time) float64 {
-	return slept(now.Round(0).Sub(start.Round(0)), now.Sub(start))
-}
-
-// slept returns wall minus monotonic time in seconds. A small wall-clock
-// correction can make it negative, so it is clamped at 0.
-func slept(wall, mono time.Duration) float64 {
-	if wall <= mono {
-		return 0
-	}
-	return (wall - mono).Seconds()
+	return (now.Round(0).Sub(start.Round(0)) - now.Sub(start)).Seconds()
 }

@@ -4,6 +4,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.13] - 2026-10-09
+
+### Fixed
+- **Break reminders**: a break waits again while you work in another app. Clock drift of microseconds a second looked like sleep, so the break counted down anyway. A late timer no longer takes away work you did after coming back. Setting the clock back no longer hides the next sleep. On Linux, where Koko cannot see input, a break counts down even while Koko is hidden (plan 033)
+
 ## [0.5.12] - 2026-10-09
 
 ### Fixed

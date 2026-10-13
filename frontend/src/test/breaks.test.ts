@@ -139,7 +139,8 @@ describe("stepBreak", () => {
       WORK,
       BREAK,
     );
-    expect(s.workSeconds).toBe(3000 + 5 * 60);
+    // The 1 second of the run seen at the last sample counted then.
+    expect(s.workSeconds).toBe(3000 + 5 * 60 + 1);
   });
 
   it("counts a late gap as work when the peak idle was short", () => {
@@ -178,6 +179,35 @@ describe("stepBreak", () => {
     const s = run(onBreak, 30 * 60, { seen: false, idle: 1 });
     expect(s.phase).toBe("break");
     expect(s.breakSeconds).toBe(0);
+  });
+
+  it("holds a break with clock drift that looks like a tiny sleep", () => {
+    // The wall clock drifts about 20 microseconds a second against the
+    // monotonic clock, so every sample shows a tiny slept time.
+    const s = run(onBreak, 30 * 60, { seen: false, idle: 1, slept: 2e-5 });
+    expect(s.breakSeconds).toBe(0);
+  });
+
+  it("counts a break down with Koko hidden where idle is unknown", () => {
+    const s = run(onBreak, 120, { seen: false, idle: -1 });
+    expect(s.breakSeconds).toBe(120);
+  });
+
+  it("ignores a drop in slept time after the clock is set back", () => {
+    const s = stepBreak({ ...NEW_CYCLE, workSeconds: 100 }, { ...tick, slept: -600 }, WORK, BREAK);
+    expect(s.workSeconds).toBe(101);
+  });
+
+  it("keeps work done after a time away that a late timer missed", () => {
+    // You were already 600 seconds away at the last sample. The timer fires
+    // 300 seconds late. You came back 10 seconds in and worked 290 seconds.
+    const s = stepBreak(
+      { ...NEW_CYCLE, workSeconds: 3000, lastIdle: 600, awaySeconds: 600 },
+      { ...tick, elapsed: 300, idle: 0, peakIdle: 610, seen: false },
+      WORK,
+      BREAK,
+    );
+    expect(s.workSeconds).toBe(3000 + 290);
   });
 
   it("counts a break down while you are idle with Koko hidden", () => {

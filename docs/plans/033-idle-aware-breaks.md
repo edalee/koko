@@ -32,6 +32,8 @@ The idle time comes from IOKit's `HIDIdleTime`, which needs no permission.
 
 The frontend samples every second. For each sample, `elapsed` is the wall-clock time since the last one, and `slept` is the growth in `sleptSeconds`. `awake` is `elapsed - slept`.
 
+The wall clock drifts against the monotonic clock by microseconds a second, so `slept` under 1 second is not sleep. `sleptSeconds` drops if the clock is set back. The frontend ignores the drop, so the next sleep still counts.
+
 You are **active** if your last input was under 60 seconds ago. A short pause to read still counts as work.
 
 **Away run:** the time since your last input, including sleep. Fresh input ends it. When the away run reaches the break length, it was a break: the work cycle starts again, and any break due or under way ends.
@@ -39,13 +41,14 @@ You are **active** if your last input was under 60 seconds ago. A short pause to
 **Work phase:**
 - If idle is unknown, all awake time counts as work.
 - If you are active, all awake time counts as work. This covers a throttled gap with recent input.
-- If the peak idle time shows a time away of 60 seconds or more that ended in this sample, that time does not count. A peak as long as a break starts a new cycle.
+- If the peak idle time shows a time away of 60 seconds or more that ended in this sample, that time does not count. Only the run's growth since the last sample is taken off, because earlier samples already counted the rest. A peak as long as a break starts a new cycle.
 - If you are not active, only the awake time before your last input counts.
 - When work reaches the work length, the break is due.
 
 **Break phase:**
 - The break counts down while Koko has focus, or while you are away (idle 60 seconds or more, or asleep).
 - If another app has focus and you are active, the break waits until you come back to Koko.
+- If the idle time is unknown (Linux), the break always counts down, because Koko cannot tell if you are away.
 - When the countdown ends, the work cycle starts again. "Skip this break" also starts it again.
 
 **Quiet hours** pause the timer, as before.
@@ -60,6 +63,11 @@ You are **active** if your last input was under 60 seconds ago. A short pause to
 - `frontend/src/lib/breaks.ts` (new): the rules above, as a pure function.
 - `frontend/src/hooks/useSafeWorking.ts`: samples `Activity()` and calls the function.
 - `frontend/src/App.tsx`: no session gate.
+
+## Limits
+
+- If a late timer spans two times away, only the longer one is seen. The other counts as work, so the break comes early.
+- The backend reads the idle time every second, even with break reminders off. One IOKit read a second costs little, and turning it on and off with the setting would miss a time away just after the setting changes.
 
 ## Not tested
 
