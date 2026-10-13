@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { merge } from "../components/WorkerSettings";
+import { canonicalZone, merge } from "../components/WorkerSettings";
 
 describe("merge", () => {
   it("keeps a reviewer section as it is", () => {
@@ -44,5 +44,14 @@ describe("merge", () => {
     expect(cfg.jiraSite).toBe("");
     // The time zone is this computer's own.
     expect(cfg.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+});
+
+describe("canonicalZone", () => {
+  it("accepts a real zone in any case, and nothing else", () => {
+    expect(canonicalZone("Europe/London")).toBe("Europe/London");
+    expect(canonicalZone("europe/london")).toBe("Europe/London");
+    expect(canonicalZone("Europe/Lon")).toBeNull();
+    expect(canonicalZone("Local")).toBeNull();
   });
 });

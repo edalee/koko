@@ -77,7 +77,8 @@ func (l *rotatingLog) Close() error {
 func agentStderrPath(paths Paths) string { return filepath.Join(paths.Logs, "agent-stderr.log") }
 
 // pruneReviewLogs deletes review run logs and result files older than
-// reviewLogRetention: review-*.log and review-*.result.json. worker.log and the stderr log are left alone.
+// reviewLogRetention: review-*.log and review-*.result.json. worker.log and
+// the stderr log are left alone.
 func pruneReviewLogs(dir string, now time.Time) (removed int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -160,6 +160,16 @@ const CONNECTION_NAMES: Record<string, string> = {
   wake: "Mac wake",
 };
 
+// canonicalZone is the IANA name for zone, in its usual case, or null if
+// there is no such zone. "Local" is not a zone.
+export function canonicalZone(zone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat("en", { timeZone: zone.trim() }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
 export function merge(raw: string): WorkerConfig {
   const parsed = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
   const reviewer: Partial<ReviewerConfig> = parsed.reviewer ?? {};
@@ -227,6 +237,18 @@ export default function WorkerSettings() {
       setError(String(e));
     }
   }, []);
+
+  // saveField saves a Calendar and Jira field. A time zone that is not a real
+  // zone is not saved, because the worker would stop every job on it.
+  const saveField = (key: "timeZone" | "calendarId" | "jiraSite") => {
+    if (key !== "timeZone") return save(cfg);
+    const zone = canonicalZone(cfg.timeZone);
+    if (!zone) {
+      setError(`"${cfg.timeZone}" is not a time zone. Use a name such as Europe/London.`);
+      return;
+    }
+    return save({ ...cfg, timeZone: zone });
+  };
 
   const setJob = (key: string, job: JobConfig) =>
     save({ ...cfg, jobs: { ...cfg.jobs, [key]: job } });
@@ -370,7 +392,7 @@ export default function WorkerSettings() {
               type="text"
               value={cfg[key]}
               onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
-              onBlur={() => save(cfg)}
+              onBlur={() => saveField(key)}
               placeholder={placeholder}
               className={cn(inputClass, "flex-1 font-mono placeholder:text-tertiary")}
             />

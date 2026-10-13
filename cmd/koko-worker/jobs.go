@@ -822,8 +822,8 @@ func commentsFor(out reviewOutcome, sha, prefix string) (comments []string, lgtm
 			return nil, false, "a draft PR comment has no footer, so it may be cut short, see " + out.log
 		}
 	}
-	// A clean pass may write no draft (a reviewer's docs or comments pass may
-	// not), so an LGTM needs only that no pass's verdict asks for changes.
+	// A clean pass may write no draft, so an LGTM needs only that no pass's
+	// verdict asks for changes.
 	clean := true
 	for _, v := range out.verdicts {
 		if v == verdictFollowUps || v == verdictNotMergeable {

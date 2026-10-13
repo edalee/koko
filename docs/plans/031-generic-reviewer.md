@@ -59,17 +59,7 @@ A new reviewer should use the result file.
 
 ## Migration
 
-A `reviewer` section without a `command` key is from 0.5.7 or older. The worker and the Settings tab migrate it the same way:
-
-- `command` becomes the old reviewer's Claude variable set to `{claude}`, then `{reviewer} `, plus the old `args`, or the old default arguments if there were none.
-- `logs` becomes the old reviewer's log folder, unless `format` was `result-json`.
-- `markerPrefix` becomes the old reviewer's marker if it was not set.
-
-An empty `command` stays empty. Only a missing key counts as old.
-
-The state file's old reviewed and results keys become `reviewed` and `results` on load, so no PR is reviewed twice. Old run logs are still deleted after 60 days.
-
-The old reviewer's name appears only in the migration code and in your own `worker.json`.
+0.5.8 to 0.5.13 migrated a `reviewer` section without a `command` key, and the old state keys. 0.5.14 removed these migrations: an old config has no reviewer until you set one in Settings.
 
 ## Renames
 
@@ -82,4 +72,4 @@ The old reviewer's name appears only in the migration code and in your own `work
 
 ## Not in scope
 
-The stand-up's Jira site and Koko's own PR panel still default to one org. Neither is part of the reviewer.
+The stand-up's Jira site and Koko's own PR panel. Both lost their org defaults in 0.5.14.

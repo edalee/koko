@@ -49,7 +49,7 @@ The PR list groups PRs under "My PRs" and "Team PRs", with a count each.
 
 ## Migration
 
-A non-empty `githubRepos` from before becomes `prPanel.team.repos`. Bare names there meant a repo in one fixed org, so they become that full name. An empty one meant the built-in team list, which goes: you now see your own PRs and your review requests instead.
+A non-empty `githubRepos` from before becomes `prPanel.team.repos`. Bare names there meant a repo in one fixed org. Since 0.5.14 they are dropped, because they name no owner. An empty one meant the built-in team list, which goes: you now see your own PRs and your review requests instead.
 
 ## Files
 

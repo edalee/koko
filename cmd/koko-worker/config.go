@@ -338,9 +338,9 @@ func expandHome(path string) string {
 	return filepath.Join(home, strings.TrimPrefix(path, "~"))
 }
 
-// localZone is the Mac's time zone name, such as Europe/London, from the
-// /etc/localtime link. time.Local has no name to give the calendar, so this
-// falls back to UTC.
+// localZone is the Mac's time zone name, such as Europe/London. It reads the
+// /etc/localtime link, because time.Local gives no name for the calendar.
+// If the link is missing or names no known zone, it returns UTC.
 func localZone() string {
 	target, err := os.Readlink("/etc/localtime")
 	if err != nil {
