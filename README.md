@@ -143,6 +143,8 @@ It needs these connections. Settings > Worker checks each one and says how to fi
   - **Command**, for example `{reviewer} {pr}`. `{reviewer}` is the CLI from a managed clone of a repo, kept up to date before each run, or from a local path.
   - **Logs**, off by default. With logs off, the reviewer writes its comments as JSON to `$REVIEW_RESULT`.
   - **Marker**, the prefix of the comment markers, `<!-- marker:`.
+  - **Orgs**, the orgs and accounts whose PRs are reviewed. Empty means every org.
+  - **Excluded repos**, `owner/repo` names that are never reviewed.
 
   The reviewer never posts. The worker posts its comments.
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
@@ -264,7 +266,7 @@ frontend/src/
   test/                  Vitest tests
 
 docs/
-  plans/                 Implementation plans (001-033)
+  plans/                 Implementation plans (001-034)
   architecture/          ADRs and the design system
   references/            Setup guides
 ```

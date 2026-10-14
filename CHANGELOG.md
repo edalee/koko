@@ -4,6 +4,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.15] - 2026-10-14
+
+### Added
+- **Review worker**: Settings > Worker sets the orgs to review and the repos to skip. Both apply to your PRs and your team's (plan 034)
+
 ## [0.5.14] - 2026-10-13
 
 ### Added

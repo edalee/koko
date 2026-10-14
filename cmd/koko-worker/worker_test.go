@@ -897,6 +897,46 @@ func TestReviewScopeConfig(t *testing.T) {
 	}
 }
 
+func TestReviewOrgsAndExclusions(t *testing.T) {
+	r := ReviewerConfig{}
+	if why := r.skipRepo("anyone/thing"); why != "" {
+		t.Errorf("no orgs reviews every owner, got %q", why)
+	}
+	r = ReviewerConfig{Orgs: []string{"Acme", "jdoe"}, ExcludeRepos: []string{"acme/Legacy"}}
+	for repo, skip := range map[string]bool{
+		"acme/api":    false,
+		"ACME/web":    false,
+		"jdoe/dots":   false,
+		"other/api":   true,
+		"acme/legacy": true, // an exclusion wins over an org
+	} {
+		if got := r.skipRepo(repo) != ""; got != skip {
+			t.Errorf("skipRepo(%q) skips = %v, want %v", repo, got, skip)
+		}
+	}
+
+	path := t.TempDir() + "/worker.json"
+	body := `{"reviewer": {"orgs": [" acme ", ""], "excludeRepos": ["", " acme/legacy "]}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(cfg.Reviewer.Orgs) != "[acme]" || fmt.Sprint(cfg.Reviewer.ExcludeRepos) != "[acme/legacy]" {
+		t.Errorf("want trimmed lists, got %q and %q", cfg.Reviewer.Orgs, cfg.Reviewer.ExcludeRepos)
+	}
+
+	for _, bad := range []ReviewerConfig{{Orgs: []string{"acme/api"}}, {ExcludeRepos: []string{"legacy"}}} {
+		cfg := testConfig()
+		cfg.Reviewer.Orgs, cfg.Reviewer.ExcludeRepos = bad.Orgs, bad.ExcludeRepos
+		if cfg.Reviewer.problem() == nil {
+			t.Errorf("want an error for orgs %q, excluded %q", bad.Orgs, bad.ExcludeRepos)
+		}
+	}
+}
+
 func TestTeamSection(t *testing.T) {
 	pr := func(n int, author, created string) SearchPR {
 		p := SearchPR{URL: fmt.Sprintf("https://github.com/acme/api/pull/%d", n), Number: n, Title: "Change", CreatedAt: created}
