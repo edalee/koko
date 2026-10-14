@@ -338,8 +338,9 @@ func expandHome(path string) string {
 	return filepath.Join(home, strings.TrimPrefix(path, "~"))
 }
 
-// localZone is the Mac's time zone name, such as Europe/London. It reads the
-// /etc/localtime link, because time.Local gives no name for the calendar.
+// localZone is the Mac's time zone name, such as Europe/London. Go names the
+// Mac's zone "Local", but Google Calendar needs a real name, so this reads
+// the /etc/localtime link.
 // If the link is missing or names no known zone, it returns UTC.
 func localZone() string {
 	target, err := os.Readlink("/etc/localtime")

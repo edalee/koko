@@ -9,7 +9,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check as CheckConnections,
   GetConfig,
@@ -212,6 +212,8 @@ export default function WorkerSettings() {
   const [running, setRunning] = useState<string | null>(null);
   const [output, setOutput] = useState<{ job: string; text: string } | null>(null);
   const [log, setLog] = useState<string | null>(null);
+  // savedZone is the time zone last read or saved, for a typo to fall back to.
+  const savedZone = useRef(DEFAULTS.timeZone);
 
   const refreshStatus = useCallback(() => {
     Status()
@@ -221,7 +223,11 @@ export default function WorkerSettings() {
 
   useEffect(() => {
     GetConfig()
-      .then((raw) => setCfg(merge(raw)))
+      .then((raw) => {
+        const loaded = merge(raw);
+        savedZone.current = loaded.timeZone;
+        setCfg(loaded);
+      })
       .catch((e) => setError(String(e)));
     refreshStatus();
     const timer = setInterval(refreshStatus, 30_000);
@@ -231,6 +237,7 @@ export default function WorkerSettings() {
   const save = useCallback(async (next: WorkerConfig) => {
     setCfg(next);
     setError(null);
+    savedZone.current = next.timeZone;
     try {
       await SaveConfig(JSON.stringify(next));
     } catch (e) {
@@ -238,12 +245,15 @@ export default function WorkerSettings() {
     }
   }, []);
 
-  // saveField saves a Calendar and Jira field. A time zone that is not a real
-  // zone is not saved, because the worker would stop every job on it.
+  // saveField saves one field of the Calendar and Jira section. An empty time
+  // zone becomes the Mac's zone. A name that is not a real zone goes back to
+  // the saved zone, because the worker would stop every job on it, and any
+  // later save would write it.
   const saveField = (key: "timeZone" | "calendarId" | "jiraSite") => {
     if (key !== "timeZone") return save(cfg);
-    const zone = canonicalZone(cfg.timeZone);
+    const zone = canonicalZone(cfg.timeZone.trim() || DEFAULTS.timeZone);
     if (!zone) {
+      setCfg({ ...cfg, timeZone: savedZone.current });
       setError(`"${cfg.timeZone}" is not a time zone. Use a name such as Europe/London.`);
       return;
     }

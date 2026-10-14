@@ -373,7 +373,7 @@ func TestManualSlots(t *testing.T) {
 	// The review run by hand at 12:05 covers 09:30 and 12:00, not 14:00.
 	got := manualSlots(cfg, JobReview, monday(12, 5))
 	if len(got) != 2 || got[1].Format("15:04") != "12:00" {
-		t.Errorf("acme: got %v", got)
+		t.Errorf("review: got %v", got)
 	}
 	st := readyState(cfg)
 	recordRun(&st, DueRun{Job: JobStandup, Slots: manualSlots(cfg, JobStandup, monday(6, 55))}, StatusOK, "run by hand", monday(6, 56))
@@ -426,7 +426,7 @@ func TestUpdateStateKeepsConcurrentChanges(t *testing.T) {
 
 func TestLoadConfigKeepsDefaults(t *testing.T) {
 	path := t.TempDir() + "/worker.json"
-	// What the Koko UI sends when you only fill in Slack, plus a hand-edited job.
+	// What the Koko UI sends with Slack and a Jira site filled in, plus a hand-edited job.
 	body := `{"enabled": true, "timeZone": "", "jiraSite": " https://acme.atlassian.net/ ", "focus": {"windowStart": ""},
 		"slack": {"botToken": "x", "userId": "U1"},
 		"jobs": {"review": {"enabled": true}, "focus": {"enabled": false, "times": [""]}}}`

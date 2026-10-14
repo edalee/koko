@@ -210,7 +210,7 @@ func lgtmOnHead(ctx context.Context, repo string, number int, prefix, sha string
 }
 
 // hasHeadMarker is true when a line of body is the code review marker for
-// the commit short. The marker may sit on any line.
+// the short commit ID. The marker may sit on any line.
 func hasHeadMarker(body, prefix, short string) bool {
 	for _, l := range strings.Split(body, "\n") {
 		l = strings.TrimSpace(l)
