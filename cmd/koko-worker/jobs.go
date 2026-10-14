@@ -123,7 +123,8 @@ func runStandup(ctx context.Context, env Env) error {
 
 	verdicts := map[string]ticketVerdict{}
 	var jiraErr error
-	if len(judged) > 0 {
+	// With no Jira site set, the stand-up reads no tickets.
+	if len(judged) > 0 && env.cfg.JiraSite != "" {
 		var keys []string
 		seen := map[string]bool{}
 		for _, j := range judged {
@@ -643,9 +644,6 @@ func runReview(ctx context.Context, env Env, onlyURL string) error {
 	if err := os.WriteFile(env.paths.ClaudeWrap, []byte(claudeWrapper), 0o700); err != nil {
 		return err
 	}
-	// The wrapper and shims had these names before 0.5.8.
-	_ = os.Remove(filepath.Join(env.paths.Dir, "tono-claude.sh"))
-	_ = os.RemoveAll(filepath.Join(env.paths.Dir, "tono-bin"))
 	var failures []string
 	if !env.test {
 		gaveUp, err := postUnposted(ctx, env)
@@ -824,8 +822,8 @@ func commentsFor(out reviewOutcome, sha, prefix string) (comments []string, lgtm
 			return nil, false, "a draft PR comment has no footer, so it may be cut short, see " + out.log
 		}
 	}
-	// A clean pass may write no draft (tono's docs and comments passes do
-	// not), so an LGTM needs only that no pass's verdict asks for changes.
+	// A clean pass may write no draft, so an LGTM needs only that no pass's
+	// verdict asks for changes.
 	clean := true
 	for _, v := range out.verdicts {
 		if v == verdictFollowUps || v == verdictNotMergeable {
@@ -1404,7 +1402,7 @@ func hasMarkerLine(verified, prefix string) bool {
 // later runs skip the PR.
 func lgtmComment(prefix, sha string) string {
 	short := sha[:min(7, len(sha))]
-	return fmt.Sprintf("<!-- %s:review sha=%s -->\n> **LGTM!** 😃⭐😸\n\n<sub>Koko review worker: code, docs and code comments at `%s`, run with Claude</sub>", prefix, short, short)
+	return fmt.Sprintf("<!-- %s:review sha=%s -->\n> **LGTM!** 😃⭐😸\n\n<sub>Koko review worker: no findings at `%s`, run with Claude</sub>", prefix, short, short)
 }
 
 // logKey names one review target in the log format: "owner/repo|n" with

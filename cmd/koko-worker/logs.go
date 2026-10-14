@@ -76,12 +76,9 @@ func (l *rotatingLog) Close() error {
 // such as a crash. The scheduler's log goes to worker.log instead.
 func agentStderrPath(paths Paths) string { return filepath.Join(paths.Logs, "agent-stderr.log") }
 
-// legacyReviewLogPrefix started the review run logs before 0.5.8.
-const legacyReviewLogPrefix = "tono-"
-
 // pruneReviewLogs deletes review run logs and result files older than
-// reviewLogRetention: review-*.log and review-*.result.json, and tono-*.log
-// from before 0.5.8. worker.log and the stderr log are left alone.
+// reviewLogRetention: review-*.log and review-*.result.json. worker.log and
+// the stderr log are left alone.
 func pruneReviewLogs(dir string, now time.Time) (removed int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -89,7 +86,7 @@ func pruneReviewLogs(dir string, now time.Time) (removed int) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		ours := (strings.HasPrefix(name, reviewLogPrefix) || strings.HasPrefix(name, legacyReviewLogPrefix)) &&
+		ours := strings.HasPrefix(name, reviewLogPrefix) &&
 			(strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".result.json"))
 		if e.IsDir() || !ours {
 			continue

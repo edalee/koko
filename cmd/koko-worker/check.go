@@ -70,6 +70,10 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		}
 
 	case "jira":
+		if cfg.JiraSite == "" {
+			r.OK, r.Detail = true, "off, no Jira site is set"
+			break
+		}
 		res, err := cr.run(ctx, "Call getAccessibleAtlassianResources once, then reply with the single word DONE.",
 			[]string{"mcp__claude_ai_Atlassian__getAccessibleAtlassianResources"}, 3*time.Minute)
 		calls := res.callsTo("mcp__claude_ai_Atlassian__getAccessibleAtlassianResources")
@@ -93,7 +97,7 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 			r.Fix = "Reconnect Google Calendar in claude.ai under Settings, Connectors, and allow calendar access on Google's consent screen."
 		}
 
-	case "reviewer", legacyJobTono:
+	case "reviewer":
 		rv := cfg.Reviewer
 		cli := cfg.reviewerCLI(workerPaths())
 		_, cloneErr := os.Stat(filepath.Join(workerPaths().Reviewer, ".git"))

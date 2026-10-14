@@ -1,14 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-const lgtmDraft = "<!-- tono:review n=3 sha=e41b9a2 -->\n## Code Review #3\n\n> **LGTM!** 🐊 🚀 No findings at `e41b9a2`.\n\nAll three points from #2 are fixed. Nice work on the retry tests 👑\n\n<sub>tono code review, read then verified, run with Claude</sub>"
 
 func TestReviewerCommand(t *testing.T) {
 	p := SearchPR{URL: "https://github.com/o/r/pull/7", Number: 7}
@@ -29,7 +29,7 @@ func TestReviewerCommand(t *testing.T) {
 			t.Errorf("want an error for %q", bad)
 		}
 	}
-	if got := commandProgram("TONO_CLAUDE={claude} {reviewer} {pr}"); got != "{reviewer}" {
+	if got := commandProgram("RV_CLAUDE={claude} {reviewer} {pr}"); got != "{reviewer}" {
 		t.Errorf("commandProgram: %q", got)
 	}
 }
@@ -83,40 +83,7 @@ func TestCommentsForResultJSON(t *testing.T) {
 	}
 }
 
-func TestCommentsForLogLGTMDrafts(t *testing.T) {
-	docs := strings.Replace(strings.Replace(lgtmDraft, "tono:review", "tono:docs-check", 1), "Code Review", "Docs Review", 1)
-	all := reviewOutcome{fromLogs: true, expected: 3, passes: 3, lgtmPasses: 3, comments: []reviewComment{
-		{Pass: "review", Verdict: contractLGTM, Body: lgtmDraft},
-		{Pass: "docs", Verdict: contractLGTM, Body: docs},
-		{Pass: "comments", Verdict: contractLGTM, Body: lgtmDraft},
-	}}
-	// Three clean passes post one LGTM, the code review's.
-	if c, lgtm, failed := commentsFor(all, "e41b9a2", "tono"); failed != "" || !lgtm || len(c) != 1 || c[0] != lgtmDraft {
-		t.Errorf("all LGTM: %d comments, lgtm %v, %q", len(c), lgtm, failed)
-	}
-	// One clean pass and one with findings post both, and it is not an LGTM.
-	mixed := all
-	mixed.lgtmPasses = 1
-	mixed.comments = []reviewComment{{Pass: "review", Verdict: contractLGTM, Body: lgtmDraft}, {Pass: "docs", Body: "<!-- tono:docs-check n=1 -->\n- **MED**: x\n<sub>f</sub>"}}
-	if c, lgtm, failed := commentsFor(mixed, "e41b9a2", "tono"); failed != "" || lgtm || len(c) != 2 {
-		t.Errorf("mixed: %d comments, lgtm %v, %q", len(c), lgtm, failed)
-	}
-	// A code review the reviewer skipped (its LGTM is on the head commit) leaves two
-	// passes, which is the whole review.
-	skipped := reviewOutcome{fromLogs: true, expected: 2, passes: 2, ran: map[string]bool{"docs": true, "comments": true},
-		comments: []reviewComment{{Pass: "docs", Body: "<!-- tono:docs-check n=1 -->\n- **LOW**: y\n<sub>f</sub>"}}}
-	if c, _, failed := commentsFor(skipped, "e41b9a2", "tono"); failed != "" || len(c) != 1 {
-		t.Errorf("skipped code review: %d comments, %q", len(c), failed)
-	}
-}
-
-func TestLGTMVerdict(t *testing.T) {
-	if !isLGTMDraft(lgtmDraft) || isLGTMDraft("> **Mergeable.** One finding") {
-		t.Error("isLGTMDraft")
-	}
-	if got := parseVerdict("## Draft\n\n```\n" + lgtmDraft + "\n```\n"); got != verdictReady {
-		t.Errorf("LGTM verdict %q, want ready", got)
-	}
+func TestOverallVerdict(t *testing.T) {
 	// A reviewer with its own pass names is ready when every pass is.
 	if got := overallVerdict(map[string]string{"security": verdictReady, "style": verdictReady}); got != verdictReady {
 		t.Errorf("all ready: %q", got)
@@ -125,12 +92,6 @@ func TestLGTMVerdict(t *testing.T) {
 		t.Errorf("one follow-up: %q", got)
 	}
 }
-
-// v057Reviewer is a real 0.5.7 reviewer section: no command, format,
-// args or marker, so the tono defaults of the time applied.
-const v057Reviewer = `{"reviewer": {"autoUpdate": true, "branch": "main", "mine": {"enabled": true, "maxAgeDays": 14},
-  "path": "", "repo": "epidemicsound/tonometer", "script": "tono", "source": "managed",
-  "team": {"enabled": true, "maxAgeDays": 1, "repos": [], "team": "epidemicsound/content-protection"}}}`
 
 func TestReviewerDefaults(t *testing.T) {
 	cfg := defaultConfig()
@@ -146,40 +107,18 @@ func TestReviewerDefaults(t *testing.T) {
 	}
 }
 
-func TestReviewerMigration(t *testing.T) {
+func TestReviewerConfigLoad(t *testing.T) {
 	home, _ := os.UserHomeDir()
-	tonoLogs := filepath.Join(home, ".cache/tono/logs")
-
-	cfg := loadTestConfig(t, v057Reviewer)
-	r := cfg.Reviewer
-	if r.Command != "TONO_CLAUDE={claude} {reviewer} {pr} --all -l high -R {repo}" || r.Logs != tonoLogs || r.MarkerPrefix != "tono" {
-		t.Errorf("0.5.7 config: command %q, logs %q, marker %q", r.Command, r.Logs, r.MarkerPrefix)
-	}
-	if r.Repo != "epidemicsound/tonometer" || r.Team.Team != "epidemicsound/content-protection" || r.problem() != nil {
-		t.Errorf("0.5.7 config kept: %+v, %v", r, r.problem())
-	}
-	// The migrated command still hands tono the wrapper, as TONO_CLAUDE.
-	env, prog, _, _ := reviewerCommand(r.Command, "/cli", "/wrap", SearchPR{}, "x")
-	if prog != "/cli" || strings.Join(env, " ") != "TONO_CLAUDE=/wrap" {
-		t.Errorf("migrated command runs %q with %q", prog, env)
-	}
-
-	cfg = loadTestConfig(t, `{"reviewer": {"format": "result-json", "args": ["{url}", "a b"], "markerPrefix": "acme"}}`)
-	if r := cfg.Reviewer; r.Command != "TONO_CLAUDE={claude} {reviewer} {url} 'a b'" || r.Logs != "" || r.MarkerPrefix != "acme" {
-		t.Errorf("0.5.7 result-json: command %q, logs %q, marker %q", r.Command, r.Logs, r.MarkerPrefix)
-	}
-
-	// A command key, even an empty one, is a 0.5.8 config: nothing changes.
-	cfg = loadTestConfig(t, `{"reviewer": {"command": "", "logs": ""}}`)
+	cfg := loadTestConfig(t, `{"reviewer": {"command": "", "logs": ""}}`)
 	if r := cfg.Reviewer; r.Command != "" || r.Logs != "" || r.MarkerPrefix != "" {
 		t.Errorf("an empty command stays empty: %+v", r)
 	}
 	cfg = loadTestConfig(t, `{"reviewer": {"command": "acme {pr}", "logs": "~/acme/logs", "markerPrefix": "acme"}}`)
 	if r := cfg.Reviewer; r.Command != "acme {pr}" || r.Logs != filepath.Join(home, "acme/logs") {
-		t.Errorf("0.5.8 config: %+v", r)
+		t.Errorf("config: %+v", r)
 	}
 
-	// No reviewer section and no tono keys is a new install.
+	// No reviewer section is a new install.
 	cfg = loadTestConfig(t, `{"enabled": true}`)
 	if cfg.Reviewer.Command != "" || cfg.Reviewer.Repo != "" {
 		t.Errorf("new install: %+v", cfg.Reviewer)
@@ -220,8 +159,8 @@ func TestReviewerEnv(t *testing.T) {
 		return v
 	}
 	base := []string{"PATH=/usr/bin", "HOME=/h"}
-	env := reviewerEnv(base, []string{"TONO_CLAUDE=/wrap", "REVIEW_RESULT=/evil"}, "/shims", "/wrap", "/result.json", p, "abc")
-	if last(env, "TONO_CLAUDE") != "/wrap" || last(env, "REVIEW_RESULT") != "/result.json" || last(env, "PATH") != "/shims:/usr/bin" {
+	env := reviewerEnv(base, []string{"RV_CLAUDE=/wrap", "REVIEW_RESULT=/evil"}, "/shims", "/wrap", "/result.json", p, "abc")
+	if last(env, "RV_CLAUDE") != "/wrap" || last(env, "REVIEW_RESULT") != "/result.json" || last(env, "PATH") != "/shims:/usr/bin" {
 		t.Errorf("env: %q", env)
 	}
 	// A PATH from the command keeps the read-only gh and git in front.
@@ -231,35 +170,63 @@ func TestReviewerEnv(t *testing.T) {
 	}
 }
 
-func TestCommentsForTonoCleanPR(t *testing.T) {
-	// tono 0.5.x after tonometer #5: a clean code review writes an LGTM, and
-	// clean docs and comments passes write nothing.
-	out := reviewOutcome{fromLogs: true, expected: 3, passes: 3, lgtmPasses: 1,
-		verdicts: map[string]string{"review": verdictReady},
-		comments: []reviewComment{{Pass: "review", Verdict: contractLGTM, Body: lgtmDraft}}}
-	if c, lgtm, failed := commentsFor(out, "e41b9a2", "tono"); failed != "" || !lgtm || len(c) != 1 {
-		t.Errorf("clean PR: %d comments, lgtm %v, %q", len(c), lgtm, failed)
+func TestHasHeadMarker(t *testing.T) {
+	if !hasHeadMarker("Some text\n<!-- acme:review n=2 sha=e41b9a2 -->\n> **LGTM!**", "acme", "e41b9a2") {
+		t.Error("a marker below the first line counts")
 	}
-	// An LGTM code review with a docs pass that wants changes is not an LGTM.
-	out.verdicts["docs"] = verdictFollowUps
-	if _, lgtm, failed := commentsFor(out, "e41b9a2", "tono"); lgtm || failed != "" {
-		t.Errorf("docs follow-ups: lgtm %v, %q", lgtm, failed)
-	}
-
-	// A rerun at a head tono already LGTM'd: the code review is skipped and
-	// the clean docs and comments passes write nothing. Nothing new to post.
-	rerun := reviewOutcome{fromLogs: true, expected: 2, passes: 2, lgtmOnHead: true,
-		ran: map[string]bool{"docs": true, "comments": true}, verdicts: map[string]string{"docs": verdictReady}}
-	if c, lgtm, failed := commentsFor(rerun, "e41b9a2", "tono"); failed != "" || !lgtm || len(c) != 0 {
-		t.Errorf("rerun: %d comments, lgtm %v, %q", len(c), lgtm, failed)
+	if hasHeadMarker("<!-- acme:review n=2 sha=0000000 -->", "acme", "e41b9a2") || hasHeadMarker("<!-- acme:security sha=e41b9a2 -->", "acme", "e41b9a2") {
+		t.Error("another commit or pass must not count")
 	}
 }
 
-func TestHasHeadMarker(t *testing.T) {
-	if !hasHeadMarker("Some text\n<!-- tono:review n=2 sha=e41b9a2 -->\n> **LGTM!**", "tono", "e41b9a2") {
-		t.Error("a marker below the first line counts, as in tono")
+// TestReviewWorkerRunsAReviewer runs a stand-in reviewer through the review
+// worker. It checks out the PR's head, runs the command there and reads the
+// result file. Any program that keeps the contract (plan 030) works the same.
+func TestReviewWorkerRunsAReviewer(t *testing.T) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("gh is not on PATH")
 	}
-	if hasHeadMarker("<!-- tono:review n=2 sha=0000000 -->", "tono", "e41b9a2") || hasHeadMarker("<!-- tono:docs-check sha=e41b9a2 -->", "tono", "e41b9a2") {
-		t.Error("another commit or pass must not count")
+	tmp := t.TempDir()
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// An origin with the PR's head at refs/pull/7/head, as GitHub has it.
+	origin := filepath.Join(tmp, "origin")
+	git(tmp, "init", "--quiet", origin)
+	git(origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--quiet", "--allow-empty", "-m", "change")
+	sha := git(origin, "rev-parse", "HEAD")
+	git(origin, "update-ref", "refs/pull/7/head", sha)
+
+	paths := Paths{Dir: filepath.Join(tmp, "worker"), Logs: filepath.Join(tmp, "logs"), Cache: filepath.Join(tmp, "repos"),
+		ClaudeWrap: filepath.Join(tmp, "claude.sh")}
+	p := SearchPR{URL: "https://github.com/acme/api/pull/7", Number: 7}
+	p.Repository.NameWithOwner = "acme/api"
+	git(tmp, "clone", "--quiet", origin, filepath.Join(paths.Cache, "acme__api"))
+
+	// The stand-in reviewer writes one LGTM comment for the PR it was given.
+	reviewer := filepath.Join(tmp, "reviewer")
+	script := `#!/bin/sh
+printf '{"status": "reviewed", "comments": [{"pass": "review", "verdict": "lgtm", "body": "<!-- acme:review sha=%s -->\\nLGTM for #%s"}]}' "$(git rev-parse --short HEAD)" "$1" > "$REVIEW_RESULT"
+`
+	if err := os.WriteFile(reviewer, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := defaultConfig()
+	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "{reviewer} {pr}", "acme"
+	env := Env{cfg: cfg, paths: paths}
+
+	out, err := runReviewer(context.Background(), env, reviewer, p, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments, lgtm, failed := commentsFor(out, sha, "acme")
+	if failed != "" || !lgtm || len(comments) != 1 || !strings.HasSuffix(comments[0], "LGTM for #7") ||
+		!hasHeadMarker(comments[0], "acme", sha[:7]) {
+		t.Errorf("comments %q, lgtm %v, failed %q", comments, lgtm, failed)
 	}
 }

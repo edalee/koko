@@ -175,7 +175,7 @@ export default function SettingsPanel({
                 type="text"
                 value={slackOwnerID}
                 onChange={(e) => setSlackOwnerID(e.target.value)}
-                placeholder="U02F4AZV2"
+                placeholder="U0123456789"
                 className="w-full px-3 py-2 text-sm bg-white/[0.04] border border-white/[0.06] rounded-lg text-white placeholder:text-tertiary outline-none focus:border-accent/40 transition-colors font-mono"
               />
               <p className="text-[10px] text-tertiary">

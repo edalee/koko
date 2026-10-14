@@ -150,9 +150,9 @@ func TestGHRepo(t *testing.T) {
 
 func TestPRPanelMigration(t *testing.T) {
 	cs := &ConfigService{filePath: filepath.Join(t.TempDir(), "config.json")}
-	cs.config.GitHubRepos = []string{"zufolo", "acme/api", " "}
+	cs.config.GitHubRepos = []string{"web", "acme/api", " "}
 	p := cs.GetPRPanel()
-	if strings.Join(p.Team.Repos, ",") != "epidemicsound/zufolo,acme/api" || !p.Mine.Enabled || !p.Team.Enabled {
+	if strings.Join(p.Team.Repos, ",") != "acme/api" || !p.Mine.Enabled || !p.Team.Enabled {
 		t.Errorf("migrated: %+v", p)
 	}
 	// An empty list meant the old built-in repos, which are gone.

@@ -6,7 +6,7 @@ Status: merged to `main` in #20 (commit `e9d32b4`, 30 Sep). The wake test and th
 
 - **Config file:** the architecture diagram shows a `worker` section in `config.json`. The code uses its own `worker.json`, as "Keeping clear of other Koko work" says.
 - **Slack:** the backend table says `slack.go` DMs "through Koko's Slack token". The worker uses its own bot token and user ID from `worker.json`.
-- **Review scope:** the Tono section describes only the team scope. The code has `reviewer.mine` and `reviewer.team`, each with `enabled` and `maxAgeDays`, plus `reviewer.team.repos`, as "Done on 30 Sep" and "Done on 5 Oct" describe.
+- **Review scope:** the Review section describes only the team scope. The code has `reviewer.mine` and `reviewer.team`, each with `enabled` and `maxAgeDays`, plus `reviewer.team.repos`, as "Done on 30 Sep" and "Done on 5 Oct" describe.
 - **Run now with a PR URL:** only the CLI has it (`koko-worker run review --pr URL`). The Settings UI's "Run now" takes no URL.
 - **Connection checks:** there are seven, not five. `claude` (the CLI on the worker's PATH) and `reviewer` (the managed clone or the local path) join Slack, GitHub, Jira, calendar and wake.
 - **Sudoers rule:** it allows `pmset schedule cancel wake` as well as `pmset schedule wake`. The worker cancels an old wake when the times change, and on uninstall.
@@ -14,17 +14,17 @@ Status: merged to `main` in #20 (commit `e9d32b4`, 30 Sep). The wake test and th
 - **Deny list:** it is wider than the plan's list. It also refuses `Write`, `Edit`, `NotebookEdit`, Jira issue creation, and calendar delete, update and respond.
 
 See ADR-029 to ADR-035 in `docs/architecture/decisions.md` for the decisions behind the build.
-Replaces `baldrick-work/docs/plans/001-scheduled-jobs.md`.
+Replaces an older scheduled-jobs plan in a private repo.
 
 ## Problem
 
-The work assistant lives in a separate Python repo, `baldrick-work`. It has its own Slack app and its own settings in `.env`. It reads the calendar through EventKit (the macOS calendar framework), which a launchd job can use only through a signed helper binary.
+The work assistant lives in a separate private Python repo. It has its own Slack app and its own settings in `.env`. It reads the calendar through EventKit (the macOS calendar framework), which a launchd job can use only through a signed helper binary.
 
 Koko already has a Slack connection, a settings panel and a Claude session model. Two tools do half the job each.
 
 ## Goal
 
-- The baldrick-work code moves into Koko and becomes **koko-worker**.
+- That code moves into Koko and becomes **koko-worker**.
 - koko-worker is built into Koko. One switch in the UI turns it on or off.
 - Each job has its own switch and times in the UI.
 - Connections (Slack, Google Calendar, GitHub, Jira) are set up and checked in the UI.
@@ -34,7 +34,7 @@ Koko already has a Slack connection, a settings panel and a Claude session model
 
 - No new jobs beyond the three below.
 - No cloud hosting. Everything runs on the Mac.
-- No changes to Jira. On GitHub, the only write is tono's review comments on the PRs it reviews, posted as you. Otherwise jobs only read, except for booking focus blocks.
+- No changes to Jira. On GitHub, the only write is the reviewer's comments on the PRs it reviews, posted as you. Otherwise jobs only read, except for booking focus blocks.
 
 ## Jobs
 
@@ -42,23 +42,23 @@ Koko already has a Slack connection, a settings panel and a Claude session model
 |---|---|---|
 | Stand-up | 07:00 | DMs today's meetings, your approved PRs ready to merge with a Jira check, follow-up steps, PRs waiting for your review, and team PRs. |
 | Focus | 09:15 | Books "Focus" blocks in free gaps of 30 minutes or more, 09:15 to 17:00. |
-| Tono | 09:30, 12:00, 14:00 | Reviews each PR once: your own, and the team's (see "Tono"). It posts the review on the PR, or "LGTM 😃⭐😸" when there is nothing to report. |
+| Review | 09:30, 12:00, 14:00 | Reviews each PR once: your own, and the team's (see "Review"). It posts the review on the PR, or "LGTM 😃⭐😸" when there is nothing to report. |
 
 The times are defaults. The UI can change them.
 
 ### Stand-up
 
-1. **Today's meetings.** This replaces the 08:30 calendar DM from baldrick-work.
+1. **Today's meetings.** This replaces the 08:30 calendar DM from the old assistant.
 2. **Ready to merge:** your open PRs that are approved, not drafts, mergeable, with every check green. Claude reads each Jira ticket and says whether the PR covers it. If it does, the ticket can be closed after the merge. For approved PRs that are not ready, it says what blocks them.
 3. **Follow-up steps** for each ready PR.
 4. **Needs your review:** open, non-draft PRs that request your review, oldest first. Your own PRs and bot PRs (Dependabot, Renovate) are hidden.
-   - It opens with a summary: how many PRs wait, how many tono has reviewed at their current commit (code, docs and comments), and of those how many look ready to approve, have follow-ups, or are not mergeable.
-   - Each PR shows its tono verdict, "not reviewed yet", or "outside tono's scope" with the reason. "Not reviewed yet" counts only PRs in scope.
-   - A reviewed PR links to tono's comment on the PR.
+   - It opens with a summary: how many PRs wait, how many the reviewer has reviewed at their current commit (code, docs and comments), and of those how many look ready to approve, have follow-ups, or are not mergeable.
+   - Each PR shows its review verdict, "not reviewed yet", or "outside the review scope" with the reason. "Not reviewed yet" counts only PRs in scope.
+   - A reviewed PR links to the reviewer's comment on the PR.
 
 **Layout:** the DM uses Slack blocks, with a divider between sections. Long sections are split at line breaks under Slack's 3,000-character limit per block, and a message that needs more than 50 blocks continues in a second message.
 
-Go fetches the PR lists with `gh`, so the links are exact. Claude only does the judgement: ticket coverage and follow-up steps. (In the baldrick-work test, Claude built the list and gave one PR the wrong link.)
+Go fetches the PR lists with `gh`, so the links are exact. Claude only does the judgement: ticket coverage and follow-up steps. (In a test of the old assistant, Claude built the list and gave one PR the wrong link.)
 
 ### Focus
 
@@ -71,28 +71,28 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 - Google's own `OUT_OF_OFFICE` events block their time, like any busy event.
 - One DM lists the booked blocks.
 
-### Tono
+### Review
 
-- **Scope:** tono reviews only PRs opened by a member of `epidemicsound/content-protection` in the last 4 days (`tonoTeam`, `tonoMaxAgeDays`). The members come from GitHub at every run.
-- **One review per PR:** a PR tono has reviewed, at any commit, is not reviewed again. Neither is a PR that already carries a tono comment, for example from a teammate who ran tono with `-c`.
+- **Scope:** the reviewer reviews only PRs opened by a member of `acme/team` in the last 4 days (the team and age settings). The members come from GitHub at every run.
+- **One review per PR:** a PR the reviewer has reviewed, at any commit, is not reviewed again. Neither is a PR that already carries a reviewer comment, for example from a teammate who ran the reviewer with `-c`.
 - **Sources:** your own open PRs, then the PRs waiting for your review (people, not bots), oldest first. The stand-up summarises the reviews and links each one.
 - **"Run now" with a PR URL** reviews that PR whatever the scope says.
 - The verdict comes from the draft PR comment in each verified pass: mergeable, mergeable with follow-ups, or not mergeable. "Ready to approve" means every pass says mergeable or mergeable with follow-ups, and the code review says mergeable.
 - Results are keyed `repo#number@sha`, so the stand-up can say when a PR has new commits since its review.
 - The review runs in a cache clone at the PR head, never in your working clones.
-- It calls the tono CLI directly: `tono <number> --all -l high`. The CLI posts nothing to GitHub without `-c`.
-- The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its `TONO_CLAUDE` wrapper denies the posting commands as a second guard.
-- **Posting:** the worker's Go code posts the review, not tono's Claude. It takes the draft PR comment from each pass's verified output (tono's `*-merged.log` files), found by its `<!-- tono:` marker, and posts each draft as its own comment with `gh pr comment`.
-  - If all three passes ran and none wrote a draft, it posts "LGTM 😃⭐😸" behind `<!-- tono:lgtm sha=… -->`.
+- It calls the reviewer CLI directly: `<reviewer> <number>`. The CLI posts nothing to GitHub without `-c`.
+- The CLI grants its own Claude run `Bash(gh:*)` and `Write`. The worker never passes `-c`, and its Claude wrapper denies the posting commands as a second guard.
+- **Posting:** the worker's Go code posts the review, not the reviewer's Claude. It takes the draft PR comment from each pass's verified output (the reviewer's `*-merged.log` files), found by its `<!-- reviewer:` marker, and posts each draft as its own comment with `gh pr comment`.
+  - If all three passes ran and none wrote a draft, it posts "LGTM 😃⭐😸" behind `<!-- reviewer:lgtm sha=… -->`.
   - A pass counts as finished only if its output reads as a review: three or more lines, with a heading or a list. A broken run leaves one error line, such as "API Error: Can't reach the API server". It posts nothing, not even the drafts, if a pass did not finish. It also posts nothing if a draft has no footer, if a marker line has no draft it can read, or if the verdict is bad and no draft exists. Each of these counts as a failed review. A pass that broke, offline or not, marks nothing: the run reports it, and a later run reviews the PR again.
-  - Comments are saved as unposted before the first post, and each post is saved as it lands, so a kill between posts loses nothing. The next tono run posts what is left. Before every post, first or retry, it checks that the PR is still open at the reviewed commit. If not, it drops the comments and lets the PR be reviewed again. It then checks the PR for each comment's marker line, so a post that timed out after it went through, or a `--pr` run at the same commit, is not posted twice. If part of a review was posted before the PR changed, a DM says to use "Run now" with its URL. A failed post counts one try, unless the internet is down. After 3 tries the review counts as failed, and a DM says so.
-  - The comments post as you. Each one says in its footer that tono and Claude wrote it.
+  - Comments are saved as unposted before the first post, and each post is saved as it lands, so a kill between posts loses nothing. The next review run posts what is left. Before every post, first or retry, it checks that the PR is still open at the reviewed commit. If not, it drops the comments and lets the PR be reviewed again. It then checks the PR for each comment's marker line, so a post that timed out after it went through, or a `--pr` run at the same commit, is not posted twice. If part of a review was posted before the PR changed, a DM says to use "Run now" with its URL. A failed post counts one try, unless the internet is down. After 3 tries the review counts as failed, and a DM says so.
+  - The comments post as you. Each one says in its footer that the reviewer and Claude wrote it.
 - A review of your own PR that fails for a reason other than the network sends one DM warning. It is not retried for the same commit.
 - A network failure marks nothing, so the scheduler's retry reviews that commit once the internet is back.
-- If another tono run holds the PR's lock, the PR is left for the next slot.
+- If another review run holds the PR's lock, the PR is left for the next slot.
 - One review per cache clone at a time, so a "Run now" never checks out another PR under a review in progress.
-- A review is capped at 45 minutes. On timeout, tono's whole process group gets SIGTERM, so tono's trap removes its lock. Anything still running a minute later gets SIGKILL.
-- **Read-only tools:** tono's runs get their own `gh` and `git` first on the PATH. They refuse any command that changes GitHub, including `gh api` calls that send data, and any `git push`. The deny list alone matches only command prefixes.
+- A review is capped at 45 minutes. On timeout, the reviewer's whole process group gets SIGTERM, so the reviewer's trap removes its lock. Anything still running a minute later gets SIGKILL.
+- **Read-only tools:** the reviewer's runs get their own `gh` and `git` first on the PATH. They refuse any command that changes GitHub, including `gh api` calls that send data, and any `git push`. The deny list alone matches only command prefixes.
 - A first clone gets 15 minutes. A failed clone is removed, so it cannot break later reviews.
 - The Test button reviews one PR only.
 
@@ -146,7 +146,7 @@ Koko app (UI)                      koko-worker (background)
 ### Slack
 
 - Koko's own `slackToken` and `slackOwnerId` are empty, so the worker has its own Slack settings.
-- You enter a bot token and your Slack user ID in the Worker UI. The baldrick-work Slack app's bot token works for this.
+- You enter a bot token and your Slack user ID in the Worker UI. The old assistant's Slack app bot token works for this.
 - They are stored in the worker's own config file, mode 0600, like Koko's config.
 
 ### Waking the Mac
@@ -164,7 +164,7 @@ Another session is changing Koko's sessions and UI. The worker must not affect t
 - **Own config file:** `~/Library/Application Support/koko/worker.json`, not `config.json`. Koko's `SaveConfig` rewrites the whole `config.json` from its struct, so a `worker` key there could be wiped. This also avoids edits to `config_service.go` and `types.go`.
 - **Own runtime:** the worker never calls Koko's API and never touches Koko's sessions. It has its own launchd label, `com.koko.worker`, and its own state directory.
 - **Stages:** the worker module is new files only (`cmd/koko-worker/`). The Koko app side uses new files (`worker_service.go`, `WorkerSettings.tsx`). The only edits to shared files are a few lines in `main.go`, `SettingsPanel.tsx` and `Makefile`. They come last, after the other branch merges.
-- **The tono CLI** starts its own Claude runs. The worker sets `TONO_CLAUDE` to a wrapper that adds `--no-session-persistence` and denies the posting commands (`gh pr comment`, `gh pr review`, `gh pr merge`, `gh pr edit`, `git push`).
+- **The reviewer CLI** starts its own Claude runs. The worker sets the reviewer's Claude variable to a wrapper that adds `--no-session-persistence` and denies the posting commands (`gh pr comment`, `gh pr review`, `gh pr merge`, `gh pr edit`, `git push`).
 
 ## Backend
 
@@ -175,11 +175,11 @@ koko-worker is a nested Go module, like `koko-cli`. All worker logic lives there
 | `cmd/koko-worker/main.go` | Subcommands: `serve` (scheduler loop), `run <job> [--test [--date]]`, `check [name]`, `status`, `install`, `uninstall`. |
 | `cmd/koko-worker/config.go` | `worker.json`, defaults and paths. |
 | `cmd/koko-worker/calendar.go` | Google events, gap finder, list and create through the connector. |
-| `cmd/koko-worker/github.go` | PR lists, readiness, bot filter, and posting tono's PR comments: the worker's only GitHub write. |
+| `cmd/koko-worker/github.go` | PR lists, readiness, bot filter, and posting the reviewer's PR comments: the worker's only GitHub write. |
 | `cmd/koko-worker/launchd.go` | Agent install and removal, Mac wake booking. |
 | `cmd/koko-worker/check.go` | Connection checks for the UI. |
 | `cmd/koko-worker/scheduler.go` | Due and catch-up logic, per-job per-day run record on disk, wake booking. |
-| `cmd/koko-worker/jobs.go` | Stand-up, focus and tono jobs. Gap logic as a pure function. |
+| `cmd/koko-worker/jobs.go` | Stand-up, focus and review jobs. Gap logic as a pure function. |
 | `cmd/koko-worker/claude.go` | `claude -p` runner: stdin prompt, isolated settings, allowlist, deny list, timeout. |
 | `cmd/koko-worker/slack.go` | DM through Koko's Slack token. |
 | `worker_service.go` | Wails-bound: config, on/off, run now, status, checks, log. It calls the worker binary, which copies itself to Application Support and installs or removes the agent. All methods pass JSON strings, so the shared `models.ts` does not change. |
@@ -195,9 +195,9 @@ A new **Worker** section in `SettingsPanel.tsx`:
 - **Worker config** is read from and written to `worker.json` through `worker_service.go`.
 - **Connections:** one row each for Slack, Google Calendar, GitHub (`gh`), Jira and Mac wake. Each has a "Check" button with a plain result, such as "Google Calendar: connected, 6 events today". Where a connection is missing, the row says how to fix it.
 
-## What moves from baldrick-work
+## What moves from the old assistant
 
-| baldrick-work part | In Koko |
+| Old assistant part | In Koko |
 |---|---|
 | Scheduled jobs (unbuilt draft) | Rewritten in Go as koko-worker. The Python draft is reference only. |
 | 08:30 calendar DM | Replaced by the stand-up. |
@@ -205,7 +205,7 @@ A new **Worker** section in `SettingsPanel.tsx`:
 | Slack DM chat bot, `/today`, `/koko`, Claude brain, SQLite memory | Out of scope. A possible follow-up plan. |
 | EventKit calendar reader | Dropped, replaced by the Google connector. |
 
-Your uncommitted work in baldrick-work (the 08:30 briefing loop) stays there until baldrick-work is retired.
+Your uncommitted work in the old assistant (the 08:30 briefing loop) stays there until the old assistant is retired.
 
 ## Testing
 
@@ -218,19 +218,19 @@ Your uncommitted work in baldrick-work (the 08:30 briefing loop) stays there unt
 
 Built on `feat/koko-worker`, not committed:
 - **Worker module:** all three jobs, the scheduler, checks, install and wake booking. 45 unit tests pass. `go vet` and `golangci-lint` are clean.
-- **Tested under launchd:** checks, the stand-up (exact links, bots hidden, Jira verdicts), focus against Monday's real calendar, and tono on kalimba#28 (nothing posted). One real focus block was booked through the worker's own code on 15 January 2027, then deleted.
+- **Tested under launchd:** checks, the stand-up (exact links, bots hidden, Jira verdicts), focus against Monday's real calendar, and the reviewer on a real PR (nothing posted). One real focus block was booked through the worker's own code on 15 January 2027, then deleted.
 - **Tested directly:** install, status and uninstall of the agent.
-- **Checked:** worker and tono runs save no conversations under `~/.claude/projects`.
-- **Second tono review (fixed in the third commit):** `WorkerService` added to `Bind`, changed times wait for the next day, a job lock shared with "Run now", wakes booked while offline and not lost on shutdown, reinstall only for an idle running agent, read-only `gh` and `git` for tono, `caffeinate` during jobs, a longer first clone, and six more code comments corrected.
-- **Tono review of the branch (fixed in the second commit):** empty UI values no longer wipe defaults, a tono timeout no longer leaves its lock, one review per cache clone, the worker sets its own PATH, a stale agent copy is reinstalled, network waits are labelled apart from failures, and six code comments are corrected.
-- **Review fixes:** plain busy focus blocks, locked state, retries, a stand-up that degrades per section, tono's first-run baseline, wake status set only on success, and a working directory for the agent.
+- **Checked:** worker and reviewer runs save no conversations under `~/.claude/projects`.
+- **Second review of the branch (fixed in the third commit):** `WorkerService` added to `Bind`, changed times wait for the next day, a job lock shared with "Run now", wakes booked while offline and not lost on shutdown, reinstall only for an idle running agent, read-only `gh` and `git` for the reviewer, `caffeinate` during jobs, a longer first clone, and six more code comments corrected.
+- **First review of the branch (fixed in the second commit):** empty UI values no longer wipe defaults, a reviewer timeout no longer leaves its lock, one review per cache clone, the worker sets its own PATH, a stale agent copy is reinstalled, network waits are labelled apart from failures, and six code comments are corrected.
+- **Review fixes:** plain busy focus blocks, locked state, retries, a stand-up that degrades per section, the reviewer's first-run baseline, wake status set only on success, and a working directory for the agent.
 - **Koko app side:** `worker_service.go`, the bindings and `WorkerSettings.tsx`. `go vet`, `tsc` and `biome` are clean. Not yet visible in the app, because nothing is hooked in.
 
 Done since:
-- The Worker section shows in Settings, with fields for tono's team and window, and focus time's minimum gap.
+- The Worker section shows in Settings, with fields for the reviewer's team and window, and focus time's minimum gap.
 - `make build-worker`, `make test-worker`, and the worker in `make dev`, `make test` and `make lint`.
 - `make build` puts `koko-worker` inside `Koko.app`, next to Koko's own binary.
-- The Slack bot token and user ID are copied from baldrick-work.
+- The Slack bot token and user ID are copied from the old assistant.
 - End-to-end test of the serve loop: one stand-up slot, one DM, one state record.
 
 Done on 30 Sep:
@@ -239,22 +239,22 @@ Done on 30 Sep:
 - Every toggle knob now stays inside its track.
 - A timed invite from midnight to midnight shows as "All day" in the stand-up.
 - The Slack tab is hidden. It held the old Slack DM bot, which lets you control Koko sessions by DM.
-- Tono has two separate settings, each reviewed once per PR:
-  - **My PRs** (`tonoMine`): every open PR you opened, whatever the team or age.
-  - **Team PRs** (`tonoTeamPRs`): PRs opened by `tonoTeam` members in the last `tonoMaxAgeDays` days. It covers PRs that ask for your review, plus every open PR in `tonoRepos`. You add and remove those repos in Settings.
-  - The old `tonoOwnPRsOnly: true` reads as Team PRs off.
-- The stand-up has a "Team PRs" section for team PRs in `tonoRepos` that do not ask for your review.
-- Tono's reviews go on the PR, not to Slack:
-  - The worker posts each pass's draft comment on the PR, through your `gh` auth. Tono's own Claude stays read-only.
-  - If every pass ran and none wrote a draft, the worker posts "LGTM 😃⭐😸" behind a `<!-- tono:lgtm -->` marker. Every posted comment carries a `<!-- tono:` marker, so later runs skip the PR.
-  - Comments that fail to post are retried at the next tono run, up to 3 tries. Then the review counts as failed.
+- The review job has two separate settings, each reviewed once per PR:
+  - **My PRs**: every open PR you opened, whatever the team or age.
+  - **Team PRs**: PRs opened by team members in the last few days, a setting. It covers PRs that ask for your review, plus every open PR in the team's repo list. You add and remove those repos in Settings.
+  - The old "own PRs only" setting reads as Team PRs off.
+- The stand-up has a "Team PRs" section for team PRs in the team's repo list that do not ask for your review.
+- The reviewer's reviews go on the PR, not to Slack:
+  - The worker posts each pass's draft comment on the PR, through your `gh` auth. The reviewer's own Claude stays read-only.
+  - If every pass ran and none wrote a draft, the worker posts "LGTM 😃⭐😸" behind a `<!-- reviewer:lgtm -->` marker. Every posted comment carries a `<!-- reviewer:` marker, so later runs skip the PR.
+  - Comments that fail to post are retried at the next review run, up to 3 tries. Then the review counts as failed.
   - The stand-up lists each reviewed PR with its verdict and a link to the review. The stand-up thread and the review DMs are gone. A failed review of your own PR still comes by DM.
   - "Test" prints the comments instead of posting them.
 
 Done on 1 Oct: the stand-up's Jira facts come from Go, not Claude.
-- A stand-up claimed that clarinet#14's ticket covered "all DRM services", and it named kalimba alert rules that neither the ticket nor the PR mentions. CON-119 has only a title.
+- A stand-up claimed that a PR's ticket covered "all the team's services", and it named alert rules that neither the ticket nor the PR mentions. The ticket has only a title.
 - Go picks each PR's ticket key: the first in the title, then the branch, then the body.
-- One Claude run only calls `getJiraIssue`. Go reads the summary, description, status, assignee and link from the tool's raw result. A moved ticket is matched under the key the PR names, and the line says "PDDI-778, now CON-166".
+- One Claude run only calls `getJiraIssue`. Go reads the summary, description, status, assignee and link from the tool's raw result. A moved ticket is matched under the key the PR names, and the line says "OLD-123, now PROJ-123".
 - A second Claude run gets the ticket text and no tools. Every claim must quote the ticket. Go keeps a verdict only if its quotes are in the ticket, and a follow-up only if its quote is in the ticket or the PR. Anything else reads "unknown".
 - A ticket with no description reads "unknown", without asking Claude. A ticket Go could not read says so.
 - Each ticket links to Jira and shows its status and assignee.
@@ -263,29 +263,29 @@ Done on 1 Oct: the stand-up's Jira facts come from Go, not Claude.
 
 Done on 2 Oct:
 - Released as 0.5.0. A release now builds `koko-worker` into `Koko.app`, and `koko-worker version` reports the build.
-- Once a review is on the PR, one Slack line says so: the PR, the verdict and a link to the review. It goes once per review (`TonoResult.Pinged`), even if posting finishes on a retry.
+- Once a review is on the PR, one Slack line says so: the PR, the verdict and a link to the review. It goes once per review (a `Pinged` flag on the result), even if posting finishes on a retry.
 - "Needs your review" lists only PRs opened by the team. The rest are counted in one line. Without the team's members, every PR is listed.
 
 Done on 5 Oct:
-- Tono reviewed Tools#191, a PR of yours from May 2022, in a repo that has since been archived. "My PRs" had no age limit, and the PR searches did not leave out archived repos. GitHub then refused the comment three times over a day.
-- "My PRs" now reviews only PRs opened in the last `tonoMineMaxAgeDays` days, default 14. "Run now" with a PR's URL still reviews any PR.
+- The reviewer reviewed a PR of yours from May 2022, in a repo that has since been archived. "My PRs" had no age limit, and the PR searches did not leave out archived repos. GitHub then refused the comment three times over a day.
+- "My PRs" now reviews only PRs opened in the last 14 days, a setting. "Run now" with a PR's URL still reviews any PR.
 - Every PR search passes `--archived=false`.
 - A post GitHub refuses for good (an archived repo, a locked PR) fails at once, with one DM.
 - `install` waits for the old agent to unload before starting the new one (0.5.2).
-- The reviewer ran from your own tonometer checkout, which was on a feature branch 4 commits behind `main`. Now:
-  - The job is the review worker, `review`. Settings, Slack, the stand-up and logs say so. `run tono` is an alias, and `install --if-idle` still checks the old `tono.lock`.
+- The reviewer ran from your own reviewer checkout, which was on a feature branch 4 commits behind `main`. Now:
+  - The job is the review worker, `review`. Settings, Slack, the stand-up and logs say so. The old job name is an alias for `run`, and `install --if-idle` still checks the old lock file.
   - worker.json has a `reviewer` section. `source` is `managed` (a worker-owned clone of `repo` at `branch`, under `~/.cache/koko-worker/reviewer`) or `local` (`path`). `autoUpdate` fetches the branch before each scheduled run or Run now. A failed fetch runs the last good copy, and a test run never updates. `mine` and `team` each have `enabled` and `maxAgeDays`, and `team` has `team` and `repos`.
-  - The old flat `tono*` keys and `jobs.tono` are carried over on load, by the worker and the UI alike. An empty `tonoPath` becomes a managed reviewer. State keys `tono@…` become `review@…`, so run history stays.
+  - The old flat reviewer settings and job key are carried over on load, by the worker and the UI alike. An empty old path setting becomes a managed reviewer. Old state keys become `review@…`, so run history stays.
   - The state records the reviewer commit each run used. `status` and the card show it, and `check reviewer` reports it.
 
 Done on 7 Oct: log retention.
 - Logs grew forever. The scheduler now writes `worker.log` through its own writer, which moves it to `worker.log.1` at 5 MB, so the log stays under about 10 MB.
 - launchd sends the agent's own stdout and stderr to `agent-stderr.log`, so a rename never leaves launchd writing to the old file. The plist changes on the next install.
-- Once a day, `serveTick` deletes review run logs (`tono-*.log`) older than 60 days, the same age at which `pruneState` forgets a review. Tono's own logs in `~/.cache/tono/logs` belong to tono, and stay.
+- Once a day, `serveTick` deletes old review run logs older than 60 days, the same age at which `pruneState` forgets a review. The reviewer's own logs belong to the reviewer, and stay.
 
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
-2. Turn off baldrick-work's launchd agent.
+2. Turn off the old assistant's launchd agent.
 3. Drop or rebuild the old Slack DM bot (`slack_commands.go`). See the last item under "Out of scope". The Slack tab stays hidden until then.
 4. Make the GitHub tab in Settings easier to use. It holds the followed repos and the hidden PRs.
 
@@ -294,10 +294,10 @@ Still to do:
 1. Done: the Google Calendar and Jira connectors work in headless `claude -p` under launchd.
 2. Build the koko-worker module: config, scheduler, Claude runner, Slack, and the stand-up job, with `run --test` and `check`.
 3. Add the focus job.
-4. Add the tono job.
+4. Add the review job.
 5. Add wake booking and the sudoers check.
 6. Add the Koko app side (`worker_service.go`, `WorkerSettings.tsx`). Hook it into shared files after the other branch merges.
-7. Turn off baldrick-work's launchd agent when you say so. Its chat bot stays until the follow-up plan decides.
+7. Turn off the old assistant's launchd agent when you say so. Its chat bot stays until the follow-up plan decides.
 
 ## Decisions taken
 
@@ -309,7 +309,7 @@ Still to do:
 - **A strategy for Dependabot PRs.** Approve a bump when it is appropriate, and close it when it is not relevant. Needs rules first, because approving and closing act on GitHub under your account:
   - which bumps may be approved: patch and minor, green checks, no breaking-change notes, repos with tests;
   - which get closed: the dependency is no longer used, or a newer bump supersedes it;
-  - whether tono reviews a bump before approval;
+  - whether the reviewer reviews a bump before approval;
   - an approval limit per day, and a DM listing every action taken.
 
 - **The Slack chat bot.** It has not worked well, because its Slack and Koko connections are hard to keep alive. If a follow-up plan solves that, the bot may move into koko-worker or merge into Koko's Slack handler.
