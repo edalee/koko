@@ -685,10 +685,11 @@ func runReview(ctx context.Context, env Env, onlyURL string) error {
 		if env.test && onlyURL == "" && reviewed > 0 {
 			break
 		}
-		// A PR named with --pr is reviewed whatever the scope or its age says.
-		// Your own PRs are outside the team scope, and have their own age limit.
+		// A PR named with --pr is reviewed whatever the scope, the orgs, the
+		// excluded repos or its age say. Your own PRs are outside the team
+		// scope, and have their own age limit.
 		if onlyURL == "" {
-			if (!t.mine && scope.outside(p) != "") || t.tooOld || reviewedBefore(env.state, p.repo(), p.Number) {
+			if env.cfg.Reviewer.skipRepo(p.repo()) != "" || (!t.mine && scope.outside(p) != "") || t.tooOld || reviewedBefore(env.state, p.repo(), p.Number) {
 				continue
 			}
 			onGitHub, err := hasReviewComment(ctx, p.repo(), p.Number, env.cfg.Reviewer.MarkerPrefix)

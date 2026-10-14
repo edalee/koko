@@ -6,16 +6,19 @@ const inputClass =
   "px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40";
 
 // RepoList adds and removes "owner/repo" names. A bare name means <org>/<name>,
-// where org is the team's org. With no org, it needs owner/repo.
+// where org is the team's org. With no org, it needs owner/repo. With owners
+// set, it lists org and user names instead.
 export default function RepoList({
   repos,
   org,
   empty,
+  owners = false,
   onChange,
 }: {
   repos: string[];
   org: string;
   empty: string;
+  owners?: boolean;
   onChange: (next: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -25,15 +28,19 @@ export default function RepoList({
     const name = draft.trim();
     setProblem(null);
     if (!name) return;
-    if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(name)) {
+    if (owners && !/^[A-Za-z0-9-]+$/.test(name)) {
+      setProblem("Use an org or user name");
+      return;
+    }
+    if (!owners && !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)?$/.test(name)) {
       setProblem(org ? "Use owner/repo, or a bare repo name" : "Use owner/repo");
       return;
     }
-    if (!name.includes("/") && !org) {
+    if (!owners && !name.includes("/") && !org) {
       setProblem("Use owner/repo, or set the team first");
       return;
     }
-    const full = name.includes("/") ? name : `${org}/${name}`;
+    const full = owners || name.includes("/") ? name : `${org}/${name}`;
     if (repos.some((r) => r.toLowerCase() === full.toLowerCase())) {
       setProblem("Already in the list");
       return;
@@ -73,7 +80,9 @@ export default function RepoList({
               add();
             }
           }}
-          placeholder={org ? `owner/repo, or repo for ${org}` : "owner/repo"}
+          placeholder={
+            owners ? "org or user name" : org ? `owner/repo, or repo for ${org}` : "owner/repo"
+          }
           className={cn(inputClass, "flex-1 py-1.5 font-mono placeholder:text-tertiary")}
         />
         <button
