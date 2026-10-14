@@ -53,6 +53,11 @@ type ReviewerConfig struct {
 	// Team is PRs opened by Team's members: the ones that ask for your review,
 	// and every open one in Repos.
 	Team TeamScopeConfig `json:"team"`
+	// Orgs and ExcludeRepos narrow Mine and Team (plan 034). Orgs is the
+	// owners whose PRs are reviewed, empty for every owner. ExcludeRepos is
+	// "owner/repo" names never reviewed, even in one of Orgs.
+	Orgs         []string `json:"orgs"`
+	ExcludeRepos []string `json:"excludeRepos"`
 }
 
 // ScopeConfig switches a set of PRs on, for those opened in the last MaxAgeDays.
@@ -219,13 +224,9 @@ func (c *Config) fillDefaults() {
 	if r.Team.Team == "" {
 		r.Team.Team = d.Team.Team
 	}
-	var repos []string
-	for _, repo := range r.Team.Repos {
-		if repo = strings.TrimSpace(repo); repo != "" {
-			repos = append(repos, repo)
-		}
-	}
-	r.Team.Repos = repos
+	r.Team.Repos = trimList(r.Team.Repos)
+	r.Orgs = trimList(r.Orgs)
+	r.ExcludeRepos = trimList(r.ExcludeRepos)
 	if c.Focus.WindowStart == "" {
 		c.Focus.WindowStart = def.Focus.WindowStart
 	}
@@ -319,7 +320,48 @@ func (r ReviewerConfig) problem() error {
 			return fmt.Errorf("review repo %q, want owner/repo", repo)
 		}
 	}
+	for _, org := range r.Orgs {
+		if strings.Contains(org, "/") {
+			return fmt.Errorf("review org %q, want an org or user name", org)
+		}
+	}
+	for _, repo := range r.ExcludeRepos {
+		if !ownerRepo(repo) {
+			return fmt.Errorf("excluded repo %q, want owner/repo", repo)
+		}
+	}
 	return nil
+}
+
+// skipRepo says why the review worker skips PRs in repo, an "owner/repo"
+// name, or returns "". Names match in any case.
+func (r ReviewerConfig) skipRepo(repo string) string {
+	for _, x := range r.ExcludeRepos {
+		if strings.EqualFold(x, repo) {
+			return "an excluded repo"
+		}
+	}
+	if len(r.Orgs) == 0 {
+		return ""
+	}
+	owner, _, _ := strings.Cut(repo, "/")
+	for _, org := range r.Orgs {
+		if strings.EqualFold(org, owner) {
+			return ""
+		}
+	}
+	return "not in the review orgs"
+}
+
+// trimList trims each entry of list and drops the empty ones.
+func trimList(list []string) []string {
+	var out []string
+	for _, s := range list {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // usesReviewer is true when the command runs the CLI from the source setting.

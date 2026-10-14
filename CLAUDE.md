@@ -63,7 +63,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
   - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx` (on/off, job times, Test and Run now, checks, log)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
-- `docs/plans/` — Implementation plans (001-033)
+- `docs/plans/` — Implementation plans (001-034)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
@@ -90,6 +90,6 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **`/design` command**: screenshots running app + analyzes against design system
 
 ## Design Docs
-- Implementation plans in `docs/plans/` (001-033)
+- Implementation plans in `docs/plans/` (001-034)
 - Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation
