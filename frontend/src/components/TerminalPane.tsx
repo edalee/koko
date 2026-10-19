@@ -153,6 +153,46 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     Resize(sid, dims.cols, dims.rows);
   }, []);
 
+  /**
+   * Repaint every visible row. Does not touch the grid or the PTY.
+   *
+   * Content can sit in the buffer while the screen shows none of it: after a
+   * WebGL context is lost, or after the window comes back from sleep. A
+   * scroll or a window resize repaints it, and so does this.
+   */
+  const repaint = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return;
+    webglRef.current?.clearTextureAtlas?.();
+    term.refresh(0, term.rows - 1);
+  }, []);
+
+  /**
+   * Load the WebGL renderer, or leave the DOM renderer in place if it fails.
+   *
+   * WebKit keeps only a small number of WebGL contexts alive, and drops the
+   * oldest when a new one is made. It also drops them across sleep. On a
+   * loss, dispose the addon so xterm falls back to the DOM renderer, then
+   * repaint, because the fallback does not draw the old rows by itself. The
+   * next activation of this pane tries WebGL again.
+   */
+  const loadWebgl = useCallback(() => {
+    const term = termRef.current;
+    if (!term || webglRef.current) return;
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl.dispose();
+        if (webglRef.current === webgl) webglRef.current = null;
+        repaint();
+      });
+      term.loadAddon(webgl);
+      webglRef.current = webgl;
+    } catch {
+      // WebGL not available, DOM renderer is fine
+    }
+  }, [repaint]);
+
   // Create terminal once (stable across reconnects)
   useEffect(() => {
     const container = containerRef.current;
@@ -203,15 +243,8 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     );
 
     term.open(container);
-
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-      webglRef.current = webgl;
-    } catch {
-      // WebGL not available, DOM renderer is fine
-    }
+    termRef.current = term;
+    loadWebgl();
 
     // Only fit a laid-out box. QuickTerminal keeps its shells across
     // close/reopen, so a non-active pane can mount inside `display: none`,
@@ -220,7 +253,6 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     // 120-column output into it. Leaving xterm at its 80x24 default is closer,
     // and the activation effect fits properly once the pane is visible.
     if (isLaidOut(container)) fit.fit();
-    termRef.current = term;
     fitRef.current = fit;
     serializeRef.current = serialize;
     searchRef.current = search;
@@ -325,19 +357,14 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     //      as a user-facing escape hatch; it's harmless even after
     //      the fix lands.
     // -------------------------------------------------------------------
-    const redraw = () => {
-      webglRef.current?.clearTextureAtlas?.();
-      const t = termRef.current;
-      if (t) t.refresh(0, t.rows - 1);
-    };
     const atlasInterval = setInterval(() => {
       if (!activeRef.current) return;
       if (!hadOutputSinceFlushRef.current) return;
-      redraw();
+      repaint();
       hadOutputSinceFlushRef.current = false;
     }, 10000);
     const onBack = () => {
-      if (activeRef.current && document.visibilityState === "visible") redraw();
+      if (activeRef.current && document.visibilityState === "visible") repaint();
     };
     window.addEventListener("focus", onBack);
     document.addEventListener("visibilitychange", onBack);
@@ -355,8 +382,10 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      webglRef.current = null;
     };
-  }, [refit]); // refit is stable — this effect must never re-run; it owns the terminal
+    // refit, repaint and loadWebgl are stable, so this effect never re-runs. It owns the terminal.
+  }, [refit, repaint, loadWebgl]);
 
   // Subscribe to PTY events — re-subscribes when sessionId changes (reconnect).
   useEffect(() => {
@@ -399,11 +428,17 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
   // above deliberately drops those events. Without this, a tab that was
   // inactive during a resize keeps its stale `cols` forever and the TUI
   // renders cropped. The guard inside refit() makes the common case a no-op.
+  //
+  // Repaint on every activation too. A pane whose WebGL context was dropped
+  // while it sat in the background otherwise shows a blank screen with the
+  // content still in its buffer, until a scroll or resize redraws it.
   useEffect(() => {
     if (!active) return;
+    loadWebgl();
     refit(sessionId);
+    repaint();
     termRef.current?.focus();
-  }, [active, sessionId, refit]);
+  }, [active, sessionId, refit, repaint, loadWebgl]);
 
   // Close context menu on any click or keypress
   useEffect(() => {
@@ -522,9 +557,7 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
           onRedraw={() => {
             // Fixes WebGL texture atlas corruption (overlapping/melted glyphs)
             // without clearing scrollback.
-            webglRef.current?.clearTextureAtlas?.();
-            const t = termRef.current;
-            if (t) t.refresh(0, t.rows - 1);
+            repaint();
             setCtxMenu(null);
           }}
         />

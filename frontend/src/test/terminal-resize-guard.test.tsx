@@ -28,6 +28,7 @@ vi.mock("@xterm/xterm", () => {
     loadAddon = vi.fn();
     dispose = vi.fn();
     focus = vi.fn();
+    refresh = vi.fn();
     get cols() {
       return mockTermCols;
     }
