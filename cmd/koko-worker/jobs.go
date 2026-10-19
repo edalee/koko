@@ -269,6 +269,7 @@ var errNoTeam = errors.New("no review team is set")
 func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts map[string]int) string {
 	t.loadScope(ctx, env)
 	r, reviewed := latestResult(env.state, p.repo(), p.Number)
+	skip := env.cfg.Reviewer.skipRepo(p.repo())
 	switch {
 	case reviewed && r.Failed != "" && len(r.Comments) > 0:
 		// Part of the review reached the PR before posting failed.
@@ -277,6 +278,10 @@ func (t *reviewTally) status(ctx context.Context, env Env, p SearchPR, counts ma
 	case reviewed && r.Failed != "":
 		counts["failed"]++
 		return "the review worker could not review it"
+	case skip != "" && (!reviewed || len(r.Unposted) > 0):
+		// The worker does not review or post in this repo. A posted review still shows.
+		counts["skipped"]++
+		return "skipped: " + skip
 	case reviewed && len(r.Unposted) > 0:
 		// Not on GitHub yet, so no verdict to show.
 		counts["waiting"]++
@@ -330,6 +335,11 @@ func (t *reviewTally) summary(env Env, counts map[string]int) string {
 		} else {
 			fmt.Fprintf(&b, " %d were opened more than %d days ago, so they are skipped.", counts["outside"], env.cfg.Reviewer.Team.MaxAgeDays)
 		}
+	}
+	if n := counts["skipped"]; n == 1 {
+		b.WriteString(" 1 is in a repo the review worker skips.")
+	} else if n > 1 {
+		fmt.Fprintf(&b, " %d are in repos the review worker skips.", n)
 	}
 	if t.scopeErr != nil && !errors.Is(t.scopeErr, errNoTeam) {
 		fmt.Fprintf(&b, " _Could not load the review scope: %s_", truncate(t.scopeErr.Error(), 150))
@@ -391,8 +401,9 @@ func reviewSection(ctx context.Context, env Env, tally *reviewTally, queue []Sea
 }
 
 // teamSection is the stand-up's "Team PRs" section: the team's open PRs in
-// Reviewer.Team.Repos. It skips PRs outside the review scope, and PRs that ask for your
-// review, because "Needs your review" lists those. It is empty if the
+// Reviewer.Team.Repos. It skips PRs outside the review scope, PRs in repos
+// the review worker skips, and PRs that ask for your review, because "Needs
+// your review" lists those. It is empty if the
 // section is switched off or has no repos.
 func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchPR, prsErr error, queue []SearchPR) string {
 	if !env.cfg.Reviewer.Team.Enabled || len(env.cfg.Reviewer.Team.Repos) == 0 {
@@ -412,7 +423,7 @@ func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchP
 	counts := map[string]int{}
 	var lines []string
 	for _, p := range prs {
-		if inQueue[p.URL] || (tally.scopeErr == nil && tally.scope.outside(p) != "") {
+		if inQueue[p.URL] || env.cfg.Reviewer.skipRepo(p.repo()) != "" || (tally.scopeErr == nil && tally.scope.outside(p) != "") {
 			continue
 		}
 		lines = append(lines, prLine(p, tally.status(ctx, env, p, counts)))
@@ -1001,7 +1012,8 @@ func reviewPing(r ReviewResult) string {
 func postUnposted(ctx context.Context, env Env) ([]string, error) {
 	var failures []string
 	for key, r := range env.state.Results {
-		if len(r.Unposted) == 0 {
+		// A review in a repo the worker now skips stays unposted.
+		if len(r.Unposted) == 0 || env.cfg.Reviewer.skipRepo(r.Repo) != "" {
 			continue
 		}
 		gaveUp, err := postPending(ctx, env, key, r)

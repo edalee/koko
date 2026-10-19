@@ -333,8 +333,7 @@ func (r ReviewerConfig) problem() error {
 	return nil
 }
 
-// skipRepo says why the review worker skips PRs in repo, an "owner/repo"
-// name, or returns "". Names match in any case.
+// skipRepo returns why the review worker skips PRs in repo ("owner/repo"), or "" if it reviews them. Names match in any case.
 func (r ReviewerConfig) skipRepo(repo string) string {
 	for _, x := range r.ExcludeRepos {
 		if strings.EqualFold(x, repo) {

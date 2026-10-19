@@ -28,7 +28,8 @@ export default function RepoList({
     const name = draft.trim();
     setProblem(null);
     if (!name) return;
-    if (owners && !/^[A-Za-z0-9-]+$/.test(name)) {
+    // EMU logins (Enterprise Managed Users) have an underscore, as in handle_shortcode.
+    if (owners && !/^[A-Za-z0-9_-]+$/.test(name)) {
       setProblem("Use an org or user name");
       return;
     }

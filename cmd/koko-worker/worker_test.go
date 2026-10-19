@@ -827,6 +827,47 @@ func TestStandupStatusForPostingStates(t *testing.T) {
 	}
 }
 
+func TestStandupStatusForSkippedRepos(t *testing.T) {
+	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
+	p.Repository.NameWithOwner = "o/r"
+	env := Env{cfg: testConfig(), state: &State{Results: map[string]ReviewResult{}}}
+	env.cfg.Reviewer.ExcludeRepos = []string{"o/r"}
+	tally := &reviewTally{loaded: true}
+	counts := map[string]int{}
+	if s := tally.status(context.Background(), env, p, counts); s != "skipped: an excluded repo" || counts["skipped"] != 1 || counts["waiting"] != 0 {
+		t.Errorf("excluded: %q %v", s, counts)
+	}
+	if s := tally.summary(env, counts); !strings.Contains(s, "1 is in a repo the review worker skips.") || strings.Contains(s, "not reviewed yet") {
+		t.Errorf("summary: %q", s)
+	}
+
+	env.cfg.Reviewer.ExcludeRepos, env.cfg.Reviewer.Orgs = nil, []string{"acme"}
+	if s := tally.status(context.Background(), env, p, map[string]int{}); s != "skipped: not in the review orgs" {
+		t.Errorf("outside the orgs: %q", s)
+	}
+	// An unposted review is never posted in a skipped repo, so it is skipped too.
+	env.state.Results["o/r#1@abc"] = ReviewResult{Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}}
+	if s := tally.status(context.Background(), env, p, map[string]int{}); s != "skipped: not in the review orgs" {
+		t.Errorf("unposted in a skipped repo: %q", s)
+	}
+}
+
+func TestPostUnpostedSkipsSkippedRepos(t *testing.T) {
+	f := &fakePostEnv{st: &State{Results: map[string]ReviewResult{
+		"o/r#1@abc": {URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}},
+	}, Reviewed: map[string]time.Time{}}}
+	env := f.env()
+	env.state, env.cfg = f.st, testConfig()
+	env.cfg.Reviewer.ExcludeRepos = []string{"O/R"}
+	if _, err := postUnposted(context.Background(), env); err != nil || len(f.posted) != 0 {
+		t.Errorf("excluded repo: err %v, posted %q", err, f.posted)
+	}
+	env.cfg.Reviewer.ExcludeRepos = nil
+	if _, err := postUnposted(context.Background(), env); err != nil || len(f.posted) != 1 {
+		t.Errorf("included repo: err %v, posted %q", err, f.posted)
+	}
+}
+
 func TestReviewScope(t *testing.T) {
 	now := monday(9, 30)
 	s := reviewScope{
@@ -963,6 +1004,12 @@ func TestTeamSection(t *testing.T) {
 		strings.Contains(got, "api#2") || strings.Contains(got, "api#3") || strings.Contains(got, "api#4") {
 		t.Errorf("team section:\n%s", got)
 	}
+	// An excluded repo lists none of its PRs.
+	env.cfg.Reviewer.ExcludeRepos = []string{"acme/api"}
+	if got := teamSection(context.Background(), env, tally, prs, nil, nil); !strings.Contains(got, "• None in acme/api") {
+		t.Errorf("excluded repo, got:\n%s", got)
+	}
+	env.cfg.Reviewer.ExcludeRepos = nil
 	env.cfg.Reviewer.Team.Enabled = false
 	if s := teamSection(context.Background(), env, tally, prs, nil, nil); s != "" {
 		t.Errorf("switched off, got:\n%s", s)
