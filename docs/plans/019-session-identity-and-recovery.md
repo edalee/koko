@@ -49,7 +49,7 @@ Replace `session-N` with **directory-scoped slugs**: `{dir-slug}/n`.
 
 ```
 ~/Projects/koko      → koko/1, koko/2
-~/Projects/drumstick → drumstick/1
+~/Projects/api      → api/1
 /tmp                 → tmp/1
 ```
 
@@ -120,9 +120,9 @@ The session sidebar groups sessions under their directory name with nested inden
 ▾ koko
     Session 1          ● active
     Bug fix            ○ disconnected
-▾ drumstick
+▾ api
     Session 1          ● active
-▸ baldrick (1 closed)
+▸ web (1 closed)
 ```
 
 - Directory header: folder icon + last path component, collapsible
@@ -158,8 +158,8 @@ If the app crashes mid-write, recovery on startup:
 ### Session list response
 ```json
 [
-  {"slug": "koko/1", "name": "Feature work", "dir": "/Users/ed/Projects/koko", "status": "active", "claudeSessionId": "e9088da2-..."},
-  {"slug": "koko/2", "name": "Bug fix", "dir": "/Users/ed/Projects/koko", "status": "disconnected", "claudeSessionId": "8deec030-..."}
+  {"slug": "koko/1", "name": "Feature work", "dir": "~/Projects/koko", "status": "active", "claudeSessionId": "e9088da2-..."},
+  {"slug": "koko/2", "name": "Bug fix", "dir": "~/Projects/koko", "status": "disconnected", "claudeSessionId": "8deec030-..."}
 ]
 ```
 

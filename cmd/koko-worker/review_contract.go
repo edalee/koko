@@ -210,7 +210,7 @@ func lgtmOnHead(ctx context.Context, repo string, number int, prefix, sha string
 }
 
 // hasHeadMarker is true when a line of body is the code review marker for
-// the commit short. tono accepts the marker on any line, so this does too.
+// the short commit ID. The marker may sit on any line.
 func hasHeadMarker(body, prefix, short string) bool {
 	for _, l := range strings.Split(body, "\n") {
 		l = strings.TrimSpace(l)

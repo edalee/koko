@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -39,10 +38,6 @@ type State struct {
 	Runs     map[string]RunRecord    `json:"runs"`     // key: slotKey
 	Reviewed map[string]time.Time    `json:"reviewed"` // key: "owner/repo#12@sha"
 	Results  map[string]ReviewResult `json:"results"`  // key: "owner/repo#12@sha"
-	// OldReviewed and OldResults are Reviewed and Results under their names
-	// before 0.5.8. loadState moves them over, and the next save drops them.
-	OldReviewed map[string]time.Time    `json:"tonoReviewed,omitempty"`
-	OldResults  map[string]ReviewResult `json:"tonoResults,omitempty"`
 	// TimesAdded is when each active run time first appeared, keyed "job@HH:MM".
 	// A slot counts only on days when its time was active before the slot came.
 	TimesAdded map[string]time.Time `json:"timesAdded"`
@@ -77,42 +72,7 @@ func loadState(path string) State {
 	if st.Results == nil {
 		st.Results = map[string]ReviewResult{}
 	}
-	for k, v := range st.OldReviewed {
-		if _, ok := st.Reviewed[k]; !ok {
-			st.Reviewed[k] = v
-		}
-	}
-	for k, v := range st.OldResults {
-		if _, ok := st.Results[k]; !ok {
-			st.Results[k] = v
-		}
-	}
-	st.OldReviewed, st.OldResults = nil, nil
-	renameJobKeys(&st, legacyJobTono, JobReview)
 	return st
-}
-
-// renameJobKeys moves run records and run times from one job name to
-// another, so the review job's history survives its rename from "tono".
-func renameJobKeys(st *State, from, to string) {
-	prefix := from + "@"
-	for k, v := range st.Runs {
-		if strings.HasPrefix(k, prefix) {
-			if _, taken := st.Runs[to+"@"+k[len(prefix):]]; !taken {
-				v.Job = to
-				st.Runs[to+"@"+k[len(prefix):]] = v
-			}
-			delete(st.Runs, k)
-		}
-	}
-	for k, v := range st.TimesAdded {
-		if strings.HasPrefix(k, prefix) {
-			if _, taken := st.TimesAdded[to+"@"+k[len(prefix):]]; !taken {
-				st.TimesAdded[to+"@"+k[len(prefix):]] = v
-			}
-			delete(st.TimesAdded, k)
-		}
-	}
 }
 
 // ReviewResult is the reviewer's outcome for one commit of one PR.

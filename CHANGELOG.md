@@ -4,6 +4,18 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.14] - 2026-10-13
+
+### Added
+- **Worker settings**: Settings > Worker has fields for the time zone, the calendar and the Jira site
+
+### Changed
+- **Generic defaults**: the worker's time zone now defaults to your Mac's own. The Jira site starts empty, and with no site the stand-up reads no tickets and says so in one line. Test fixtures, docs and screenshots no longer name any org, repo or person
+- **Jira site after the update**: an older `worker.json` has no Jira site, so the stand-up stops checking Jira. After you update, set the Jira site in Settings > Worker
+
+### Removed
+- **Old config migrations**: the worker no longer converts reviewer settings from before 0.5.8, the old review job name, or old state keys. The PR panel drops a bare repo name with no owner. If your `worker.json` still relies on them, set the reviewer command, log folder and marker in Settings > Worker before you update
+
 ## [0.5.13] - 2026-10-09
 
 ### Fixed
@@ -27,29 +39,29 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ## [0.5.9] - 2026-10-08
 
 ### Changed
-- **PR panel**: shows your open PRs and your team's, under "My PRs" and "Team PRs". Settings > GitHub sets them like the review worker's: an age limit for each, the team (`org/team-slug`) and its repos, or one click copies the review worker's settings. A bare repo name means the team's org. The built-in list of DRM repos is gone, so with no repos set you now see your PRs and your review requests. A followed repo list carries over as the team's repos (plan 032, ADR-041)
+- **PR panel**: shows your open PRs and your team's, under "My PRs" and "Team PRs". Settings > GitHub sets them like the review worker's: an age limit for each, the team (`org/team-slug`) and its repos, or one click copies the review worker's settings. A bare repo name means the team's org. The built-in list of one team's repos is gone, so with no repos set you now see your PRs and your review requests. A followed repo list carries over as the team's repos (plan 032, ADR-041)
 
 ### Fixed
-- **PRs outside epidemicsound**: approve, merge, files, diffs, reviews, commits and comments used to add `epidemicsound/` to every repo. They now use the PR's own `owner/repo`
+- **PRs outside one org**: approve, merge, files, diffs, reviews, commits and comments used to add one fixed org to every repo. They now use the PR's own `owner/repo`
 - **Silent PR errors**: a source that fails now shows its error above the PR list, instead of an empty list
 - **Slow PR list**: one search per source, run at the same time, replaces one `gh pr list` per repo in turn
 
 ## [0.5.8] - 2026-10-08
 
 ### Changed
-- **Reviewer command**: Settings > Worker > Review worker sets the reviewer as one command, such as `{reviewer} {pr} --all`, with an optional log folder and the comment marker. Logs off means the reviewer writes `$REVIEW_RESULT`. The worker no longer assumes tono or Epidemic Sound: a new install has no reviewer and no team until you set them, and a bare repo name means the team's org. Your current tono settings carry over as they are (plan 031, ADR-040)
+- **Reviewer command**: Settings > Worker > Review worker sets the reviewer as one command, such as `{reviewer} {pr}`, with an optional log folder and the comment marker. Logs off means the reviewer writes `$REVIEW_RESULT`. The worker no longer assumes one reviewer CLI or org: a new install has no reviewer and no team until you set them, and a bare repo name means the team's org. Your current reviewer settings carry over as they are (plan 031, ADR-040)
 
 ### Fixed
-- **Clean PRs from tono**: tono's docs and comments passes write nothing when clean, so a PR with only tono's code review LGTM now counts as LGTM in the stand-up and the Slack line. A rerun at a commit tono already approved no longer fails. The worker's own LGTM uses tono's code review marker and `**LGTM!**`, so tono recognises it
+- **Clean PRs from the reviewer**: the reviewer's docs and comments passes write nothing when clean, so a PR with only the reviewer's code review LGTM now counts as LGTM in the stand-up and the Slack line. A rerun at a commit the reviewer already approved no longer fails. The worker's own LGTM uses the reviewer's code review marker and `**LGTM!**`, so the reviewer recognises it
 
 ## [0.5.7] - 2026-10-08
 
 ### Added
-- **Reviewer contract**: the review worker can run any reviewer CLI, not only tono. The reviewer writes its comments as JSON to `$REVIEW_RESULT`, and the worker posts them. Settings > Worker > Review worker > "Advanced" sets the format, the arguments and the marker prefix (plan 030, ADR-039)
+- **Reviewer contract**: the review worker can run any reviewer CLI, not only one. The reviewer writes its comments as JSON to `$REVIEW_RESULT`, and the worker posts them. Settings > Worker > Review worker > "Advanced" sets the format, the arguments and the marker prefix (plan 030, ADR-039)
 
 ### Fixed
-- **tono's LGTM reviews**: a clean review's `**LGTM!**` now reads as ready to approve in the stand-up and the Slack line, and a fully clean PR gets one LGTM comment, not one per pass
-- **Skipped code review**: when tono skips the code review because its LGTM is already on the head commit, the worker no longer marks the review failed
+- **The reviewer's LGTM reviews**: a clean review's `**LGTM!**` now reads as ready to approve in the stand-up and the Slack line, and a fully clean PR gets one LGTM comment, not one per pass
+- **Skipped code review**: when the reviewer skips the code review because its LGTM is already on the head commit, the worker no longer marks the review failed
 
 ## [0.5.6] - 2026-10-07
 
@@ -64,17 +76,17 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ## [0.5.4] - 2026-10-06
 
 ### Added
-- **Reviewer setting**: Settings > Worker > Review worker picks where the reviewer code comes from. "Managed", the default, keeps the worker's own clone of `epidemicsound/tonometer` and moves it to the newest commit on `main` before each run. If a fetch fails, the last good copy runs. "Local path" runs a CLI you point at. The card shows which commit the last run used. Your own tonometer checkout no longer decides which code reviews your PRs
+- **Reviewer setting**: Settings > Worker > Review worker picks where the reviewer code comes from. "Managed", the default, keeps the worker's own clone of `acme/reviewer` and moves it to the newest commit on `main` before each run. If a fetch fails, the last good copy runs. "Local path" runs a CLI you point at. The card shows which commit the last run used. Your own reviewer checkout no longer decides which code reviews your PRs
 
 ### Changed
-- **Review worker**: the tono job is now called the review worker, `review`, in Settings, Slack, the stand-up and the logs. `koko-worker run tono` still works
+- **Review worker**: the old review job is now called the review worker, `review`, in Settings, Slack, the stand-up and the logs. The old job name still works with `koko-worker run`
 - **Reviewer config**: worker.json keeps the review settings in one `reviewer` section: the source, and the My PRs and Team PRs scopes, each with an age limit. A worker.json from before is carried over on load, values included
 
 ## [0.5.3] - 2026-10-05
 
 ### Changed
-- **Tono "My PRs"**: reviews only your PRs opened in the last 14 days, a setting in Settings > Worker. It used to review every open PR you ever opened, back to 2022. "Run now" with a PR's URL still reviews any PR
-- **Archived repos**: every PR search leaves them out. An archived repo is read-only, so tono could never post there
+- **Review "My PRs"**: reviews only your PRs opened in the last 14 days, a setting in Settings > Worker. It used to review every open PR you ever opened, back to 2022. "Run now" with a PR's URL still reviews any PR
+- **Archived repos**: every PR search leaves them out. An archived repo is read-only, so the reviewer could never post there
 
 ### Fixed
 - **Posting refused for good**: a comment GitHub will never accept, such as on an archived repo or a locked PR, fails at once with one DM. It used to take three tries over a day
@@ -87,7 +99,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ## [0.5.1] - 2026-10-02
 
 ### Added
-- **Tono review ping**: once a review is on the PR, one Slack line says so, with the verdict and a link to the review. The review itself never goes to Slack
+- **Review ping**: once a review is on the PR, one Slack line says so, with the verdict and a link to the review. The review itself never goes to Slack
 - **Housekeeping in Settings > General**: "Clear history" forgets Koko's closed sessions, and leaves Claude's conversations alone. "Remove worktrees" removes worktrees Koko created for closed sessions. It never forces, and keeps any with uncommitted or ignored files, or still in use (plan 028 step 7b)
 
 ### Changed
@@ -109,8 +121,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Stand-up job**: a 07:00 Slack DM with today's meetings, your PRs ready to merge with a Jira check, follow-up steps, PRs waiting for your review, and team PRs
 - **Stories you can close**: a stand-up section listing your Jira stories, not done, that a PR merged this week or a PR ready to merge covers
 - **Focus time job**: at 09:15, books "Focus" blocks in free calendar gaps of 30 minutes or more, through the Google Calendar connector
-- **Tono review job**: at 09:30, 12:00 and 14:00, reviews each PR once with the tono CLI, and posts the review as comments on the PR, as you. A PR with nothing to report gets "LGTM 😃⭐😸". Nothing posts for a review that did not finish
-- **Tono settings**: "My PRs" reviews every open PR you opened. "Team PRs" reviews the team's recent PRs: those that ask for your review, and every open PR in a repo list you edit in Settings
+- **Review job**: at 09:30, 12:00 and 14:00, reviews each PR once with the reviewer CLI, and posts the review as comments on the PR, as you. A PR with nothing to report gets "LGTM 😃⭐😸". Nothing posts for a review that did not finish
+- **Review settings**: "My PRs" reviews every open PR you opened. "Team PRs" reviews the team's recent PRs: those that ask for your review, and every open PR in a repo list you edit in Settings
 - **`koko-worker version`**: prints the version the binary was built as. The scheduler logs it at start
 - **Worker scheduler**: runs jobs missed while the Mac slept, waits for the internet, and retries other failures 3 times. It books the next Mac wake with `pmset`
 - **Worker settings**: a Worker tab in Settings with an on/off switch, job switches and times, "Test", "Run now", connection checks and the log (`WorkerSettings.tsx`, `worker_service.go`)
@@ -160,7 +172,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **MCP Server** — `koko mcp` subcommand, 8 tools including `interact` (send+receive in one call with output settle detection)
 - **Slack Bot** — DM the bot to control sessions. Owner-only access via Slack member ID
 - **CLI Companion** — `koko-cli` binary with `sessions`, `status`, `send`, `output`, `tail` (WebSocket streaming), `files`
-- **Session identity** — Directory-scoped slugs (koko-1, drumstick-2) replace transient session-N IDs. Slugs work across all clients (API, MCP, Slack, CLI)
+- **Session identity** — Directory-scoped slugs (koko-1, api-2) replace transient session-N IDs. Slugs work across all clients (API, MCP, Slack, CLI)
 - **Claude UUID recovery** — Captures Claude Code session UUID from JSONL files. `claude --resume <uuid>` for precise reconnects instead of `--continue`
 - **Session context card** — Disconnected sessions show glass card with last assistant message, directory path, and "Click to reconnect" over semi-transparent mesh gradient
 - **Grouped sidebar** — Sessions grouped under directory headers when multiple sessions share a directory, flat otherwise. Collapsible with status dots and count badges

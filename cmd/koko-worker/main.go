@@ -143,9 +143,6 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 		return fmt.Errorf("run needs a job: standup, focus or review")
 	}
 	job := args[0]
-	if job == legacyJobTono {
-		job = JobReview // the name before 0.5.4
-	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
