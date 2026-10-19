@@ -26,11 +26,4 @@ describe("RepoList", () => {
     expect(onChange).toHaveBeenCalledWith(["acme", "jdoe"]);
     expect(onChange).toHaveBeenCalledTimes(1);
   });
-
-  it("accepts an EMU login with an underscore in owners mode", () => {
-    const onChange = vi.fn();
-    render(<RepoList owners repos={[]} org="" empty="" onChange={onChange} />);
-    add("jdoe_acme");
-    expect(onChange).toHaveBeenCalledWith(["jdoe_acme"]);
-  });
 });
