@@ -131,3 +131,16 @@ func TestTicketLine(t *testing.T) {
 		t.Errorf("moved: %q", moved)
 	}
 }
+
+func TestJiraOffNote(t *testing.T) {
+	// A config from before 0.5.14 has no Jira site, so the stand-up says so.
+	if got := jiraOffNote("", 2); !strings.Contains(got, "Jira checks are off") || !strings.Contains(got, "Settings > Worker") {
+		t.Errorf("no site: %q", got)
+	}
+	if got := jiraOffNote("acme.atlassian.net", 2); got != "" {
+		t.Errorf("site set: %q", got)
+	}
+	if got := jiraOffNote("", 0); got != "" {
+		t.Errorf("no PRs to check: %q", got)
+	}
+}

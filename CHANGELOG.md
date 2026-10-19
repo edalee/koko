@@ -10,10 +10,11 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 - **Worker settings**: Settings > Worker has fields for the time zone, the calendar and the Jira site
 
 ### Changed
-- **Generic defaults**: the worker's time zone now defaults to your Mac's own. The Jira site starts empty, and with no site the stand-up reads no tickets. Test fixtures, docs and screenshots no longer name any org, repo or person
+- **Generic defaults**: the worker's time zone now defaults to your Mac's own. The Jira site starts empty, and with no site the stand-up reads no tickets and says so in one line. Test fixtures, docs and screenshots no longer name any org, repo or person
+- **Jira site after the update**: an older `worker.json` has no Jira site, so the stand-up stops checking Jira. After you update, set the Jira site in Settings > Worker
 
 ### Removed
-- **Old config migrations**: the worker no longer converts reviewer settings from before 0.5.8, the old review job name, or old state keys. The PR panel drops a bare repo name with no owner. If your `worker.json` still relies on them, set the reviewer command, log folder, marker and Jira site in Settings > Worker before you update
+- **Old config migrations**: the worker no longer converts reviewer settings from before 0.5.8, the old review job name, or old state keys. The PR panel drops a bare repo name with no owner. If your `worker.json` still relies on them, set the reviewer command, log folder and marker in Settings > Worker before you update
 
 ## [0.5.13] - 2026-10-09
 

@@ -75,6 +75,16 @@ func loadDetails(ctx context.Context, prs []SearchPR) (ok []SearchPR, details []
 	return ok, details, failed
 }
 
+// jiraOffNote says why the stand-up checked no tickets, so a user who
+// updated from a version without a Jira site field notices. It is empty with
+// a site set, or with no PRs to check.
+func jiraOffNote(site string, prs int) string {
+	if site != "" || prs == 0 {
+		return ""
+	}
+	return "_Jira checks are off until you set the Jira site in Settings > Worker._\n"
+}
+
 func runStandup(ctx context.Context, env Env) error {
 	loc := env.cfg.location()
 	now := env.now.In(loc)
@@ -189,6 +199,7 @@ func runStandup(ctx context.Context, env Env) error {
 	for _, f := range prFailed {
 		b.WriteString("• " + f + "\n")
 	}
+	b.WriteString(jiraOffNote(env.cfg.JiraSite, len(judged)))
 	sections = append(sections, b.String())
 
 	if s := closableSection(judged, verdicts); s != "" {
