@@ -524,6 +524,7 @@
 - **Rationale:**
   - A built-in list of one team's repos and a fixed org prefix on every action made the panel wrong for anyone else, and broken for other orgs.
   - The same scopes as the review worker mean the panel lists the PRs the worker reviews, and one click copies them.
+  - 2026-10-19: the review worker's `orgs` and `excludeRepos` do not reach the panel. The copy takes only `mine` and `team`, and the panel never applies them. With either set, the panel lists more PRs than the worker reviews.
   - Each search takes several seconds with the detail fields, so they run in parallel. A failed source shows its error, and the others still show.
   - Hidden PR keys move to `owner/repo#n`. The old `repo#n` keys still hide and unhide.
 - **Files:** `pr_sources.go`, `github_service.go`, `config_service.go`, `frontend/src/components/PRPanelSettings.tsx`, `frontend/src/components/PRDetailOverlay.tsx`

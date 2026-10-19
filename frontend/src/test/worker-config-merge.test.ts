@@ -47,6 +47,19 @@ describe("merge", () => {
   });
 });
 
+describe("review orgs and excluded repos", () => {
+  it("keeps the lists, and turns null into an empty list", () => {
+    const kept = merge(
+      JSON.stringify({ reviewer: { orgs: ["acme"], excludeRepos: ["acme/legacy"] } }),
+    );
+    expect(kept.reviewer.orgs).toEqual(["acme"]);
+    expect(kept.reviewer.excludeRepos).toEqual(["acme/legacy"]);
+    const empty = merge(JSON.stringify({ reviewer: { orgs: null, excludeRepos: null } }));
+    expect(empty.reviewer.orgs).toEqual([]);
+    expect(empty.reviewer.excludeRepos).toEqual([]);
+  });
+});
+
 describe("canonicalZone", () => {
   it("accepts a real zone in any case, and nothing else", () => {
     expect(canonicalZone("Europe/London")).toBe("Europe/London");

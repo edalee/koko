@@ -47,6 +47,8 @@ interface ReviewerConfig {
   markerPrefix: string;
   mine: ScopeConfig;
   team: ScopeConfig & { team: string; repos: string[] };
+  orgs: string[];
+  excludeRepos: string[];
 }
 
 interface WorkerConfig {
@@ -110,6 +112,8 @@ const DEFAULTS: WorkerConfig = {
     markerPrefix: "",
     mine: { enabled: true, maxAgeDays: 14 },
     team: { enabled: false, maxAgeDays: 4, team: "", repos: [] },
+    orgs: [],
+    excludeRepos: [],
   },
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
@@ -181,6 +185,9 @@ export function merge(raw: string): WorkerConfig {
       ...reviewer,
       mine: { ...DEFAULTS.reviewer.mine, ...reviewer.mine },
       team: { ...DEFAULTS.reviewer.team, ...reviewer.team, repos: reviewer.team?.repos ?? [] },
+      // Go writes an empty list as null.
+      orgs: reviewer.orgs ?? [],
+      excludeRepos: reviewer.excludeRepos ?? [],
     },
     slack: { ...DEFAULTS.slack, ...parsed.slack },
     focus: { ...DEFAULTS.focus, ...parsed.focus },
@@ -654,6 +661,37 @@ export default function WorkerSettings() {
                       className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
                     />
                   )}
+                </div>
+              )}
+
+              {key === "review" && (
+                <div className="space-y-2 pt-3 border-t border-white/[0.05]">
+                  <div>
+                    <p className="text-xs text-white/80">Orgs</p>
+                    <p className="text-[10px] text-tertiary">
+                      Only PRs in these orgs and accounts are reviewed, yours and the team's. Add
+                      your own login to keep your personal repos.
+                    </p>
+                  </div>
+                  <RepoList
+                    owners
+                    repos={cfg.reviewer.orgs}
+                    org=""
+                    empty="No orgs set. PRs in every org are reviewed."
+                    onChange={(orgs) => saveReviewer({ orgs })}
+                  />
+                  <div className="pt-1">
+                    <p className="text-xs text-white/80">Excluded repos</p>
+                    <p className="text-[10px] text-tertiary">
+                      PRs in these repos are never reviewed, even in one of the orgs above.
+                    </p>
+                  </div>
+                  <RepoList
+                    repos={cfg.reviewer.excludeRepos}
+                    org=""
+                    empty="No repos excluded."
+                    onChange={(excludeRepos) => saveReviewer({ excludeRepos })}
+                  />
                 </div>
               )}
 
