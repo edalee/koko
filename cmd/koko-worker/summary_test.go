@@ -35,7 +35,7 @@ func TestSummaryPeriod(t *testing.T) {
 			"2026-10-30 00:00 CET", "2026-11-02 00:00 CET", "Friday 30 October to Sunday 1 November"},
 	}
 	for _, c := range cases {
-		start, end := summaryPeriod(c.job, c.now, cet)
+		start, end := summaryPeriod(c.job, c.now, cet, time.Time{})
 		const f = "2006-01-02 15:04 MST"
 		if start.Format(f) != c.start || end.Format(f) != c.end {
 			t.Errorf("%s: got %s to %s, want %s to %s", c.name, start.Format(f), end.Format(f), c.start, c.end)
@@ -46,9 +46,34 @@ func TestSummaryPeriod(t *testing.T) {
 	}
 
 	// Summer time ends on Sunday 25 October, so that weekend is an hour longer.
-	start, end := summaryPeriod(weekdays, time.Date(2026, 10, 26, 8, 30, 0, 0, cet), cet)
+	start, end := summaryPeriod(weekdays, time.Date(2026, 10, 26, 8, 30, 0, 0, cet), cet, time.Time{})
 	if start.Format("Mon 15:04 MST") != "Fri 00:00 CEST" || end.Format("Mon 15:04 MST") != "Mon 00:00 CET" || end.Sub(start) != 73*time.Hour {
 		t.Errorf("over the clock change: %s to %s (%s)", start, end, end.Sub(start))
+	}
+}
+
+func TestSummaryPeriodFromCovered(t *testing.T) {
+	weekdays := JobConfig{Enabled: true, Times: []string{"08:30"}}
+	tuesday := time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
+	const f = "Mon 2 15:04"
+	cases := []struct {
+		name    string
+		covered time.Time
+		start   string
+	}{
+		// Monday's summary did not run, so Tuesday's covers Friday to Monday.
+		{"a missed run", time.Date(2026, 10, 16, 0, 0, 0, 0, cet), "Fri 16 00:00"},
+		{"the usual day", time.Date(2026, 10, 19, 0, 0, 0, 0, cet), "Mon 19 00:00"},
+		{"at most 7 days", time.Date(2026, 9, 1, 0, 0, 0, 0, cet), "Tue 13 00:00"},
+		// A second run on the same day repeats today's summary.
+		{"today already covered", time.Date(2026, 10, 20, 0, 0, 0, 0, cet), "Mon 19 00:00"},
+		{"nothing covered yet", time.Time{}, "Mon 19 00:00"},
+	}
+	for _, c := range cases {
+		start, end := summaryPeriod(weekdays, tuesday, cet, c.covered)
+		if start.Format(f) != c.start || end.Format(f) != "Tue 20 00:00" {
+			t.Errorf("%s: got %s to %s, want %s to Tue 20 00:00", c.name, start.Format(f), end.Format(f), c.start)
+		}
 	}
 }
 
@@ -173,6 +198,10 @@ func decodePRs(t *testing.T, nodes ...map[string]any) map[string]summaryPR {
 func TestBuildFacts(t *testing.T) {
 	start := time.Date(2026, 10, 16, 0, 0, 0, 0, cet)
 	end := time.Date(2026, 10, 19, 0, 0, 0, 0, cet)
+	bodyKey := summaryNode(2, "bob", "2026-10-17T09:00:00Z", "",
+		"alice@2026-10-17T10:00:00Z", "alice@2026-10-17T11:00:00Z@COMMENTED", "bob@2026-10-17T12:00:00Z@COMMENTED",
+		"review-app[bot]@2026-10-17T10:00:00Z@COMMENTED", "carol@@PENDING")
+	bodyKey["headRefName"], bodyKey["body"] = "feature/cache", "Closes PROJ-22."
 	other := summaryNode(9, "alice", "2026-10-16T09:00:00Z", "2026-10-16T10:00:00Z")
 	other["repository"] = map[string]any{"nameWithOwner": "acme/website"}
 	prs := decodePRs(t,
@@ -180,9 +209,7 @@ func TestBuildFacts(t *testing.T) {
 		summaryNode(1, "alice", "2026-10-12T09:00:00Z", "2026-10-16T15:00:00Z", "bob@2026-10-13T09:00:00Z"),
 		// bob opened #2. alice reviewed it twice, bob replied to himself, a bot
 		// reviewed, and carol's review is pending.
-		summaryNode(2, "bob", "2026-10-17T09:00:00Z", "",
-			"alice@2026-10-17T10:00:00Z", "alice@2026-10-17T11:00:00Z@COMMENTED", "bob@2026-10-17T12:00:00Z@COMMENTED",
-			"review-app[bot]@2026-10-17T10:00:00Z@COMMENTED", "carol@@PENDING"),
+		bodyKey,
 		// Merged after the period ended, in Paris time.
 		summaryNode(3, "bob", "2026-10-12T09:00:00Z", "2026-10-18T22:30:00Z"),
 		// In a repo outside the summary's repos.
@@ -206,12 +233,23 @@ func TestBuildFacts(t *testing.T) {
 	if carol.active() {
 		t.Errorf("carol = %+v, want no activity", carol)
 	}
-	if keys := strings.Join(ticketKeys(people), ","); keys != "PROJ-1,PROJ-2" {
+	// #1 names its ticket in the branch, #2 only in the body.
+	if keys := strings.Join(ticketKeys(people), ","); keys != "PROJ-1,PROJ-22" {
 		t.Errorf("ticket keys = %q", keys)
 	}
-	addTickets(people, map[string]jiraTicket{"PROJ-2": {Key: "PROJ-2", Summary: "Add caching", Status: "In Review"}})
-	if len(people[1].Tickets) != 1 || len(people[0].Tickets) != 0 {
-		t.Errorf("tickets: alice %+v, bob %+v", people[0].Tickets, people[1].Tickets)
+	tickets := map[string]jiraTicket{
+		"PROJ-1":  {Key: "PROJ-1", Summary: "Login fails", Status: "Done"},
+		"PROJ-22": {Key: "PROJ-22", Summary: "Add caching", Status: "In Review"},
+	}
+	addTickets(people, tickets, map[string]bool{"PROJ-22": true})
+	if a, b := people[0].Tickets, people[1].Tickets; len(a) != 1 || a[0].statusText() != "Done" || len(b) != 1 || b[0].statusText() != "In Review, moved" {
+		t.Errorf("tickets: alice %+v, bob %+v", a, b)
+	}
+	// Without the search, the status shows and nothing claims a move.
+	people[0].Tickets = nil
+	addTickets(people[:1], tickets, nil)
+	if a := people[0].Tickets; len(a) != 1 || a[0].Moved != nil || a[0].statusText() != "Done" {
+		t.Errorf("unknown moves: %+v", a)
 	}
 }
 
@@ -223,11 +261,12 @@ func TestSummaryLogins(t *testing.T) {
 }
 
 func summaryPeople() []personFacts {
+	moved := true
 	return []personFacts{
 		{Login: "alice",
 			Merged:   []prFact{{Ref: "api#1", Title: "Fix <login>", URL: "https://github.com/acme/api/pull/1"}},
 			Reviewed: []prFact{{Ref: "api#2", Title: "Add caching", Author: "bob", URL: "https://github.com/acme/api/pull/2"}},
-			Tickets:  []ticketFact{{Key: "PROJ-1", Summary: "Login fails", Status: "Done", URL: "https://acme.atlassian.net/browse/PROJ-1"}}},
+			Tickets:  []ticketFact{{Key: "PROJ-1", Summary: "Login fails", Status: "Done", Moved: &moved, URL: "https://acme.atlassian.net/browse/PROJ-1"}}},
 		{Login: "bob", Opened: []prFact{{Ref: "api#2", Title: "Add caching", URL: "https://github.com/acme/api/pull/2"}}},
 		{Login: "carol"},
 		{Login: "dave"},
@@ -241,7 +280,7 @@ func TestSummaryMessage(t *testing.T) {
 	got := printMessage(msg)
 	for _, want := range []string{
 		"*Team summary, Friday 16 to Sunday 18 October*\n_Could not check Jira: no site_",
-		"*alice*\nAlice merged api#1 &amp; reviewed api#2 &lt;b&gt;.\nPRs: <https://github.com/acme/api/pull/1|api#1>, <https://github.com/acme/api/pull/2|api#2>\nTickets: <https://acme.atlassian.net/browse/PROJ-1|PROJ-1>",
+		"*alice*\nAlice merged api#1 &amp; reviewed api#2 &lt;b&gt;.\nPRs: <https://github.com/acme/api/pull/1|api#1>, <https://github.com/acme/api/pull/2|api#2>\nTickets: <https://acme.atlassian.net/browse/PROJ-1|PROJ-1> (Done, moved)",
 		"*bob*\n• Opened <https://github.com/acme/api/pull/2|api#2> Add caching",
 		"No activity: carol, dave.",
 	} {
@@ -257,7 +296,7 @@ func TestSummaryMessage(t *testing.T) {
 	for _, want := range []string{
 		"• Merged <https://github.com/acme/api/pull/1|api#1> Fix &lt;login&gt;",
 		"• Reviewed <https://github.com/acme/api/pull/2|api#2> Add caching (bob)",
-		"• Moved <https://acme.atlassian.net/browse/PROJ-1|PROJ-1> Login fails (Done)",
+		"• Ticket <https://acme.atlassian.net/browse/PROJ-1|PROJ-1> Login fails (Done, moved)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("lists lack %q:\n%s", want, got)
