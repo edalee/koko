@@ -11,9 +11,16 @@ import (
 	"time"
 )
 
-// headlessEntrypoint marks a transcript written by `claude -p`, such as a
-// koko-worker run. Koko never shows these as conversations (plan 036).
-const headlessEntrypoint = "sdk-cli"
+// headlessPrefix starts the entrypoint of every headless run, such as
+// "sdk-cli" for `claude -p` and "sdk-go" for the Go SDK. Koko never shows
+// these as conversations (plan 036).
+const headlessPrefix = "sdk-"
+
+// isHeadless reports whether an entrypoint is a headless run's. "cli" and any
+// other value are interactive. "" (older files) is too.
+func isHeadless(entrypoint string) bool {
+	return strings.HasPrefix(entrypoint, headlessPrefix)
+}
 
 // maxRecentPrompts is how many of the user's prompts a summary keeps.
 const maxRecentPrompts = 10
@@ -69,13 +76,20 @@ func (cs *ClaudeService) summaryOf(path string, head *conversationHead) SessionS
 		return cached
 	}
 
+	if head == nil {
+		// Read once, for the entrypoint and for a title the tail may lack.
+		if _, cached := cachedEntrypoint(path); !cached {
+			h := readConversationHead(path)
+			head = &h
+		}
+	}
 	entrypoint, _ := transcriptEntrypoint(path, head)
 	s := emptySummary()
-	if entrypoint != headlessEntrypoint {
+	if !isHeadless(entrypoint) {
 		s = readSummary(path)
 		if s.Title == "" {
-			// Only when the tail had no title: an older file, or one whose
-			// records near the end are too large to reach.
+			// Only when the tail had no title: an older file with no ai-title,
+			// or one whose last ai-title is more than tailBudget from the end.
 			if head == nil {
 				h := readConversationHead(path)
 				head = &h
@@ -101,15 +115,22 @@ var entrypoints = struct {
 	m  map[string]string
 }{m: make(map[string]string)}
 
-// transcriptEntrypoint returns the entrypoint a session file's first records
-// name: "sdk-cli" for a headless run, "" in older files. written is false
-// while the file has no real record yet, so its kind is not yet known.
-// head is the file's head read, if the caller has one.
-func transcriptEntrypoint(path string, head *conversationHead) (entrypoint string, written bool) {
+// cachedEntrypoint returns a session file's entrypoint if an earlier read
+// found one.
+func cachedEntrypoint(path string) (string, bool) {
 	entrypoints.mu.Lock()
+	defer entrypoints.mu.Unlock()
 	ep, ok := entrypoints.m[path]
-	entrypoints.mu.Unlock()
-	if ok {
+	return ep, ok
+}
+
+// transcriptEntrypoint returns the entrypoint a session file's first records
+// name: "sdk-" and more for a headless run, "cli" for an interactive one, ""
+// in older files. written is false while the file has no real record yet, so
+// its kind is not yet known. head is the file's head read, if the caller has
+// one.
+func transcriptEntrypoint(path string, head *conversationHead) (entrypoint string, written bool) {
+	if ep, ok := cachedEntrypoint(path); ok {
 		return ep, true
 	}
 
@@ -128,9 +149,27 @@ func transcriptEntrypoint(path string, head *conversationHead) (entrypoint strin
 	return head.entrypoint, head.entrypoint != "" || head.cwd != ""
 }
 
+// withoutHeadlessHistory drops closed sessions whose conversation is a
+// headless run. Records saved before plan 036 can point at one.
+func withoutHeadlessHistory(records []SessionRecord) []SessionRecord {
+	out := make([]SessionRecord, 0, len(records))
+	for _, r := range records {
+		if r.Status == "closed" && r.ClaudeSessionID != "" {
+			if path := sessionFilePath(r.Directory, r.ClaudeSessionID); path != "" {
+				if ep, _ := transcriptEntrypoint(path, nil); isHeadless(ep) {
+					continue
+				}
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // sessionTicket picks the Jira key a session is about. The branch is the
-// strongest sign, then the PR, then the title, then the prompts, newest first.
-// A pr-link record has no PR title, so only its repository and URL are searched.
+// strongest sign, then the PR, then the title. The prompts, newest first, are
+// searched only after those. A pr-link record has no PR title, so only its
+// repository and URL are searched.
 func sessionTicket(s SessionSummary) string {
 	texts := []string{s.Branch}
 	if s.PR != nil {
@@ -165,9 +204,11 @@ type summaryRecord struct {
 	} `json:"message"`
 }
 
-// readSummary walks a session file backwards, newest record first, until it
-// has every field or reaches tailBudget. It leaves the title empty if the walk
-// found none, and leaves Ticket and UpdatedAt to the caller.
+// readSummary walks a session file backwards, newest record first. It stops
+// once it has the title, recap, branch and maxRecentPrompts prompts, or at
+// tailBudget. It then looks for a PR link only in the lines already read.
+// It leaves the title empty if the walk found none, and leaves Ticket and
+// UpdatedAt to the caller.
 //
 // Only prompts the user typed count. Tool results, `!` and `/` commands, task
 // notifications and messages from other sessions have no human origin.
@@ -183,10 +224,25 @@ func readSummary(path string) SessionSummary {
 		return s
 	}
 
-	eachLineBackwards(f, info.Size(), tailBudget, func(line []byte) bool {
+	done := false
+	eachLineBackwards(f, info.Size(), tailBudget, func(line []byte) walk {
+		// Once the branch is known, only a few record types matter. Most
+		// lines are tool output, so this skips decoding them.
+		if s.Branch != "" && !summaryMarkers(line) {
+			return walkOn
+		}
 		var r summaryRecord
 		if err := json.Unmarshal(line, &r); err != nil {
-			return true
+			return walkOn
+		}
+		if done {
+			// The main fields are in. Only a PR link in the lines already read
+			// is still worth taking.
+			if r.Type == "pr-link" && r.PRURL != "" {
+				s.PR = &SessionPR{Number: r.PRNumber, Repo: r.PRRepository, URL: r.PRURL}
+				return walkStop
+			}
+			return walkOn
 		}
 		if s.Branch == "" {
 			s.Branch = r.GitBranch
@@ -221,15 +277,41 @@ func readSummary(path string) SessionSummary {
 				}
 			}
 		}
-		done := s.Title != "" && s.Recap != "" && s.LastPrompt != "" && s.Branch != "" &&
-			s.PR != nil && len(s.RecentPrompts) == maxRecentPrompts
-		return !done
+		done = s.Title != "" && s.Recap != "" && s.Branch != "" &&
+			len(s.RecentPrompts) == maxRecentPrompts
+		switch {
+		case done && s.PR != nil:
+			return walkStop
+		case done:
+			return walkChunk
+		}
+		return walkOn
 	})
 
 	if s.LastPrompt == "" && len(s.RecentPrompts) > 0 {
 		s.LastPrompt = s.RecentPrompts[0].Text
 	}
 	return s
+}
+
+// markers are the byte strings a record needs to hold for readSummary to use
+// it once the branch is known.
+var markers = [][]byte{
+	[]byte(`"ai-title"`),
+	[]byte(`"last-prompt"`),
+	[]byte(`"pr-link"`),
+	[]byte(`"away_summary"`),
+	[]byte(`"human"`),
+}
+
+// summaryMarkers reports whether a raw record may be one readSummary uses.
+func summaryMarkers(line []byte) bool {
+	for _, m := range markers {
+		if bytes.Contains(line, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // isHumanPrompt reports whether a user record is a prompt the user typed.
@@ -251,16 +333,26 @@ func unixMillis(ts string) int64 {
 	return t.UnixMilli()
 }
 
+// walk tells eachLineBackwards what to do after a line.
+type walk int
+
+const (
+	walkOn    walk = iota // go on to the next line
+	walkChunk             // finish the lines already read, then stop
+	walkStop              // stop now
+)
+
 // eachLineBackwards calls fn on each complete line in the last budget bytes of
-// a file, newest first, until fn returns false.
+// a file, newest first, until fn says to stop.
 //
 // It reads tailChunk bytes at a time and carries a part line over to the next
 // read. A line that begins before the budget is never passed on, because only
 // part of it was read.
-func eachLineBackwards(f *os.File, size, budget int64, fn func(line []byte) bool) {
+func eachLineBackwards(f *os.File, size, budget int64, fn func(line []byte) walk) {
 	var carry []byte // text after pos, up to its first newline
+	finishing := false
 	pos := size
-	for pos > 0 && size-pos < budget {
+	for pos > 0 && size-pos < budget && !finishing {
 		n := min(int64(tailChunk), pos, budget-(size-pos))
 		pos -= n
 		buf := make([]byte, int(n)+len(carry))
@@ -273,8 +365,13 @@ func eachLineBackwards(f *os.File, size, budget int64, fn func(line []byte) bool
 			if i < 0 {
 				break
 			}
-			if line := buf[i+1:]; len(line) > 0 && !fn(line) {
-				return
+			if line := buf[i+1:]; len(line) > 0 {
+				switch fn(line) {
+				case walkStop:
+					return
+				case walkChunk:
+					finishing = true
+				}
 			}
 			buf = buf[:i]
 		}

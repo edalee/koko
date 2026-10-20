@@ -347,6 +347,11 @@ export function useSessionTabs() {
                   reconnectError: undefined,
                   // A fresh conversation's id arrives later, on the event.
                   claudeSessionId: claudeSessionId || undefined,
+                  // Another conversation, so the old one's summary no longer
+                  // describes the tab. The same one keeps it until the next poll.
+                  ...(claudeSessionId && claudeSessionId === t.claudeSessionId
+                    ? {}
+                    : { title: undefined, recap: undefined, ticket: undefined }),
                 }
               : t,
           ),
@@ -406,7 +411,7 @@ export function useSessionTabs() {
         // read, the tab's last known one is kept.
         const summary = claudeId
           ? savedSummary(await GetSessionSummary(tab.directory, claudeId).catch(() => null))
-          : null;
+          : { title: undefined, recap: undefined, ticket: undefined };
 
         const newEntry: SessionHistoryEntry = {
           slug: tab.slug,
@@ -414,7 +419,6 @@ export function useSessionTabs() {
           directory: tab.directory,
           createdAt: tab.createdAt,
           closedAt: Date.now(),
-          lastMessage: tab.lastMsg || undefined,
           ...(summary ?? { title: tab.title, recap: tab.recap, ticket: tab.ticket }),
           claudeSessionId: claudeId,
           // Only a worktree Koko created and the user kept. One removed in

@@ -94,6 +94,13 @@ func TestSessionTicket_Order(t *testing.T) {
 		{"then the title", SessionSummary{Branch: "main", Title: "Fix TTL-3 title", RecentPrompts: prompts}, "TTL-3"},
 		{"then the newest prompt", SessionSummary{Branch: "main", Title: "no key", RecentPrompts: prompts}, "NEW-5"},
 		{"lower case is not a key", SessionSummary{Branch: "feat/acme-123"}, ""},
+		{"UTF-8 is not a key", SessionSummary{Title: "fix UTF-8 decoding"}, ""},
+		{"SHA-256 is not a key", SessionSummary{RecentPrompts: []SessionPrompt{{Text: "use SHA-256"}}}, ""},
+		{"CVE-2024-1234 is not a key", SessionSummary{Title: "patch CVE-2024-1234"}, ""},
+		{"GPT-4 is not a key", SessionSummary{Title: "try GPT-4"}, ""},
+		{"ISO-8601 is not a key", SessionSummary{Title: "ISO-8601 dates"}, ""},
+		{"a term does not hide a key after it", SessionSummary{Title: "UTF-8 bug in ACME-77"}, "ACME-77"},
+		{"a digit in the project is not a key", SessionSummary{Title: "see A1B-2"}, ""},
 		{"none", SessionSummary{}, ""},
 	}
 	for _, c := range cases {
@@ -121,7 +128,7 @@ func TestGetSessionSummary_TicketFromBranch(t *testing.T) {
 }
 
 // Two tabs in one repo. Each must get its own conversation, even when the
-// other file is newer. GetLastMessage used to read the newest file.
+// other file is newer. The old preview read the newest file.
 func TestGetSessionSummary_TwoTranscriptsInOneFolder(t *testing.T) {
 	workDir := t.TempDir()
 	projectDir := withFakeHome(t, workDir)
@@ -130,16 +137,13 @@ func TestGetSessionSummary_TwoTranscriptsInOneFolder(t *testing.T) {
 	writeConv(t, projectDir, "tab-b", now, titleLine("Tab B"), humanLine("prompt for B"), assistantLine("reply B"))
 
 	cs := NewClaudeService()
-	for _, c := range []struct{ uuid, title, prompt, reply string }{
-		{"tab-a", "Tab A", "prompt for A", "reply A"},
-		{"tab-b", "Tab B", "prompt for B", "reply B"},
+	for _, c := range []struct{ uuid, title, prompt string }{
+		{"tab-a", "Tab A", "prompt for A"},
+		{"tab-b", "Tab B", "prompt for B"},
 	} {
 		got, _ := cs.GetSessionSummary(workDir, c.uuid)
 		if got.Title != c.title || got.LastPrompt != c.prompt {
 			t.Errorf("%s: got title %q, prompt %q", c.uuid, got.Title, got.LastPrompt)
-		}
-		if msg, _ := cs.GetLastMessage(workDir, c.uuid); msg != c.reply {
-			t.Errorf("%s: last message %q, want %q", c.uuid, msg, c.reply)
 		}
 	}
 }
@@ -163,24 +167,28 @@ func TestGetSessionSummary_NoUUIDIsEmpty(t *testing.T) {
 		if got.RecentPrompts == nil {
 			t.Errorf("%q: prompts must be [] not null", uuid)
 		}
-		if msg, _ := cs.GetLastMessage(workDir, uuid); msg != "" {
-			t.Errorf("%q: last message %q", uuid, msg)
-		}
 	}
 }
 
-// A headless `claude -p` run, such as a koko-worker job, is never shown.
+// A headless run from another tool is never shown. Any "sdk-" entrypoint is
+// headless: `claude -p` writes "sdk-cli" and the Go SDK "sdk-go".
 func TestHeadlessTranscript_EmptySummaryAndNotListed(t *testing.T) {
 	workDir := t.TempDir()
 	projectDir := withFakeHome(t, workDir)
 	now := time.Now()
 	copyFixture(t, projectDir, workDir, "session-headless.jsonl", "headless", now)
+	writeConv(t, projectDir, "go-sdk", now,
+		fmt.Sprintf(`{"type":"user","origin":{"kind":"human"},"cwd":%q,"entrypoint":"sdk-go","message":{"role":"user","content":"call a tool"}}`, workDir),
+		titleLine("Tool call"),
+	)
 	copyFixture(t, projectDir, workDir, "session-mixed.jsonl", "mixed", now.Add(-time.Minute))
 
 	cs := NewClaudeService()
-	got, _ := cs.GetSessionSummary(workDir, "headless")
-	if !reflect.DeepEqual(got, emptySummary()) {
-		t.Errorf("expected an empty summary, got %+v", got)
+	for _, uuid := range []string{"headless", "go-sdk"} {
+		got, _ := cs.GetSessionSummary(workDir, uuid)
+		if !reflect.DeepEqual(got, emptySummary()) {
+			t.Errorf("%s: expected an empty summary, got %+v", uuid, got)
+		}
 	}
 
 	list, err := cs.ListConversations(workDir)
@@ -292,13 +300,13 @@ func TestEachLineBackwards(t *testing.T) {
 
 	collect := func(budget int64) []string {
 		var out []string
-		eachLineBackwards(f, info.Size(), budget, func(line []byte) bool {
+		eachLineBackwards(f, info.Size(), budget, func(line []byte) walk {
 			if len(line) > 10 {
 				out = append(out, "big")
 			} else {
 				out = append(out, string(line))
 			}
-			return true
+			return walkOn
 		})
 		return out
 	}
@@ -311,10 +319,75 @@ func TestEachLineBackwards(t *testing.T) {
 		t.Errorf("cut budget: %v", got)
 	}
 
-	// fn returning false stops the walk.
+	// walkStop stops the walk at once.
 	var n int
-	eachLineBackwards(f, info.Size(), tailBudget, func([]byte) bool { n++; return false })
+	eachLineBackwards(f, info.Size(), tailBudget, func([]byte) walk { n++; return walkStop })
 	if n != 1 {
 		t.Errorf("expected one call, got %d", n)
+	}
+
+	// walkChunk finishes the lines already read, then stops. The first read
+	// holds "last" and the end of the big record, so nothing older is passed.
+	var seen []string
+	eachLineBackwards(f, info.Size(), tailBudget, func(line []byte) walk {
+		seen = append(seen, string(line[:min(len(line), 5)]))
+		return walkChunk
+	})
+	if !reflect.DeepEqual(seen, []string{"last"}) {
+		t.Errorf("walkChunk: %v", seen)
+	}
+}
+
+// The walk stops once it has the title, recap, branch and ten prompts. A PR
+// link further back than what it read by then is not looked for.
+func TestReadSummary_StopsOnceTheMainFieldsAreFound(t *testing.T) {
+	lines := func(withPadding bool) []string {
+		out := []string{prLine("acme/app", "https://github.com/acme/app/pull/7")}
+		if withPadding {
+			out = append(out, fmt.Sprintf(`{"type":"attachment","blob":%q}`, strings.Repeat("p", 3*tailChunk)))
+		}
+		for i := 0; i < maxRecentPrompts; i++ {
+			out = append(out, humanLine(fmt.Sprintf("prompt %d", i)))
+		}
+		return append(out, titleLine("Title"), recapLine("Recap"), branchLine("main"))
+	}
+
+	dir := t.TempDir()
+	far := writeConv(t, dir, "far", time.Now(), lines(true)...)
+	if got := readSummary(far); got.PR != nil {
+		t.Errorf("expected no PR from beyond the stop, got %+v", got.PR)
+	}
+	near := writeConv(t, dir, "near", time.Now(), lines(false)...)
+	if got := readSummary(near); got.PR == nil || got.PR.Number != 7 {
+		t.Errorf("expected the PR within the read, got %+v", got.PR)
+	}
+}
+
+// Closed sessions saved before plan 036 can point at a headless run. They are
+// left out of the history. Tabs and closed sessions of real conversations stay.
+func TestGetSessions_HidesHeadlessHistory(t *testing.T) {
+	workDir := t.TempDir()
+	projectDir := withFakeHome(t, workDir)
+	now := time.Now()
+	copyFixture(t, projectDir, workDir, "session-headless.jsonl", "headless", now)
+	copyFixture(t, projectDir, workDir, "session-mixed.jsonl", "mixed", now)
+
+	cs := &ConfigService{sessionsPath: filepath.Join(t.TempDir(), "sessions.json")}
+	saved := SessionsData{Sessions: []SessionRecord{
+		{Slug: "a-1", Directory: workDir, ClaudeSessionID: "headless", Status: "closed"},
+		{Slug: "a-2", Directory: workDir, ClaudeSessionID: "mixed", Status: "closed"},
+		{Slug: "a-3", Directory: workDir, ClaudeSessionID: "headless", Status: "disconnected"},
+		{Slug: "a-4", Directory: workDir, Status: "closed"},
+	}}
+	if err := cs.SaveSessions(saved); err != nil {
+		t.Fatal(err)
+	}
+
+	var slugs []string
+	for _, r := range cs.GetSessions().Sessions {
+		slugs = append(slugs, r.Slug)
+	}
+	if want := []string{"a-2", "a-3", "a-4"}; !reflect.DeepEqual(slugs, want) {
+		t.Errorf("slugs = %v, want %v", slugs, want)
 	}
 }

@@ -21,7 +21,7 @@ type SessionRecord struct {
 	CreatedAt       int64  `json:"createdAt"`
 	ClosedAt        int64  `json:"closedAt,omitempty"`
 	Status          string `json:"status"`                 // "active", "disconnected", "closed"
-	LastMsg         string `json:"lastMsg,omitempty"`      // last assistant message snippet, from files before plan 036
+	LastMsg         string `json:"lastMsg,omitempty"`      // Claude's last reply, kept only from sessions saved before plan 036
 	WorktreePath    string `json:"worktreePath,omitempty"` // the session's worktree, created by Koko or opened from the Worktrees module
 	// WorktreeCreated is true only when Koko created the worktree. Settings
 	// removes only these in bulk, never one the user made by hand.

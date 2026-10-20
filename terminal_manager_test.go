@@ -234,8 +234,8 @@ func newDetectSession(id string, startedAt, lastSubmitAt time.Time) *session {
 	}
 }
 
-// writeJSONL writes an interactive session file, whose first record names
-// its entrypoint as Claude Code's own do.
+// writeJSONL writes an interactive session file. Its first record names the
+// "cli" entrypoint, as Claude Code's own files do.
 func writeJSONL(t *testing.T, dir, name string, modTime time.Time) {
 	t.Helper()
 	writeJSONLAs(t, dir, name, "cli", modTime)
@@ -354,8 +354,8 @@ func TestDetectClaudeSessionID_RefusesTwoCandidates(t *testing.T) {
 	}
 }
 
-// A koko-worker run in the same directory writes a new file too. It must
-// never become the tab's conversation (plan 036).
+// A headless run from another tool in the same directory writes a new file
+// too. It must never become the tab's conversation (plan 036).
 func TestDetectClaudeSessionID_SkipsHeadlessRuns(t *testing.T) {
 	t.Run("claims the interactive file beside a headless one", func(t *testing.T) {
 		dir := t.TempDir()
@@ -363,7 +363,7 @@ func TestDetectClaudeSessionID_SkipsHeadlessRuns(t *testing.T) {
 		s := newDetectSession("test-mixed", time.Now().Add(-time.Minute), time.Now())
 
 		preExisting := listJSONL(dir)
-		writeJSONLAs(t, dir, "worker.jsonl", headlessEntrypoint, time.Now())
+		writeJSONLAs(t, dir, "headless.jsonl", "sdk-cli", time.Now())
 		writeJSONL(t, dir, "mine.jsonl", time.Now())
 
 		go tm.detectClaudeSessionID(s, dir, preExisting)
@@ -380,7 +380,23 @@ func TestDetectClaudeSessionID_SkipsHeadlessRuns(t *testing.T) {
 		s := newDetectSession("test-headless", time.Now().Add(-time.Minute), time.Now())
 
 		preExisting := listJSONL(dir)
-		writeJSONLAs(t, dir, "worker.jsonl", headlessEntrypoint, time.Now())
+		writeJSONLAs(t, dir, "headless.jsonl", "sdk-cli", time.Now())
+
+		go tm.detectClaudeSessionID(s, dir, preExisting)
+		defer close(s.done)
+
+		if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+			t.Fatalf("expected no capture, got %q", got)
+		}
+	})
+
+	t.Run("claims nothing with only a Go SDK file", func(t *testing.T) {
+		dir := t.TempDir()
+		tm := newTestManager()
+		s := newDetectSession("test-sdk-go", time.Now().Add(-time.Minute), time.Now())
+
+		preExisting := listJSONL(dir)
+		writeJSONLAs(t, dir, "headless.jsonl", "sdk-go", time.Now())
 
 		go tm.detectClaudeSessionID(s, dir, preExisting)
 		defer close(s.done)

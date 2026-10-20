@@ -100,6 +100,7 @@ export interface SessionTab {
   connected: boolean;
   claudeSessionId?: string;
   // Claude's last reply, kept only from sessions saved before plan 036.
+  // Koko no longer shows it.
   lastMsg?: string;
   // The conversation's latest summary (plan 036). Kept on the tab, so a
   // restart or a dead session still shows what it was about.
@@ -123,6 +124,7 @@ export interface SessionHistoryEntry {
   createdAt: number;
   closedAt: number;
   // Claude's last reply, kept only from sessions closed before plan 036.
+  // Koko no longer shows it.
   lastMessage?: string;
   // The conversation's summary when the session closed (plan 036).
   title?: string;

@@ -193,7 +193,7 @@ describe("picker and history show the title and recap (plan 036)", () => {
     expect(screen.getByText("Added retries to the upload client.")).toBeInTheDocument();
   });
 
-  it("history rows show the title, ticket and recap, and old rows their last reply", () => {
+  it("history rows show the title, ticket and recap, and old rows only their name", () => {
     const history: SessionHistoryEntry[] = [
       {
         slug: "app-1",
@@ -232,7 +232,8 @@ describe("picker and history show the title and recap (plan 036)", () => {
     expect(screen.getByText("ACME-123")).toBeInTheDocument();
     expect(screen.getByText("Added retries.")).toBeInTheDocument();
     expect(screen.queryByText("an old reply that must not show")).toBeNull();
-    expect(screen.getByText("Claude's last reply, from before")).toBeInTheDocument();
+    expect(screen.getByText("lib")).toBeInTheDocument();
+    expect(screen.queryByText("Claude's last reply, from before")).toBeNull();
   });
 });
 
@@ -281,6 +282,33 @@ describe("saving the summary (plan 036)", () => {
     const before = result.current.tabs;
     act(() => result.current.rememberSummaries(new Map([["u1", full]])));
     expect(result.current.tabs).toBe(before);
+
+    // An empty summary for the same conversation clears what was kept.
+    act(() => result.current.rememberSummaries(new Map([["u1", summary()]])));
+    expect(result.current.tabs[0]).toMatchObject({
+      title: undefined,
+      recap: undefined,
+      ticket: undefined,
+    });
+  });
+
+  it("clears the summary when a reconnect opens another conversation", async () => {
+    const { result } = renderHook(() => useSessionTabs());
+    await waitFor(() => expect(result.current.tabs).toHaveLength(1));
+    act(() => result.current.rememberSummaries(new Map([["u1", full]])));
+
+    // The same conversation keeps its summary.
+    await act(() => result.current.reconnectTab(result.current.tabs[0]));
+    expect(result.current.tabs[0]).toMatchObject({ title: full.title, ticket: "ACME-123" });
+
+    // A fresh one does not.
+    await act(() => result.current.reconnectTab(result.current.tabs[0], { fresh: true }));
+    expect(result.current.tabs[0]).toMatchObject({
+      claudeSessionId: undefined,
+      title: undefined,
+      recap: undefined,
+      ticket: undefined,
+    });
   });
 });
 

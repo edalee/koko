@@ -367,12 +367,6 @@ export default function App() {
                                 {tab.recap}
                               </p>
                             )}
-                            {/* Sessions saved before plan 036 have only Claude's last reply. */}
-                            {!tab.title && !tab.recap && tab.lastMsg && (
-                              <p className="text-xs text-white/40 italic line-clamp-3 leading-relaxed">
-                                {tab.lastMsg}
-                              </p>
-                            )}
                             {tab.reconnectError && (
                               <p className="text-xs text-error pt-1" role="alert">
                                 {tab.reconnectError}

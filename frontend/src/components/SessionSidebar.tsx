@@ -256,8 +256,9 @@ export default function SessionSidebar({
                                 }`}
                                 onClick={() => onSessionSelect(session.id)}
                                 onKeyDown={(e) => {
-                                  // Only the row itself. Enter on a button inside,
-                                  // or in the rename field, is theirs.
+                                  // Only the row itself. Enter or Space on a button
+                                  // inside the row, or in the rename field, goes to
+                                  // that element.
                                   if (e.target !== e.currentTarget) return;
                                   if (e.key === "Enter" || e.key === " ") {
                                     e.preventDefault();

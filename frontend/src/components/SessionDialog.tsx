@@ -780,12 +780,6 @@ export default function SessionDialog({
                                 {entry.recap}
                               </span>
                             )}
-                            {/* Sessions closed before plan 036 have only Claude's last reply. */}
-                            {!entry.title && !entry.recap && entry.lastMessage && (
-                              <span className="text-[10px] text-muted-foreground/50 block truncate mt-0.5 italic">
-                                {entry.lastMessage}
-                              </span>
-                            )}
                           </div>
                           <span className="text-[10px] text-tertiary shrink-0">
                             {timeAgo(entry.closedAt)}

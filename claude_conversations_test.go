@@ -27,8 +27,9 @@ func titleLine(title string) string {
 	return fmt.Sprintf(`{"type":"ai-title","aiTitle":%q,"sessionId":"s"}`, title)
 }
 
+// userLine is a prompt the user typed, so it has a human origin.
 func userLine(cwd, text string) string {
-	return fmt.Sprintf(`{"type":"user","cwd":%q,"message":{"role":"user","content":[{"type":"text","text":%q}]}}`, cwd, text)
+	return fmt.Sprintf(`{"type":"user","cwd":%q,"origin":{"kind":"human"},"message":{"role":"user","content":[{"type":"text","text":%q}]}}`, cwd, text)
 }
 
 func assistantLine(text string) string {
@@ -62,6 +63,7 @@ func TestReadConversationHead_FallsBackToFirstPrompt(t *testing.T) {
 		`{"type":"system","cwd":"/repo","isMeta":true}`,
 		`{"type":"user","cwd":"/repo","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"injected context"}]}}`,
 		`{"type":"user","cwd":"/repo","isSidechain":true,"message":{"role":"user","content":[{"type":"text","text":"subagent turn"}]}}`,
+		`{"type":"user","cwd":"/repo","message":{"role":"user","content":"<bash-input>git status</bash-input>"}}`,
 		userLine("/repo", "the real first prompt"),
 	)
 
@@ -110,46 +112,10 @@ func TestReadConversationHead_SalvagesCWDFromAHugeRecord(t *testing.T) {
 func TestReadConversationHead_HandlesStringContent(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConv(t, dir, "c", time.Now(),
-		`{"type":"user","cwd":"/repo","message":{"role":"user","content":"a bare string"}}`,
+		`{"type":"user","cwd":"/repo","origin":{"kind":"human"},"message":{"role":"user","content":"a bare string"}}`,
 	)
 	if got := readConversationHead(path).title; got != "a bare string" {
 		t.Errorf("title = %q", got)
-	}
-}
-
-// A single attachment record can be far larger than one read window. The tail
-// reader must step back past it rather than stop inside it.
-func TestLastAssistantText_ReadsPastAHugeRecord(t *testing.T) {
-	dir := t.TempDir()
-	huge := fmt.Sprintf(`{"type":"attachment","blob":%q}`, strings.Repeat("x", 200*1024))
-	path := writeConv(t, dir, "d", time.Now(),
-		titleLine("t"),
-		assistantLine("the message worth showing"),
-		huge,
-		`{"type":"last-prompt"}`,
-	)
-
-	if got := lastAssistantText(path); got != "the message worth showing" {
-		t.Fatalf("expected the assistant message, got %q", got)
-	}
-}
-
-func TestLastAssistantText_TakesTheLastOne(t *testing.T) {
-	dir := t.TempDir()
-	path := writeConv(t, dir, "e", time.Now(),
-		assistantLine("first"),
-		assistantLine("second"),
-	)
-	if got := lastAssistantText(path); got != "second" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestLastAssistantText_EmptyWhenNone(t *testing.T) {
-	dir := t.TempDir()
-	path := writeConv(t, dir, "f", time.Now(), titleLine("t"), userLine("/repo", "hello"))
-	if got := lastAssistantText(path); got != "" {
-		t.Errorf("expected empty, got %q", got)
 	}
 }
 
