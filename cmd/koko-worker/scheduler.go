@@ -303,14 +303,14 @@ func recordRun(st *State, run DueRun, status, message string, now time.Time) {
 }
 
 // manualSlots is what a real "Run now" of job covers, so the scheduler does
-// not repeat it. The stand-up is once a day, so it covers all of today's
-// slots. Other jobs cover the slots that are already due.
+// not repeat it. The stand-up and the summary are once a day, so they cover
+// all of today's slots. Other jobs cover the slots that are already due.
 func manualSlots(cfg Config, job string, now time.Time) []time.Time {
 	now = now.In(cfg.location())
 	var out []time.Time
 	for _, clock := range cfg.Jobs[job].Times {
 		slot := atClock(now, clock)
-		if job == JobStandup || !now.Before(slot) {
+		if job == JobStandup || job == JobSummary || !now.Before(slot) {
 			out = append(out, slot)
 		}
 	}
