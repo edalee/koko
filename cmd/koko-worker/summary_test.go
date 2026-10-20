@@ -1,0 +1,584 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestSummaryPeriod(t *testing.T) {
+	weekdays := JobConfig{Enabled: true, Times: []string{"08:30"}}
+	utc := time.UTC
+	cases := []struct {
+		name       string
+		job        JobConfig
+		now        time.Time
+		start, end string
+		label      string
+	}{
+		{"a normal weekday", weekdays, time.Date(2026, 10, 20, 8, 30, 0, 0, cet),
+			"2026-10-19 00:00 CEST", "2026-10-20 00:00 CEST", "Monday 19 October"},
+		{"Monday after a weekend", weekdays, time.Date(2026, 10, 19, 8, 30, 0, 0, cet),
+			"2026-10-16 00:00 CEST", "2026-10-19 00:00 CEST", "Friday 16 to Sunday 18 October"},
+		{"a weekly job", JobConfig{Days: []string{"mon"}}, time.Date(2026, 10, 19, 8, 30, 0, 0, cet),
+			"2026-10-12 00:00 CEST", "2026-10-19 00:00 CEST", "Monday 12 to Sunday 18 October"},
+		{"a run on a day off", weekdays, time.Date(2026, 10, 24, 10, 0, 0, 0, cet),
+			"2026-10-23 00:00 CEST", "2026-10-24 00:00 CEST", "Friday 23 October"},
+		{"late in UTC is the next day in Paris", weekdays, time.Date(2026, 10, 19, 23, 30, 0, 0, utc),
+			"2026-10-19 00:00 CEST", "2026-10-20 00:00 CEST", "Monday 19 October"},
+		{"across a month", weekdays, time.Date(2026, 11, 2, 8, 30, 0, 0, cet),
+			"2026-10-30 00:00 CET", "2026-11-02 00:00 CET", "Friday 30 October to Sunday 1 November"},
+	}
+	for _, c := range cases {
+		start, end, _ := summaryPeriod(c.job, c.now, cet, time.Time{})
+		const f = "2006-01-02 15:04 MST"
+		if start.Format(f) != c.start || end.Format(f) != c.end {
+			t.Errorf("%s: got %s to %s, want %s to %s", c.name, start.Format(f), end.Format(f), c.start, c.end)
+		}
+		if got := periodLabel(start, end); got != c.label {
+			t.Errorf("%s: label %q, want %q", c.name, got, c.label)
+		}
+	}
+
+	// Summer time ends on Sunday 25 October, so that weekend is an hour longer.
+	start, end, _ := summaryPeriod(weekdays, time.Date(2026, 10, 26, 8, 30, 0, 0, cet), cet, time.Time{})
+	if start.Format("Mon 15:04 MST") != "Fri 00:00 CEST" || end.Format("Mon 15:04 MST") != "Mon 00:00 CET" || end.Sub(start) != 73*time.Hour {
+		t.Errorf("over the clock change: %s to %s (%s)", start, end, end.Sub(start))
+	}
+}
+
+func TestSummaryPeriodFromCovered(t *testing.T) {
+	weekdays := JobConfig{Enabled: true, Times: []string{"08:30"}}
+	tuesday := time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
+	const f = "Mon 2 15:04"
+	cases := []struct {
+		name           string
+		covered        time.Time
+		start, skipped string
+	}{
+		// Monday's summary did not run, so Tuesday's covers Friday to Monday.
+		{"a missed run", time.Date(2026, 10, 16, 0, 0, 0, 0, cet), "Fri 16 00:00", ""},
+		{"the usual day", time.Date(2026, 10, 19, 0, 0, 0, 0, cet), "Mon 19 00:00", ""},
+		{"exactly 7 days", time.Date(2026, 10, 13, 0, 0, 0, 0, cet), "Tue 13 00:00", ""},
+		// The cap says where the days it leaves out begin.
+		{"more than 7 days", time.Date(2026, 9, 1, 0, 0, 0, 0, cet), "Tue 13 00:00", "Tue 1 00:00"},
+		// A second run on the same day repeats today's summary.
+		{"today already covered", time.Date(2026, 10, 20, 0, 0, 0, 0, cet), "Mon 19 00:00", ""},
+		{"nothing covered yet", time.Time{}, "Mon 19 00:00", ""},
+	}
+	for _, c := range cases {
+		start, end, skipped := summaryPeriod(weekdays, tuesday, cet, c.covered)
+		if start.Format(f) != c.start || end.Format(f) != "Tue 20 00:00" {
+			t.Errorf("%s: got %s to %s, want %s to Tue 20 00:00", c.name, start.Format(f), end.Format(f), c.start)
+		}
+		got := ""
+		if !skipped.IsZero() {
+			got = skipped.Format(f)
+		}
+		if got != c.skipped {
+			t.Errorf("%s: skipped from %q, want %q", c.name, got, c.skipped)
+		}
+	}
+}
+
+// fakeSummaryGH stands in for gh: it answers each GraphQL call with a reply
+// built from the call's searches, and records the calls.
+type fakeSummaryGH struct {
+	calls [][]string
+	reply func(queries map[string]string) (string, error)
+}
+
+func (f *fakeSummaryGH) install(t *testing.T) {
+	saved := summaryGH
+	summaryGH = func(_ context.Context, args ...string) ([]byte, error) {
+		f.calls = append(f.calls, args)
+		queries := map[string]string{}
+		for i, a := range args {
+			if i > 0 && args[i-1] == "-f" && strings.HasPrefix(a, "q") {
+				k, v, _ := strings.Cut(a, "=")
+				queries[k] = v
+			}
+		}
+		out, err := f.reply(queries)
+		return []byte(out), err
+	}
+	t.Cleanup(func() { summaryGH = saved })
+}
+
+// summaryNode is PR n in acme/api by author, as GraphQL JSON. Each review is
+// "login@time" or "login@time@STATE", and an empty time is a pending review.
+func summaryNode(n int, author, created, merged string, reviews ...string) map[string]any {
+	var rs []map[string]any
+	for _, r := range reviews {
+		parts := strings.Split(r, "@")
+		state := "APPROVED"
+		if len(parts) > 2 {
+			state = parts[2]
+		}
+		typ := "User"
+		if strings.HasSuffix(parts[0], "[bot]") {
+			typ = "Bot"
+		}
+		var at any = parts[1]
+		if parts[1] == "" {
+			at = nil
+		}
+		rs = append(rs, map[string]any{"author": map[string]any{"login": parts[0], "__typename": typ}, "submittedAt": at, "state": state})
+	}
+	var m any = merged
+	if merged == "" {
+		m = nil
+	}
+	return map[string]any{
+		"url": "https://github.com/acme/api/pull/" + strconv.Itoa(n), "number": n, "title": "Change " + strconv.Itoa(n),
+		"createdAt": created, "mergedAt": m, "headRefName": "feature/PROJ-" + strconv.Itoa(n),
+		"repository": map[string]any{"nameWithOwner": "acme/api"},
+		"author":     map[string]any{"login": author, "__typename": "User"},
+		"reviews":    map[string]any{"nodes": rs},
+	}
+}
+
+func jsonString(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+func TestSearchActivity(t *testing.T) {
+	start := time.Date(2026, 10, 16, 0, 0, 0, 0, cet)
+	s := SummaryConfig{Team: "acme/platform", Repos: []string{"acme/api", "acme/platform"}}
+	logins := []string{"a1", "a2", "a3", "a4", "a5", "bob"}
+	f := &fakeSummaryGH{reply: func(q map[string]string) (string, error) {
+		if strings.Contains(q["q0"], "author:bob ") {
+			return "", errors.New("gh api: HTTP 502")
+		}
+		data := map[string]any{}
+		for k := range q {
+			alias := "s" + strings.TrimPrefix(k, "q")
+			data[alias] = map[string]any{"issueCount": 0, "nodes": []any{}}
+		}
+		data["s0"] = map[string]any{"issueCount": 60, "nodes": []any{summaryNode(1, "a1", "2026-10-16T09:00:00Z", "")}}
+		return jsonString(map[string]any{"data": data}), nil
+	}}
+	f.install(t)
+
+	prs, more, notes, err := searchActivity(context.Background(), s, logins, start)
+	if len(f.calls) != 2 {
+		t.Fatalf("gh calls = %d, want 2 (5 members, then 1)", len(f.calls))
+	}
+	joined := strings.Join(f.calls[0], " ")
+	for _, want := range []string{
+		"q0=is:pr author:a1 updated:>=2026-10-15T22:00:00Z repo:acme/api repo:acme/platform",
+		"q1=is:pr reviewed-by:a1 updated:>=2026-10-15T22:00:00Z",
+		"q9=is:pr reviewed-by:a5 ",
+		"$q9: String!",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("first call lacks %q:\n%s", want, joined)
+		}
+	}
+	if err == nil || len(notes) != 1 || !strings.Contains(notes[0], "Could not read GitHub for bob") {
+		t.Errorf("failed batch: err %v, notes %q", err, notes)
+	}
+	if len(prs) != 1 || !more["a1"] || more["a2"] {
+		t.Errorf("prs %d, more %v", len(prs), more)
+	}
+
+	// Without repos, the search covers the team's org.
+	if got := summaryScope(SummaryConfig{Team: "acme/platform"}); got != "org:acme" {
+		t.Errorf("scope = %q", got)
+	}
+}
+
+func decodePRs(t *testing.T, nodes ...map[string]any) map[string]summaryPR {
+	t.Helper()
+	out := map[string]summaryPR{}
+	for _, n := range nodes {
+		var p summaryPR
+		if err := json.Unmarshal([]byte(jsonString(n)), &p); err != nil {
+			t.Fatal(err)
+		}
+		out[p.URL] = p
+	}
+	return out
+}
+
+func TestBuildFacts(t *testing.T) {
+	start := time.Date(2026, 10, 16, 0, 0, 0, 0, cet)
+	end := time.Date(2026, 10, 19, 0, 0, 0, 0, cet)
+	bodyKey := summaryNode(2, "bob", "2026-10-17T09:00:00Z", "",
+		"alice@2026-10-17T10:00:00Z", "alice@2026-10-17T11:00:00Z@COMMENTED", "bob@2026-10-17T12:00:00Z@COMMENTED",
+		"review-app[bot]@2026-10-17T10:00:00Z@COMMENTED", "carol@@PENDING")
+	bodyKey["headRefName"], bodyKey["body"] = "feature/cache", "Closes PROJ-22."
+	other := summaryNode(9, "alice", "2026-10-16T09:00:00Z", "2026-10-16T10:00:00Z")
+	other["repository"] = map[string]any{"nameWithOwner": "acme/website"}
+	prs := decodePRs(t,
+		// alice merged #1, opened the week before.
+		summaryNode(1, "alice", "2026-10-12T09:00:00Z", "2026-10-16T15:00:00Z", "bob@2026-10-13T09:00:00Z"),
+		// bob opened #2. alice reviewed it twice, bob replied to himself, a bot
+		// reviewed, and carol's review is pending.
+		bodyKey,
+		// Merged after the period ended, in Paris time.
+		summaryNode(3, "bob", "2026-10-12T09:00:00Z", "2026-10-18T22:30:00Z"),
+		// In a repo outside the summary's repos.
+		other,
+	)
+	s := SummaryConfig{Team: "acme/platform", Repos: []string{"acme/api"}}
+	people := buildFacts(s, []string{"carol", "bob", "alice"}, prs, map[string]bool{"bob": true}, start, end)
+	if len(people) != 3 || people[0].Login != "alice" || people[2].Login != "carol" {
+		t.Fatalf("people = %+v", people)
+	}
+	alice, bob, carol := people[0], people[1], people[2]
+	if len(alice.Merged) != 1 || alice.Merged[0].Ref != "api#1" || len(alice.Opened) != 0 {
+		t.Errorf("alice merged/opened = %+v / %+v", alice.Merged, alice.Opened)
+	}
+	if len(alice.Reviewed) != 1 || alice.Reviewed[0].Ref != "api#2" || alice.Reviewed[0].Author != "bob" {
+		t.Errorf("alice reviewed = %+v", alice.Reviewed)
+	}
+	if len(bob.Opened) != 1 || len(bob.Merged) != 0 || len(bob.Reviewed) != 0 || !bob.More {
+		t.Errorf("bob = %+v", bob)
+	}
+	if carol.active() {
+		t.Errorf("carol = %+v, want no activity", carol)
+	}
+	// #1 names its ticket in the branch, #2 only in the body.
+	if keys := strings.Join(ticketKeys(people), ","); keys != "PROJ-1,PROJ-22" {
+		t.Errorf("ticket keys = %q", keys)
+	}
+	tickets := map[string]jiraTicket{
+		"PROJ-1":  {Key: "PROJ-1", Summary: "Login fails", Status: "Done"},
+		"PROJ-22": {Key: "PROJ-22", Summary: "Add caching", Status: "In Review"},
+	}
+	addTickets(people, tickets, map[string]bool{"PROJ-22": true})
+	if a, b := people[0].Tickets, people[1].Tickets; len(a) != 1 || a[0].statusText() != "Done" || len(b) != 1 || b[0].statusText() != "In Review, moved" {
+		t.Errorf("tickets: alice %+v, bob %+v", a, b)
+	}
+	// Without the search, the status shows and nothing claims a move.
+	people[0].Tickets = nil
+	addTickets(people[:1], tickets, nil)
+	if a := people[0].Tickets; len(a) != 1 || a[0].Moved != nil || a[0].statusText() != "Done" {
+		t.Errorf("unknown moves: %+v", a)
+	}
+}
+
+func TestSummaryLogins(t *testing.T) {
+	got := summaryLogins(map[string]bool{"bob": true, "alice": true, "ci[bot]": true, "x y": true})
+	if strings.Join(got, ",") != "alice,bob" {
+		t.Errorf("logins = %v", got)
+	}
+}
+
+func summaryPeople() []personFacts {
+	moved := true
+	return []personFacts{
+		{Login: "alice",
+			Merged:   []prFact{{Ref: "api#1", Title: "Fix <login>", URL: "https://github.com/acme/api/pull/1"}},
+			Reviewed: []prFact{{Ref: "api#2", Title: "Add caching", Author: "bob", URL: "https://github.com/acme/api/pull/2"}},
+			Tickets:  []ticketFact{{Key: "PROJ-1", Summary: "Login fails", Status: "Done", Moved: &moved, URL: "https://acme.atlassian.net/browse/PROJ-1"}}},
+		{Login: "bob", Opened: []prFact{{Ref: "api#2", Title: "Add caching", URL: "https://github.com/acme/api/pull/2"}}},
+		{Login: "carol"},
+		{Login: "dave"},
+	}
+}
+
+func TestSummaryMessage(t *testing.T) {
+	people := summaryPeople()
+	msg := summaryMessage("Friday 16 to Sunday 18 October", people,
+		map[string]string{"alice": "Alice merged api#1 & reviewed api#2 <b>."}, []string{"Could not check Jira: no site"})
+	got := printMessage(msg)
+	for _, want := range []string{
+		"*Team summary, Friday 16 to Sunday 18 October*\n_Could not check Jira: no site_",
+		"*alice*\nAlice merged api#1 &amp; reviewed api#2 &lt;b&gt;.\nPRs: <https://github.com/acme/api/pull/1|api#1>, <https://github.com/acme/api/pull/2|api#2>\nTickets: <https://acme.atlassian.net/browse/PROJ-1|PROJ-1> (Done, moved)",
+		"*bob*\n• Opened <https://github.com/acme/api/pull/2|api#2> Add caching",
+		"No activity: carol, dave.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message lacks %q:\n%s", want, got)
+		}
+	}
+	if len(msg.Sections) != 4 {
+		t.Errorf("sections = %d, want header, alice, bob and the no-activity line", len(msg.Sections))
+	}
+	// Without a paragraph, alice gets lists, with titles escaped.
+	got = personSection(people[0], "")
+	for _, want := range []string{
+		"• Merged <https://github.com/acme/api/pull/1|api#1> Fix &lt;login&gt;",
+		"• Reviewed <https://github.com/acme/api/pull/2|api#2> Add caching (bob)",
+		"• Ticket <https://acme.atlassian.net/browse/PROJ-1|PROJ-1> Login fails (Done, moved)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lists lack %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestParseProse(t *testing.T) {
+	people := summaryPeople()[:2]
+	text := "```json\n" + `{"alice": "Alice merged api#1 and closed PROJ-1.", "bob": "Bob opened api#2 and api#7.", "mallory": "Hi."}` + "\n```"
+	got, dropped, err := parseProse(text, people)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["alice"] == "" || got["bob"] != "" || got["mallory"] != "" || strings.Join(dropped, ",") != "bob" {
+		t.Errorf("paragraphs = %v, dropped %v, want alice only (bob names a PR not in his facts)", got, dropped)
+	}
+	if _, _, err := parseProse("I cannot help with that.", people); err == nil {
+		t.Error("want an error for a reply without JSON")
+	}
+	if p := prosePrompt("Monday 19 October", people); !strings.Contains(p, `"ref": "api#1"`) || strings.Contains(p, "https://") {
+		t.Errorf("prompt should carry refs and no URLs:\n%s", p)
+	}
+}
+
+func TestSummaryProseFallsBackToLists(t *testing.T) {
+	cfg := defaultConfig()
+	// A zero claudeRunner cannot write its settings file, so the call fails.
+	env := Env{cfg: cfg, claude: claudeRunner{}}
+	got := printMessage(summaryProseMessage(context.Background(), env, "Monday 19 October", summaryPeople(), nil))
+	if !strings.Contains(got, "_Claude could not write the paragraphs, so this lists the facts:") ||
+		!strings.Contains(got, "• Merged <https://github.com/acme/api/pull/1|api#1>") {
+		t.Errorf("fallback:\n%s", got)
+	}
+	// Prose off: lists, and no note.
+	env.cfg.Summary.Prose = false
+	got = printMessage(summaryProseMessage(context.Background(), env, "Monday 19 October", summaryPeople(), nil))
+	if strings.Contains(got, "Claude") || !strings.Contains(got, "• Opened") {
+		t.Errorf("prose off:\n%s", got)
+	}
+}
+
+func TestParseJiraSearch(t *testing.T) {
+	issue := `{"key": "PROJ-1", "webUrl": "https://acme.atlassian.net/browse/PROJ-1", "fields": {"summary": "Login fails", "status": {"name": "Done", "statusCategory": {"key": "done"}}}}`
+	for _, raw := range []string{`{"issues": [` + issue + `]}`, `{"issues": {"nodes": [` + issue + `]}}`} {
+		got, ok := parseJiraSearch(raw)
+		if !ok || len(got) != 1 || got[0].Key != "PROJ-1" || got[0].Status != "Done" {
+			t.Errorf("%s: got %+v, %v", raw, got, ok)
+		}
+	}
+	// An empty list is a real answer: nothing moved.
+	for _, raw := range []string{`{"issues": []}`, `{"issues": {"nodes": []}}`} {
+		if got, ok := parseJiraSearch(raw); !ok || len(got) != 0 {
+			t.Errorf("%s: got %+v, %v", raw, got, ok)
+		}
+	}
+	// Anything else is not, such as a JQL error in plain text.
+	for _, raw := range []string{"not json", `{"errorMessages": ["The value 'X-1' does not exist"]}`, `{"issues": {"total": 0}}`} {
+		if got, ok := parseJiraSearch(raw); ok {
+			t.Errorf("%s: got %+v, want not ok", raw, got)
+		}
+	}
+}
+
+func TestSummaryConfig(t *testing.T) {
+	def := defaultConfig()
+	job := def.Jobs[JobSummary]
+	if job.Enabled || strings.Join(job.Times, ",") != "08:30" || len(job.Days) != 0 || !def.Summary.Jira || !def.Summary.Prose {
+		t.Errorf("defaults: job %+v, summary %+v", job, def.Summary)
+	}
+	path := t.TempDir() + "/worker.json"
+	body := `{"summary": {"team": " acme/platform ", "repos": [" acme/api ", ""]}, "jobs": {"summary": {"enabled": true}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.Summary
+	if s.Team != "acme/platform" || strings.Join(s.Repos, ",") != "acme/api" || !s.Jira || !s.Prose {
+		t.Errorf("loaded = %+v", s)
+	}
+	if strings.Join(cfg.Jobs[JobSummary].Times, ",") != "08:30" {
+		t.Errorf("times = %v", cfg.Jobs[JobSummary].Times)
+	}
+	if err := s.problem(); err != nil {
+		t.Errorf("problem = %v", err)
+	}
+	for _, bad := range []SummaryConfig{{}, {Team: "platform"}, {Team: "acme/"}, {Team: "acme/platform", Repos: []string{"api"}}} {
+		if bad.problem() == nil {
+			t.Errorf("%+v: want a problem", bad)
+		}
+	}
+	// A bad summary team does not stop the other jobs.
+	cfg.Summary.Team = "platform"
+	if err := cfg.validate(); err != nil {
+		t.Errorf("validate = %v", err)
+	}
+	if got := manualSlots(cfg, JobSummary, time.Date(2026, 10, 19, 7, 0, 0, 0, cet)); len(got) != 1 {
+		t.Errorf("a summary run by hand before 08:30 covers %v", got)
+	}
+}
+
+// TestRunSummaryCoversMissedDays runs whole summaries against a fake gh and
+// a state file. A missed run's day goes into the next summary, no day is
+// counted twice, and a test run leaves the stored end alone.
+func TestRunSummaryCoversMissedDays(t *testing.T) {
+	// alice merged #1 on Monday 19 October.
+	f := &fakeSummaryGH{reply: func(q map[string]string) (string, error) {
+		data := map[string]any{}
+		for k := range q {
+			data["s"+strings.TrimPrefix(k, "q")] = map[string]any{"issueCount": 0, "nodes": []any{}}
+		}
+		data["s0"] = map[string]any{"issueCount": 1, "nodes": []any{summaryNode(1, "alice", "2026-10-15T09:00:00Z", "2026-10-19T10:00:00Z")}}
+		return jsonString(map[string]any{"data": data}), nil
+	}}
+	f.install(t)
+	saved := summaryMembers
+	summaryMembers = func(context.Context, string) (map[string]bool, error) {
+		return map[string]bool{"alice": true, "bob": true}, nil
+	}
+	t.Cleanup(func() { summaryMembers = saved })
+
+	cfg := defaultConfig()
+	cfg.TimeZone = "Europe/Paris"
+	cfg.Summary = SummaryConfig{Team: "acme/platform"} // no Jira, no prose
+	dir := t.TempDir()
+	paths := Paths{State: dir + "/state.json", Settings: dir + "/claude-settings.json"}
+	run := func(now time.Time, test bool) string {
+		t.Helper()
+		env := newEnv(cfg, paths, test)
+		env.now = now
+		var got string
+		env.send = func(_ context.Context, msg Message) error { got = printMessage(msg); return nil }
+		if err := runSummary(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	covered := func() string { return loadState(paths.State).SummaryCovered.In(cet).Format("Mon 2 15:04") }
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 8, 30, 0, 0, cet) }
+
+	// Friday's run has nothing stored, so it covers Thursday.
+	if got := run(day(16), false); !strings.Contains(got, "*Team summary, Thursday 15 October*") {
+		t.Errorf("Friday:\n%s", got)
+	}
+	if covered() != "Fri 16 00:00" {
+		t.Errorf("after Friday, covered to %s", covered())
+	}
+	// Monday's run is missed. A test run on Tuesday leaves the stored end.
+	if got := run(day(20), true); !strings.Contains(got, "Friday 16 to Monday 19 October") {
+		t.Errorf("Tuesday test:\n%s", got)
+	}
+	if covered() != "Fri 16 00:00" {
+		t.Errorf("a test run moved the end to %s", covered())
+	}
+	// Tuesday covers Friday to Monday, so Monday's merge is in it.
+	got := run(day(20), false)
+	if !strings.Contains(got, "Friday 16 to Monday 19 October") || !strings.Contains(got, "api#1") || !strings.Contains(got, "No activity: bob.") {
+		t.Errorf("Tuesday:\n%s", got)
+	}
+	if covered() != "Tue 20 00:00" {
+		t.Errorf("after Tuesday, covered to %s", covered())
+	}
+	// Wednesday covers Tuesday only, so Monday's merge is not counted again.
+	got = run(day(21), false)
+	if !strings.Contains(got, "*Team summary, Tuesday 20 October*") || strings.Contains(got, "api#1") {
+		t.Errorf("Wednesday:\n%s", got)
+	}
+	last := strings.Join(f.calls[len(f.calls)-1], " ")
+	if !strings.Contains(last, "updated:>=2026-10-19T22:00:00Z") {
+		t.Errorf("Wednesday searched from the wrong time: %s", last)
+	}
+}
+
+// A paragraph may name any key its person's PRs carry in their titles or
+// branches, even with Jira off or for a PR they only reviewed.
+func TestParseProseAllowsKeysFromThePRs(t *testing.T) {
+	people := []personFacts{
+		{Login: "alice", Reviewed: []prFact{{Ref: "api#2", Title: "CON-184: add caching", Author: "bob"}}},
+		{Login: "bob", Merged: []prFact{{Ref: "api#3", Title: "Read files as UTF-8", branch: "fix/PROJ-9-encoding"}}},
+		{Login: "carol", Opened: []prFact{{Ref: "api#4", Title: "Tidy up", key: "PROJ-12"}}},
+		{Login: "dave", Opened: []prFact{{Ref: "api#5", Title: "Tidy up"}}},
+	}
+	text := `{"alice": "alice reviewed api#2 for CON-184.", "bob": "bob merged api#3 (PROJ-9), which reads UTF-8.",
+		"carol": "carol opened api#4 for PROJ-12.", "dave": "dave opened api#5 for PROJ-77."}`
+	got, dropped, err := parseProse(text, people)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["alice"] == "" || got["bob"] == "" || got["carol"] == "" || got["dave"] != "" || strings.Join(dropped, ",") != "dave" {
+		t.Errorf("paragraphs = %v, dropped %v, want all but dave", got, dropped)
+	}
+	// dave still shows, as lists.
+	msg := printMessage(summaryMessage("Monday 19 October", people, got, nil))
+	if !strings.Contains(msg, "*dave*\n• Opened") {
+		t.Errorf("dave is missing:\n%s", msg)
+	}
+}
+
+// fakeSummaryRun installs a fake gh that answers with reply, and a fake team
+// of alice and bob, and returns the config and paths for runSummary.
+func fakeSummaryRun(t *testing.T, reply func(q map[string]string) (string, error)) (*fakeSummaryGH, Config, Paths) {
+	t.Helper()
+	f := &fakeSummaryGH{reply: reply}
+	f.install(t)
+	saved := summaryMembers
+	summaryMembers = func(context.Context, string) (map[string]bool, error) {
+		return map[string]bool{"alice": true, "bob": true}, nil
+	}
+	t.Cleanup(func() { summaryMembers = saved })
+	cfg := defaultConfig()
+	cfg.TimeZone = "Europe/Paris"
+	cfg.Summary = SummaryConfig{Team: "acme/platform"} // no Jira, no prose
+	dir := t.TempDir()
+	return f, cfg, Paths{State: dir + "/state.json", Settings: dir + "/claude-settings.json"}
+}
+
+func emptyReply(q map[string]string) (string, error) {
+	data := map[string]any{}
+	for k := range q {
+		data["s"+strings.TrimPrefix(k, "q")] = map[string]any{"issueCount": 0, "nodes": []any{}}
+	}
+	return jsonString(map[string]any{"data": data}), nil
+}
+
+// A failed GitHub batch sends no DM and keeps the stored end, so the
+// scheduler's retry, or the next summary, still covers the period.
+func TestRunSummaryRetriesAFailedBatch(t *testing.T) {
+	_, cfg, paths := fakeSummaryRun(t, func(map[string]string) (string, error) {
+		return "", errors.New("gh api: HTTP 502")
+	})
+	covered := time.Date(2026, 10, 19, 0, 0, 0, 0, cet)
+	if err := saveState(paths.State, State{SummaryCovered: covered}); err != nil {
+		t.Fatal(err)
+	}
+	env := newEnv(cfg, paths, false)
+	env.now = time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
+	sent := false
+	env.send = func(context.Context, Message) error { sent = true; return nil }
+	err := runSummary(context.Background(), env)
+	var reported reportedError
+	if err == nil || errors.As(err, &reported) || !strings.Contains(err.Error(), "Could not read GitHub for alice, bob") {
+		t.Errorf("err = %v, want a retryable error naming the members", err)
+	}
+	if sent {
+		t.Error("a DM went out without some members")
+	}
+	if got := loadState(paths.State).SummaryCovered; !got.Equal(covered) {
+		t.Errorf("stored end moved to %s", got)
+	}
+}
+
+// After more than 7 days without a summary, the DM names the days it leaves out.
+func TestRunSummaryNotesSkippedDays(t *testing.T) {
+	_, cfg, paths := fakeSummaryRun(t, emptyReply)
+	if err := saveState(paths.State, State{SummaryCovered: time.Date(2026, 10, 5, 0, 0, 0, 0, cet)}); err != nil {
+		t.Fatal(err)
+	}
+	env := newEnv(cfg, paths, false)
+	env.now = time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
+	var got string
+	env.send = func(_ context.Context, msg Message) error { got = printMessage(msg); return nil }
+	if err := runSummary(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"*Team summary, Tuesday 13 to Monday 19 October*",
+		"_No summary ran for more than 7 days, so this leaves out Monday 5 to Monday 12 October._",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message lacks %q:\n%s", want, got)
+		}
+	}
+}

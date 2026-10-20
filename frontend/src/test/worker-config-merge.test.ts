@@ -96,3 +96,27 @@ describe("canonicalZone", () => {
     expect(canonicalZone("Local")).toBeNull();
   });
 });
+
+describe("merge for the summary", () => {
+  it("starts off at 08:30 on weekdays, with no team and Jira and prose on", () => {
+    const cfg = merge("{}");
+    expect(cfg.summary).toEqual({ team: "", repos: [], jira: true, prose: true });
+    expect(cfg.jobs.summary).toEqual({
+      enabled: false,
+      times: ["08:30"],
+      days: ["mon", "tue", "wed", "thu", "fri"],
+    });
+  });
+
+  it("keeps saved settings and turns null repos into an empty list", () => {
+    const cfg = merge(
+      JSON.stringify({
+        summary: { team: "acme/platform", repos: null, prose: false },
+        jobs: { summary: { enabled: true, times: ["09:00"], days: ["mon"] } },
+      }),
+    );
+    expect(cfg.summary).toEqual({ team: "acme/platform", repos: [], jira: true, prose: false });
+    expect(cfg.jobs.summary.days).toEqual(["mon"]);
+    expect(cfg.jobs.standup.times).toEqual(["07:00"]);
+  });
+});

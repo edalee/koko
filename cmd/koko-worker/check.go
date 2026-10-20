@@ -19,7 +19,7 @@ type CheckResult struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
-var checkNames = []string{"slack", "github", "claude", "jira", "calendar", "reviewer", "wake"}
+var checkNames = []string{"slack", "github", "claude", "jira", "calendar", "reviewer", "summary", "wake"}
 
 // cmdCheck prints the checks as JSON. It exits 0 even when a check fails,
 // because a failed check is a result, not an error.
@@ -131,6 +131,23 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 			st := loadState(workerPaths().State)
 			r.OK = true
 			r.Detail = fmt.Sprintf("managed %s at %s, commit %s", rv.Repo, rv.Branch, st.ReviewerCommit)
+		}
+
+	case "summary":
+		s := cfg.Summary
+		switch {
+		case !cfg.Jobs[JobSummary].Enabled && s.Team == "":
+			r.OK, r.Detail = true, "off"
+		case s.problem() != nil:
+			r.Detail = s.problem().Error()
+			r.Fix = "Set the team as org/team-slug in Settings > Worker > Team summary."
+		default:
+			members, err := teamMembers(ctx, s.Team)
+			r.OK, r.Detail = err == nil, fmt.Sprintf("%s has %d members", s.Team, len(members))
+			if err != nil {
+				r.Detail = err.Error()
+				r.Fix = "Check the team slug. Your gh login must be able to see the team's members."
+			}
 		}
 
 	case "wake":
