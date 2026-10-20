@@ -60,7 +60,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `frontend/src/` — React app
   - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, WorktreesModule, WorktreeRemovalDialog, etc.
   - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.
-  - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx` (on/off, job times, Test and Run now, checks, log)
+  - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx`. A shell for `components/worker/`: `GeneralSection`, one card per job (`StandupCard`, `FocusCard`, `ReviewCard` on `JobCard`), `JobSchedule`, `RunControls`, the `useWorkerConfig` hook and `config.ts` (types, `merge`)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
 - `docs/plans/` — Implementation plans (001-035)

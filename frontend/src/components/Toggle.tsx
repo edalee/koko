@@ -4,16 +4,21 @@ import { cn } from "../lib/utils";
 export default function Toggle({
   id,
   on,
+  label,
   onClick,
 }: {
   id: string;
   on: boolean;
+  // label names the switch when no <label> points at it.
+  label?: string;
   onClick: () => void;
 }) {
   return (
     <button
       id={id}
       type="button"
+      aria-label={label}
+      aria-pressed={on}
       onClick={onClick}
       className={cn(
         "w-8 h-[18px] rounded-full transition-colors relative shrink-0",
