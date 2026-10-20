@@ -212,8 +212,8 @@ export function merge(raw: string): WorkerConfig {
   };
 }
 
-// toggleDay switches day on or off, in week order. The last day stays on,
-// because an empty list means Monday to Friday.
+// toggleDay switches day on or off and keeps the list in week order.
+// It never turns off the only day left, because an empty list means Monday to Friday.
 export function toggleDay(days: string[], day: string): string[] {
   if (!days.includes(day)) return DAYS.filter((d) => d === day || days.includes(d));
   return days.length > 1 ? days.filter((d) => d !== day) : days;

@@ -78,7 +78,7 @@ type TeamScopeConfig struct {
 // dayNames are the names Days uses, indexed by time.Weekday.
 var dayNames = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 
-// weekdays is the days of a job without Days.
+// weekdays are the days a job runs on if its Days is empty.
 var weekdays = []string{"mon", "tue", "wed", "thu", "fri"}
 
 // JobConfig is one job's switch, its run times ("HH:MM") and its days.
