@@ -425,7 +425,11 @@
 - **Amendments:**
   - 2026-10-01: the worker's own Go code posts each pass's draft PR comment, or an LGTM. The reviewer's Claude stays read-only, so the guards above still hold.
   - 2026-10-05: the job is now the review worker, `review`. The reviewer CLI is a managed clone of `reviewer.repo` at `reviewer.branch` under `~/.cache/koko-worker/reviewer`, fast-forwarded before each run, or a local path. Your own reviewer checkout no longer decides which code runs.
-- **Files:** `cmd/koko-worker/jobs.go`, `cmd/koko-worker/reviewer.go`
+  - 2026-10-20 (plan 035, part 3): the reviewer command has several runs, each the job `review:<name>`. Each run has its own time limit, by default 45 minutes for a PR and 60 for a repo.
+    - The read-only guards above apply to PRs runs only. A PRs run still reviews and never posts.
+    - A repos run runs the command once per repo, for a tool that changes repos, such as one that updates dependencies. It gets the real gh and git, because its tool pushes and opens PRs on purpose. `{claude}` is still the wrapper, which denies some commands but is no guard.
+    - A repos run works in its own clones under `~/.cache/koko-worker/repos-runs`, never in the review cache, and the worker removes their hooks before each run. So nothing a tool leaves behind runs during a review.
+- **Files:** `cmd/koko-worker/jobs.go`, `cmd/koko-worker/reviewer.go`, `cmd/koko-worker/repos_run.go`
 - **Plan:** `docs/plans/029-koko-worker.md`
 
 ## ADR-035: Mac wake through pmset and a sudoers rule
@@ -525,6 +529,7 @@
   - A built-in list of one team's repos and a fixed org prefix on every action made the panel wrong for anyone else, and broken for other orgs.
   - The same scopes as the review worker mean the panel lists the PRs the worker reviews, and one click copies them.
   - 2026-10-19: the review worker's `orgs` and `excludeRepos` do not reach the panel. The copy takes only `mine` and `team`, and the panel never applies them. With either set, the panel lists more PRs than the worker reviews.
+  - 2026-10-20 (plan 035, part 3): the scopes now belong to each run of the review worker. The copy takes `mine` and `team` from the run the stand-up uses: the first PRs run that is on, else the first PRs run. An older `worker.json` still has them on the reviewer, and the copy reads them from there. With no PRs run, there is nothing to copy.
   - Each search takes several seconds with the detail fields, so they run in parallel. A failed source shows its error, and the others still show.
   - Hidden PR keys move to `owner/repo#n`. The old `repo#n` keys still hide and unhide.
 - **Files:** `pr_sources.go`, `github_service.go`, `config_service.go`, `frontend/src/components/PRPanelSettings.tsx`, `frontend/src/components/PRDetailOverlay.tsx`

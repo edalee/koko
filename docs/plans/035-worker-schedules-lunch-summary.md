@@ -64,19 +64,29 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 
 - The source, logs folder, base command, marker, orgs and excluded repos stay shared.
 - Each run is a scheduled job named `review:<name>`, with its own lock, slots and status. The name is part of the lock file's name, so it is short.
-- `koko-worker run review:<name>` runs one run. `run review` runs the first PRs run.
-- Runs take one shared lock, so only one run works at a time. They share the reviewer clone and the cache clones.
+- `koko-worker run review:<name>` runs one run. A bare `run review` runs the first PRs run that is on, else the first PRs run. It never starts a repos run: with no PRs run, it fails and says so.
+- Runs take one shared lock, so only one run works at a time. They share the managed reviewer clone and the claude wrapper.
 - An older `worker.json` becomes one PRs run named "daily", with the old `jobs.review` times, days and switch, and the old scopes. Nothing changes until you add a run. The worker then ignores `jobs.review`, and the UI writes only `reviewer.runs`.
-- The stand-up uses the team, repos and age limit of the first PRs run that is on.
+- The stand-up uses the team, repos and age limit of the first PRs run that is on, else the first PRs run. It never uses a repos run. With no PRs run, it lists no team.
+
+**Decisions** (from the review of this part):
+
+1. **Own clones for repos runs.** A repos run works in its own clones under `~/.cache/koko-worker/repos-runs`, with their own locks. PR reviews never use them. Before each repo, the worker unsets `core.hooksPath` and deletes the clone's hooks, all but git's samples, so no hook a tool left runs on the next checkout.
+2. **No repo runs twice in a slot.** Each repo's outcome is saved for the slot as it ends. A retry, after a failed DM or a stop, takes the saved outcomes and runs only the repos not yet started. A repo the run was stopped in counts as failed and does not run again, because the tool may have pushed part of its work. The DM goes out once per slot.
+3. **`{claude}` in a repos run** is the review wrapper. It denies some commands, such as `git push`, but it is no guard. A repos run gets the real gh and git on purpose, because its tool opens PRs. ADR-034 says so.
+4. **A bare `run review`** starts only a PRs run, as above.
+5. **Long repos runs.** The scheduler starts a due repos run in its own process (`koko-worker run review:<name> --scheduled`), so the stand-up and focus time run on time. It still takes the run's lock. A PRs run that comes due while a run holds the shared lock waits for a later tick.
+6. **Run now on a held lock** fails at once with "another run is working, try again when it ends". Scheduled runs wait.
+7. **A bad or repeated run name, or a bad target,** fails only that run and `check reviewer`, as plan 030 says for bad reviewer values. A run with a bad name, or the second of two with one name, gets no job at all, because its name would make a bad lock file name. The UI does not save either.
 
 **PRs runs** work as the single review job did: once per PR, with the shared marker, the record of reviewed PRs and the comments. Runs share that record, so a PR is reviewed once, whichever run reaches it first.
 
 **Repos runs** are for a tool that changes repos, such as one that updates dependencies:
 
-- The command runs once per repo, one after another. Its working folder is the worker's cache clone of the repo, reset to the newest commit of the default branch, with no stray files.
+- The command runs once per repo, one after another. Its working folder is the run's own clone of the repo, reset to the newest commit of the default branch, with no stray files and no hooks.
 - `{reviewer}`, `{claude}` and `{repo}` are filled in. `{pr}`, `{url}` and `{sha}` name a PR, so the worker refuses a repos run whose command uses them.
 - The environment carries `REVIEW_REPO` and `RUN_KIND=repos`. gh and git are not read-only, so the tool can push and open PRs.
-- Exit 0 means done, 2 means nothing to do, anything else failed. The worker keeps the last 20 lines of output and a log per repo.
+- Exit 0 means done, 2 means nothing to do, anything else failed. The output goes to a log per repo as it comes. The worker keeps only its last 20 lines in memory.
 - After the run, one Slack DM lists each repo as done, nothing to do or failed, with any link in its output, and the log of a failure.
 - No markers, review records or comments.
 - A test run prints the command for each repo and runs nothing.
