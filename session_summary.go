@@ -65,22 +65,11 @@ func (cs *ClaudeService) summaryOf(path string, head *conversationHead) SessionS
 	if err != nil || info.IsDir() {
 		return emptySummary()
 	}
-	cached, fresh := cs.summaries.get(path, info)
-	if fresh {
-		return cached.summary
+	if cached, ok := cs.summaries.get(path, info); ok {
+		return cached
 	}
 
-	// The first records never change once written, so the entrypoint from an
-	// earlier read still holds. This keeps the head read off the polling path.
-	entrypoint := cached.entrypoint
-	if entrypoint == "" {
-		if head == nil {
-			h := readConversationHead(path)
-			head = &h
-		}
-		entrypoint = head.entrypoint
-	}
-
+	entrypoint, _ := transcriptEntrypoint(path, head)
 	s := emptySummary()
 	if entrypoint != headlessEntrypoint {
 		s = readSummary(path)
@@ -96,8 +85,47 @@ func (cs *ClaudeService) summaryOf(path string, head *conversationHead) SessionS
 		s.Ticket = sessionTicket(s)
 		s.UpdatedAt = info.ModTime().UnixMilli()
 	}
-	cs.summaries.put(path, info, s, entrypoint)
+	cs.summaries.put(path, info, s)
 	return s
+}
+
+// entrypointCacheSize bounds the entrypoint cache. Past it the cache starts
+// again, which costs only a head read per file.
+const entrypointCacheSize = 1024
+
+// entrypoints holds the entrypoint of each session file read so far. The first
+// records never change once written, so an entry never goes stale. This keeps
+// the head read off the polling path.
+var entrypoints = struct {
+	mu sync.Mutex
+	m  map[string]string
+}{m: make(map[string]string)}
+
+// transcriptEntrypoint returns the entrypoint a session file's first records
+// name: "sdk-cli" for a headless run, "" in older files. written is false
+// while the file has no real record yet, so its kind is not yet known.
+// head is the file's head read, if the caller has one.
+func transcriptEntrypoint(path string, head *conversationHead) (entrypoint string, written bool) {
+	entrypoints.mu.Lock()
+	ep, ok := entrypoints.m[path]
+	entrypoints.mu.Unlock()
+	if ok {
+		return ep, true
+	}
+
+	if head == nil {
+		h := readConversationHead(path)
+		head = &h
+	}
+	if head.entrypoint != "" {
+		entrypoints.mu.Lock()
+		if len(entrypoints.m) >= entrypointCacheSize {
+			entrypoints.m = make(map[string]string)
+		}
+		entrypoints.m[path] = head.entrypoint
+		entrypoints.mu.Unlock()
+	}
+	return head.entrypoint, head.entrypoint != "" || head.cwd != ""
 }
 
 // sessionTicket picks the Jira key a session is about. The branch is the
@@ -266,29 +294,27 @@ type summaryCache struct {
 }
 
 type cachedSummary struct {
-	size       int64
-	modTime    time.Time
-	summary    SessionSummary
-	entrypoint string // from the head, which never changes once written
-	used       uint64
+	size    int64
+	modTime time.Time
+	summary SessionSummary
+	used    uint64
 }
 
-// get returns the entry for path, and whether it still matches the file. A
-// stale entry still carries the entrypoint.
-func (c *summaryCache) get(path string, info os.FileInfo) (cachedSummary, bool) {
+// get returns the summary for path, if the entry still matches the file.
+func (c *summaryCache) get(path string, info os.FileInfo) (SessionSummary, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[path]
-	if !ok {
-		return cachedSummary{}, false
+	if !ok || e.size != info.Size() || !e.modTime.Equal(info.ModTime()) {
+		return SessionSummary{}, false
 	}
 	c.clock++
 	e.used = c.clock
-	return *e, e.size == info.Size() && e.modTime.Equal(info.ModTime())
+	return e.summary, true
 }
 
 // put stores a summary, evicting the least recently used entry when full.
-func (c *summaryCache) put(path string, info os.FileInfo, s SessionSummary, entrypoint string) {
+func (c *summaryCache) put(path string, info os.FileInfo, s SessionSummary) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
@@ -306,10 +332,9 @@ func (c *summaryCache) put(path string, info os.FileInfo, s SessionSummary, entr
 	}
 	c.clock++
 	c.entries[path] = &cachedSummary{
-		size:       info.Size(),
-		modTime:    info.ModTime(),
-		summary:    s,
-		entrypoint: entrypoint,
-		used:       c.clock,
+		size:    info.Size(),
+		modTime: info.ModTime(),
+		summary: s,
+		used:    c.clock,
 	}
 }

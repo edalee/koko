@@ -556,8 +556,8 @@ const submitSlack = 2 * time.Second
 // launch timer missed it. Instead this starts looking once the user submits a
 // line, and gives up captureWindow after the most recent one.
 //
-// A file counts only if it is new since launch and no other live session holds
-// it. If another session in the same directory has also been submitted to and
+// A file counts only if it is new since launch, no other live session holds
+// it, and it is not a headless `claude -p` run, such as a koko-worker job. If another session in the same directory has also been submitted to and
 // is still unidentified, we cannot tell whose file appeared, so we claim
 // nothing.
 // That leaves both without a UUID, which the session picker can resolve. It is
@@ -620,6 +620,16 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 				// belongs to something else, most likely a plain `claude` run
 				// in the same directory. Do not blacklist: only this round is
 				// wrong, a later submit may make it ours.
+				continue
+			}
+			// A worker run is never a tab's conversation. A file with no record
+			// yet is skipped for this round, since its kind is not known.
+			entrypoint, written := transcriptEntrypoint(filepath.Join(projectDir, name), nil)
+			if entrypoint == headlessEntrypoint {
+				preExisting[name] = true
+				continue
+			}
+			if !written {
 				continue
 			}
 			uuid := strings.TrimSuffix(name, ".jsonl")

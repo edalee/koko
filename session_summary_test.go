@@ -272,7 +272,7 @@ func TestSummaryCache_IsBounded(t *testing.T) {
 	for i := 0; i < summaryCacheSize+5; i++ {
 		path := writeConv(t, dir, fmt.Sprintf("f%02d", i), time.Now(), titleLine("t"))
 		info, _ := os.Stat(path)
-		c.put(path, info, emptySummary(), "cli")
+		c.put(path, info, emptySummary())
 	}
 	if len(c.entries) != summaryCacheSize {
 		t.Errorf("entries = %d, want %d", len(c.entries), summaryCacheSize)
