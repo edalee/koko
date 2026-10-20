@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,22 +56,40 @@ func TestOldConfigBecomesOneDailyRun(t *testing.T) {
 }
 
 func TestBadRunNames(t *testing.T) {
-	for _, runs := range []string{
-		`[{"name": "Weekly Run"}]`,
-		`[{"name": ""}]`,
-		`[{"name": "` + strings.Repeat("a", 33) + `"}]`,
-		`[{"name": "daily"}, {"name": "daily"}]`,
-		`[{"name": "daily", "target": "branches"}]`,
+	for runs, jobs := range map[string]string{
+		`[{"name": "Weekly Run"}]`:                   "standup focus summary",
+		`[{"name": ""}]`:                             "standup focus summary",
+		`[{"name": "` + strings.Repeat("a", 33) + `"}]`: "standup focus summary",
+		// The first of two runs with one name keeps its job, and both fail.
+		`[{"name": "daily"}, {"name": "daily"}]`: "standup focus summary review:daily",
+		// A good name keeps its job, and the run fails on its target.
+		`[{"name": "daily", "target": "branches"}]`: "standup focus summary review:daily",
 	} {
+		// A bad run fails only that run: the config loads, the other jobs
+		// keep their schedule, and runProblem says what is wrong.
 		path := filepath.Join(t.TempDir(), "worker.json")
 		if err := os.WriteFile(path, []byte(`{"reviewer": {"runs": `+runs+`}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadConfig(path); err == nil {
-			t.Errorf("%s: want an error", runs)
+		cfg, err := loadConfig(path)
+		if err != nil {
+			t.Fatalf("%s: %v", runs, err)
+		}
+		last := cfg.Reviewer.Runs[len(cfg.Reviewer.Runs)-1]
+		if cfg.runProblem(last) == nil {
+			t.Errorf("%s: want a run problem", runs)
+		}
+		if got := strings.Join(cfg.jobNames(), " "); got != jobs {
+			t.Errorf("%s: jobs %q, want %q", runs, got, jobs)
 		}
 	}
+	// A name that leaves the worker folder never becomes a job.
 	cfg := twoRuns()
+	cfg.Reviewer.Runs[1].Name = "../x"
+	if got := strings.Join(cfg.jobNames(), " "); got != "standup focus summary review:daily" {
+		t.Errorf("jobs %q", got)
+	}
+	cfg = twoRuns()
 	cfg.Reviewer.Runs[1].Name = strings.Repeat("a", 32)
 	if err := cfg.validate(); err != nil {
 		t.Errorf("a 32-letter name: %v", err)
@@ -152,8 +172,16 @@ func TestRunSettings(t *testing.T) {
 	if got := cfg.standupRun().Name; got != "late" {
 		t.Errorf("stand-up run %q", got)
 	}
-	if job, _ := cfg.resolveJob(JobReview); job != reviewDaily {
-		t.Errorf("review is %q, want the first PRs run", job)
+	// A bare review is the first PRs run that is on, and never a repos run.
+	if job, _ := cfg.resolveJob(JobReview); job != reviewJob("late") {
+		t.Errorf("review is %q, want the first PRs run that is on", job)
+	}
+	cfg.Reviewer.Runs = cfg.Reviewer.Runs[:1]
+	if job, err := cfg.resolveJob(JobReview); err == nil || !strings.Contains(err.Error(), "needs a PRs run") {
+		t.Errorf("only a repos run: %q, %v", job, err)
+	}
+	if got := cfg.standupRun(); got.Name != "" || got.Team.Enabled {
+		t.Errorf("stand-up run with no PRs run: %+v", got)
 	}
 }
 
@@ -260,14 +288,23 @@ func TestCleanCheckout(t *testing.T) {
 		return gitRun(t, origin, "rev-parse", "HEAD")
 	}
 	commit("one")
-	paths := Paths{Cache: filepath.Join(tmp, "repos")}
-	clone := filepath.Join(paths.Cache, "acme__api")
+	paths := Paths{Cache: filepath.Join(tmp, "repos"), RepoRuns: filepath.Join(tmp, "repos-runs")}
+	clone := filepath.Join(paths.RepoRuns, "acme__api")
 	gitRun(t, tmp, "clone", "--quiet", origin, clone)
-	// A review left the clone at an old commit, with a stray file.
+	// The last run left the clone at an old commit, with a stray file, a
+	// hooks path and a hook that would run on the next checkout.
 	head := commit("two")
-	if err := os.WriteFile(filepath.Join(clone, "stray.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
+	ran := filepath.Join(tmp, "hook-ran")
+	hook := "#!/bin/sh\ntouch " + ran + "\n"
+	for _, f := range []string{"stray.txt", ".git/hooks/post-checkout", "tool-hooks/post-checkout"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(clone, f)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(clone, f), []byte(hook), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
+	gitRun(t, clone, "config", "core.hooksPath", "tool-hooks")
 	dir, release, err := cleanCheckout(context.Background(), paths, "acme/api")
 	if err != nil {
 		t.Fatal(err)
@@ -281,6 +318,18 @@ func TestCleanCheckout(t *testing.T) {
 	}
 	if got := gitRun(t, dir, "status", "--porcelain"); got != "" {
 		t.Errorf("not clean: %q", got)
+	}
+	if dir != clone || strings.HasPrefix(dir, paths.Cache+string(filepath.Separator)) {
+		t.Errorf("checkout in %s, want the repos runs' own clone", dir)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("a hook ran during the checkout")
+	}
+	if _, err := os.Stat(filepath.Join(clone, ".git", "hooks", "post-checkout")); !os.IsNotExist(err) {
+		t.Error("the hook is still there")
+	}
+	if out, _ := exec.Command("git", "-C", dir, "config", "--get", "core.hooksPath").Output(); len(out) > 0 {
+		t.Errorf("core.hooksPath is still %q", out)
 	}
 }
 
@@ -310,5 +359,169 @@ func TestRunCommandPicksTheRun(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "review:monthly.lock")); !os.IsNotExist(err) {
 		t.Error("an unknown run left a lock file")
+	}
+}
+
+func TestReposRunRetryRunsNoRepoTwice(t *testing.T) {
+	env, dms, _ := reposEnv(t, `echo "$1" >> "$COUNT"
+`)
+	count := filepath.Join(env.paths.Dir, "count")
+	t.Setenv("COUNT", count)
+	env.cfg.Reviewer.Command = strings.Replace(env.cfg.Reviewer.Command, " --update-deps", "", 1)
+	env.paths.State = filepath.Join(env.paths.Dir, "state.json")
+	env.persist = func(change func(*State)) error { return updateState(env.paths.State, change) }
+	env.slot = monday(8, 0)
+	send := env.send
+	failSend := true
+	env.send = func(ctx context.Context, m Message) error {
+		if failSend {
+			failSend = false
+			return errors.New("slack is down")
+		}
+		return send(ctx, m)
+	}
+	run := ReviewRun{Name: "weekly", Target: TargetRepos, Repos: []string{"acme/api", "acme/web"}}
+	ctx := context.Background()
+	ran := func() string {
+		b, _ := os.ReadFile(count)
+		return strings.TrimSpace(string(b))
+	}
+
+	err := runRepos(ctx, env, run)
+	var reported reportedError
+	if !errors.As(err, &reported) || !strings.Contains(err.Error(), "could not send the DM") {
+		t.Fatalf("failed DM: %v", err)
+	}
+	if got := ran(); got != "acme/api\nacme/web" {
+		t.Fatalf("first try ran %q", got)
+	}
+	// The retry runs no repo again, and sends the one DM.
+	if err := runRepos(ctx, env, run); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if got := ran(); got != "acme/api\nacme/web" {
+		t.Errorf("the retry ran a repo again: %q", got)
+	}
+	if len(*dms) != 1 || !strings.Contains((*dms)[0], "acme/api: done") || !strings.Contains((*dms)[0], "acme/web: done") {
+		t.Errorf("dms %q", *dms)
+	}
+	// With the DM sent, a further retry sends nothing.
+	if err := runRepos(ctx, env, run); err != nil || len(*dms) != 1 {
+		t.Errorf("after the DM: %v, dms %q", err, *dms)
+	}
+
+	// A repo the run was stopped in counts as failed, and does not run again.
+	env.slot = monday(8, 0).AddDate(0, 0, 7)
+	if err := updateState(env.paths.State, func(st *State) {
+		st.RepoRuns[repoRunKey("review:weekly", env.slot, "acme/api")] = RepoRecord{Status: repoStarted, At: env.slot}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRepos(ctx, env, run); err == nil {
+		t.Error("want the stopped repo reported as failed")
+	}
+	if got := ran(); got != "acme/api\nacme/web\nacme/web" {
+		t.Errorf("ran %q, want only acme/web again", got)
+	}
+	if dm := (*dms)[len(*dms)-1]; !strings.Contains(dm, "acme/api: failed (the run stopped before it finished") {
+		t.Errorf("DM %q", dm)
+	}
+}
+
+func TestTailWriterKeepsABoundedTail(t *testing.T) {
+	var tw tailWriter
+	for i := range 100 {
+		_, _ = fmt.Fprintf(&tw, "line %d https://example.com/%d\n", i, i%7)
+	}
+	_, _ = tw.Write([]byte(strings.Repeat("x", 3*maxLineBytes)))
+	lines := strings.Split(tw.tail(), "\n")
+	if len(lines) != outputLines || lines[0] != "line 81 https://example.com/4" || len(lines[outputLines-1]) != maxLineBytes {
+		t.Errorf("tail: %d lines, first %q, last %d bytes", len(lines), lines[0], len(lines[outputLines-1]))
+	}
+	if len(tw.urls) != maxURLs || tw.urls[0] != "https://example.com/0" {
+		t.Errorf("urls %q", tw.urls)
+	}
+	if len(tw.lines) > outputLines {
+		t.Errorf("kept %d lines", len(tw.lines))
+	}
+}
+
+func TestRunNowFailsAtOnceOnAHeldLock(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{Config: filepath.Join(dir, "worker.json"), Dir: dir, State: filepath.Join(dir, "state.json"), Logs: filepath.Join(dir, "logs")}
+	unlock, err := lockFile(jobLockPath(paths, reviewDaily))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	done := make(chan error, 1)
+	go func() { done <- cmdRun(context.Background(), paths, []string{"review:daily"}) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errBusy) {
+			t.Errorf("err %v, want errBusy", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run now waited for the lock")
+	}
+	// The shared reviewer lock too, for a Run now only.
+	shared := filepath.Join(dir, "reviewer.lock")
+	hold, err := lockFile(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold()
+	if _, err := takeLock(shared, true); !errors.Is(err, errBusy) {
+		t.Errorf("shared lock: %v", err)
+	}
+}
+
+func TestRepoRunsStartInTheirOwnProcess(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{Dir: dir, State: filepath.Join(dir, "state.json"), Logs: filepath.Join(dir, "logs")}
+	cfg := twoRuns()
+	cfg.Reviewer.Command = "" // a PRs run that did run would fail, and record it
+	var started []string
+	release := make(chan struct{})
+	oldStart, oldDetached := startRun, detached
+	t.Cleanup(func() { startRun, detached = oldStart, oldDetached })
+	detached = map[string]*detachedRun{}
+	startRun = func(_ Paths, job string) (func() error, error) {
+		started = append(started, job)
+		return func() error { <-release; return nil }, nil
+	}
+	// A repos run holds the shared reviewer lock.
+	hold, err := lockFile(filepath.Join(dir, "reviewer.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := monday(9, 40)
+	due := dueRuns(cfg, readyState(cfg), now)
+	var later []DueRun
+	for _, r := range due {
+		if strings.HasPrefix(r.Job, "review:") {
+			later = append(later, r)
+		}
+	}
+	runDueJobs(context.Background(), cfg, paths, later, now)
+	if strings.Join(started, " ") != "review:weekly" {
+		t.Errorf("started %q, want the repos run only", started)
+	}
+	if st := loadState(paths.State); len(st.Runs) != 0 {
+		t.Errorf("the PRs run ran while the shared lock was held: %v", st.Runs)
+	}
+	// Still running: not started again.
+	runDueJobs(context.Background(), cfg, paths, later, now.Add(time.Minute))
+	// Ended a minute ago: not yet.
+	close(release)
+	<-detached["review:weekly"].done
+	hold()
+	runDueJobs(context.Background(), cfg, paths, later[1:], time.Now())
+	if len(started) != 1 {
+		t.Errorf("started again too soon: %q", started)
+	}
+	runDueJobs(context.Background(), cfg, paths, later[1:], time.Now().Add(retryInterval))
+	if len(started) != 2 {
+		t.Errorf("not started again after the wait: %q", started)
 	}
 }

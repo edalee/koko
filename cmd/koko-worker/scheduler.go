@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,6 +32,9 @@ type RunRecord struct {
 	Attempts int       `json:"attempts"` // every run of the slot
 	Failures int       `json:"failures"` // runs that failed for a reason other than the network
 	NextTry  time.Time `json:"nextTry,omitempty"`
+	// Reported is true once a repos run's DM for the slot went out, so a
+	// retry does not send it again.
+	Reported bool `json:"reported,omitempty"`
 }
 
 // State is kept on disk, because launchd restarts the worker and memory is lost.
@@ -56,6 +60,9 @@ type State struct {
 	// (not a test run) ended. The next summary starts there, so a missed run
 	// loses no day, within the 7 days a summary reaches back.
 	SummaryCovered time.Time `json:"summaryCovered,omitempty"`
+	// RepoRuns are how the repos of a repos run's slot ended, keyed
+	// repoRunKey. A retry of the slot skips the repos here.
+	RepoRuns map[string]RepoRecord `json:"repoRuns,omitempty"`
 }
 
 func slotKey(job string, slot time.Time) string {
@@ -79,6 +86,9 @@ func loadState(path string) State {
 	}
 	if st.Results == nil {
 		st.Results = map[string]ReviewResult{}
+	}
+	if st.RepoRuns == nil {
+		st.RepoRuns = map[string]RepoRecord{}
 	}
 	return st
 }
@@ -187,6 +197,38 @@ func lockFile(path string) (func(), error) {
 	}, nil
 }
 
+// errBusy is a Run now that found its job, or another run, at work.
+var errBusy = errors.New("another run is working, try again when it ends")
+
+// tryLockFile takes an exclusive lock on path if nobody holds it, or fails
+// with errBusy at once. Call the returned function to release it.
+func tryLockFile(path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errBusy
+		}
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
+}
+
+// takeLock takes the lock at path. A scheduled run waits for it. A Run now
+// (noWait) fails at once with errBusy.
+func takeLock(path string, noWait bool) (func(), error) {
+	if noWait {
+		return tryLockFile(path)
+	}
+	return lockFile(path)
+}
+
 // lockFree is true if nobody holds the lock at path right now.
 func lockFree(path string) bool {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -224,6 +266,11 @@ func pruneState(st *State, now time.Time) {
 	for k, r := range st.Runs {
 		if now.Sub(r.Slot) > 7*24*time.Hour {
 			delete(st.Runs, k)
+		}
+	}
+	for k, r := range st.RepoRuns {
+		if now.Sub(r.At) > 7*24*time.Hour {
+			delete(st.RepoRuns, k)
 		}
 	}
 	for k, t := range st.Reviewed {

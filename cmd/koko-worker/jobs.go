@@ -32,6 +32,11 @@ type Env struct {
 	test   bool   // print instead of DM or comment, book nothing
 	// timeout caps one PR or one repo of a run. Zero means reviewTimeout.
 	timeout time.Duration
+	// slot is the first slot a scheduled run, or a Run now, covers. A repos
+	// run keys its repos' outcomes on it. Zero means none.
+	slot time.Time
+	// noWait makes a Run now fail at once on a held lock, not wait.
+	noWait bool
 	state  *State // read-only snapshot taken when the run started
 	now    time.Time
 	// persist changes the state on disk under a lock. It does nothing in test mode.
@@ -97,7 +102,7 @@ func jiraOffNote(site string, prs int) string {
 
 func runStandup(ctx context.Context, env Env) error {
 	// The team PRs, repos and age limit are those of the first PRs run that
-	// is switched on.
+	// is on, else the first PRs run. With no PRs run, there are none.
 	env.cfg.Reviewer = env.cfg.Reviewer.forRun(env.cfg.standupRun())
 	loc := env.cfg.location()
 	now := env.now.In(loc)
@@ -679,7 +684,7 @@ func runReview(ctx context.Context, env Env, onlyURL string) error {
 	// one run reviews at a time. The state is read again under the lock, to
 	// see what the run before posted.
 	if !env.test {
-		unlock, err := lockFile(filepath.Join(env.paths.Dir, "reviewer.lock"))
+		unlock, err := takeLock(filepath.Join(env.paths.Dir, "reviewer.lock"), env.noWait)
 		if err != nil {
 			return err
 		}
@@ -1153,8 +1158,9 @@ func groupCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
 // reviewSkippedError means the reviewer exited with skipExit.
 type reviewSkippedError struct{ error }
 
-// skipExit is the reviewer's "nothing to review" exit code: another run holds the
-// lock, or the PR is closed or a draft.
+// skipExit is the command's "nothing to do" exit code. For a PR: another run
+// holds the lock, or the PR is closed or a draft. For a repo: the tool has
+// nothing to change.
 const skipExit = 2
 
 // reviewTimeout is the default cap on one review. On timeout, the reviewer's whole process

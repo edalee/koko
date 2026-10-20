@@ -127,7 +127,7 @@ func TestPrepareReviewer(t *testing.T) {
 		t.Errorf("repo change: origin %s, want %s", origin, otherBare)
 	}
 
-	// A local source with no path fails the review job only.
+	// A local source with no path fails only the run.
 	cfg.Reviewer.Source, cfg.Reviewer.Path = SourceLocal, ""
 	if _, err := prepareReviewer(ctx, newEnv(false)); err == nil || !strings.Contains(err.Error(), "no path is set") {
 		t.Errorf("local without a path: %v", err)

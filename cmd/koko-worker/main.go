@@ -148,13 +148,18 @@ func runJob(ctx context.Context, env Env, job, onlyURL string) error {
 
 // cmdRun runs one job now. It ignores the schedule and the on/off switches.
 // It holds the job's lock, so a scheduled run of the same job waits for it.
-// A successful real run of a whole job (no --pr) is recorded against the
-// slots it covers (see manualSlots), so the scheduler does not repeat it.
+// If another run holds a lock it needs, it fails at once with errBusy. A
+// successful real run of a whole job (no --pr) is recorded against the slots
+// it covers (see manualSlots), so the scheduler does not repeat it.
+//
+// --scheduled is how serveTick starts a repos run in its own process: it runs
+// the job's due slots as the scheduler would (see runScheduled).
 func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	test := fs.Bool("test", false, "print instead of DM, book nothing")
 	pr := fs.String("pr", "", "review only: review this PR URL")
 	date := fs.String("date", "", "with --test: run as if it were 07:00 on this day (YYYY-MM-DD)")
+	scheduled := fs.Bool("scheduled", false, "run the job's due slots, as the scheduler does")
 	if len(args) == 0 {
 		return fmt.Errorf("run needs a job: standup, focus, summary, review or review:<run>")
 	}
@@ -170,19 +175,23 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	if err != nil {
 		return err
 	}
+	if *scheduled {
+		return runScheduled(ctx, cfg, paths, job)
+	}
 	if *date != "" && !*test {
 		return fmt.Errorf("--date only works with --test")
 	}
-	// The lock comes before newEnv reads the state, so a run that waited
-	// for a scheduled one sees what that run reviewed and posted.
+	// The lock comes before newEnv reads the state, so the run sees what the
+	// last run of the job reviewed and posted.
 	if !*test {
-		unlock, err := lockFile(jobLockPath(paths, job))
+		unlock, err := tryLockFile(jobLockPath(paths, job))
 		if err != nil {
 			return err
 		}
 		defer unlock()
 	}
 	env := newEnv(cfg, paths, *test)
+	env.noWait = true
 	if *date != "" {
 		day, err := time.ParseInLocation("2006-01-02", *date, cfg.location())
 		if err != nil {
@@ -190,9 +199,13 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 		}
 		env.now = day.Add(7 * time.Hour)
 	}
+	slots := manualSlots(cfg, job, env.now)
+	if len(slots) > 0 {
+		env.slot = slots[0]
+	}
 	runErr := runJob(ctx, env, job, *pr)
 	if !*test && runErr == nil && *pr == "" {
-		run := DueRun{Job: job, Slots: manualSlots(cfg, job, env.now)}
+		run := DueRun{Job: job, Slots: slots}
 		if err := env.persist(func(st *State) { recordRun(st, run, StatusOK, "run by hand", time.Now()) }); err != nil {
 			return err
 		}
@@ -240,12 +253,7 @@ func serveTick(ctx context.Context, cfg Config, paths Paths) {
 	// tries again. The wake below is still booked.
 	if len(due) > 0 && online(ctx) {
 		stopAwake := keepAwake()
-		for _, run := range due {
-			if ctx.Err() != nil {
-				break
-			}
-			runDue(ctx, cfg, paths, run)
-		}
+		runDueJobs(ctx, cfg, paths, due, time.Now())
 		stopAwake()
 	}
 	if ctx.Err() != nil {
@@ -268,6 +276,108 @@ func serveTick(ctx context.Context, cfg Config, paths Paths) {
 	}
 }
 
+// runDueJobs runs the due jobs one after another. A repos run can take hours,
+// so it starts in its own process (startDetached), and the loop goes on. A
+// PRs run waits for a later tick while a run holds the shared reviewer lock,
+// so it never stalls the loop either.
+func runDueJobs(ctx context.Context, cfg Config, paths Paths, due []DueRun, now time.Time) {
+	for _, run := range due {
+		if ctx.Err() != nil {
+			return
+		}
+		if r, ok := cfg.reviewRun(run.Job); ok {
+			if r.Target == TargetRepos {
+				startDetached(paths, run.Job, now)
+				continue
+			}
+			if !lockFree(filepath.Join(paths.Dir, "reviewer.lock")) {
+				log.Printf("%s: waiting, another run holds the reviewer", run.Job)
+				continue
+			}
+		}
+		runDue(ctx, cfg, paths, run)
+	}
+}
+
+// detachedRun is a repos run serveTick started in its own process. ended is
+// set before done closes.
+type detachedRun struct {
+	done  chan struct{}
+	ended time.Time
+}
+
+// detached holds the repos runs serveTick started, by job.
+var detached = map[string]*detachedRun{}
+
+// startRun starts `koko-worker run <job> --scheduled` in its own session,
+// so it outlives a restart of the agent. It returns a function that waits for
+// it. Tests swap it, so they never start a real run.
+var startRun = func(paths Paths, job string) (func() error, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(self, "run", job, "--scheduled")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return cmd.Wait, nil
+}
+
+// startDetached starts a due repos run in its own process, unless it is still
+// running, its lock is held, or it ended less than retryInterval ago. The
+// child records the slot. The wait stops a child that died before it could
+// record from starting again on every tick.
+func startDetached(paths Paths, job string, now time.Time) {
+	if d, ok := detached[job]; ok {
+		select {
+		case <-d.done:
+			if now.Sub(d.ended) < retryInterval {
+				return
+			}
+		default:
+			return
+		}
+	}
+	if !lockFree(jobLockPath(paths, job)) {
+		return
+	}
+	wait, err := startRun(paths, job)
+	if err != nil {
+		log.Printf("%s: could not start: %v", job, err)
+		return
+	}
+	log.Printf("%s: started in its own process", job)
+	d := &detachedRun{done: make(chan struct{})}
+	detached[job] = d
+	go func() {
+		if err := wait(); err != nil {
+			log.Printf("%s: %v", job, err)
+		}
+		d.ended = time.Now()
+		close(d.done)
+	}()
+}
+
+// runScheduled is the process startDetached starts: it runs job's due slots
+// under the job's lock, as serveTick would, and records them. It logs to
+// worker.log and keeps the Mac awake.
+func runScheduled(ctx context.Context, cfg Config, paths Paths, job string) error {
+	if l, err := openRotatingLog(agentLogPath(paths), logCap); err == nil {
+		log.SetOutput(l)
+		defer func() { _ = l.Close() }()
+	}
+	for _, run := range dueRuns(cfg, loadState(paths.State), time.Now()) {
+		if run.Job == job {
+			stopAwake := keepAwake()
+			defer stopAwake()
+			runDue(ctx, cfg, paths, run)
+		}
+	}
+	return nil
+}
+
 // lastLogPrune is when serveTick last pruned old review logs. Once a day is
 // enough, and a restart prunes at once.
 var lastLogPrune time.Time
@@ -287,6 +397,7 @@ func runDue(ctx context.Context, cfg Config, paths Paths, run DueRun) {
 	}
 	log.Printf("%s: running for %s", run.Job, run.Slots[len(run.Slots)-1].Format("15:04"))
 	env := newEnv(cfg, paths, false)
+	env.slot = run.Slots[0]
 	err = runJob(ctx, env, run.Job, "")
 	status, msg := StatusOK, ""
 	var reported reportedError

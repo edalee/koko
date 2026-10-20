@@ -152,7 +152,7 @@ func TestEventTimesKeepOtherZones(t *testing.T) {
 }
 
 // testConfig is the default config, switched on, with a reviewer and a team
-// set up and the review job on.
+// set up and the daily run on.
 func testConfig() Config {
 	cfg := defaultConfig()
 	cfg.Enabled = true

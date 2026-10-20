@@ -14,8 +14,9 @@ import (
 // prepareReviewer makes the reviewer CLI ready and returns its path.
 //
 // Bad reviewer settings fail only the run, so the stand-up and focus time
-// keep running. runJob has checked the rest of the run's settings. A command without {reviewer} runs its own program, and
-// the result is "". A local reviewer runs as it is.
+// keep running. runJob has checked the rest of the run's settings. A command
+// without {reviewer} runs its own program, and the result is "". A local
+// reviewer runs as it is.
 //
 // A managed reviewer is the worker's own clone of Reviewer.Repo, so the
 // branch you have checked out in your own clone never changes what reviews
