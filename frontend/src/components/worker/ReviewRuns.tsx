@@ -207,7 +207,7 @@ export default function ReviewRuns({
               <>
                 <Field
                   label="Repos"
-                  help="The command runs once per repo, one after another. Exit 0 is done, 2 is nothing to do. One Slack DM lists each repo, with any link in its output. Test prints the commands and runs nothing."
+                  help="The command runs once per repo, one after another. Exit 0 is done, 2 is nothing to do. One Slack DM lists each repo, with the last 5 links in its output. Switching the worker or the run off stops a scheduled run before its next repo. Test prints the commands and runs nothing."
                 >
                   <RepoList
                     repos={run.repos}

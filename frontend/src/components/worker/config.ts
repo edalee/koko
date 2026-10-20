@@ -247,8 +247,8 @@ export function nextSlot(job: JobConfig, zone: string, now = new Date()): string
   return null;
 }
 
-// reviewerSetUp is true if the review job can run with these settings. It
-// follows problem() in cmd/koko-worker/config.go.
+// reviewerSetUp is true if a PRs run can run with these settings. It follows
+// problem() in cmd/koko-worker/config.go.
 export function reviewerSetUp(r: ReviewerConfig): boolean {
   const command = r.command.trim();
   if (!command || !/^[a-z0-9-]+$/.test(r.markerPrefix.trim())) return false;

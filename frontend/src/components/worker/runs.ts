@@ -92,8 +92,8 @@ export function newRun(runs: ReviewRun[]): ReviewRun {
   return { ...withDefaults({ name }), times: ["09:00"], days: ["mon"] };
 }
 
-// runsProblem says why the worker would refuse the runs, or null. A bad name
-// stops every job, so the UI does not save one.
+// runsProblem says why the UI will not save the runs, or null. A run with a
+// bad or repeated name never runs, and check reviewer fails.
 export function runsProblem(runs: ReviewRun[]): string | null {
   if (runs.length === 0) return "Keep at least one run.";
   const seen = new Set<string>();

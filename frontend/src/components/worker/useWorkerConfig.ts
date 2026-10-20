@@ -57,7 +57,7 @@ export function useWorkerConfig() {
   }, [cfg.lunch.start, cfg.lunch.end]);
 
   // save writes worker.json. It writes nothing while a run name is bad,
-  // because the worker would stop every job. The runs stay on screen to fix.
+  // because the worker would never run that run. The runs stay on screen to fix.
   const save = useCallback(async (next: WorkerConfig) => {
     setCfg(next);
     const problem = runsProblem(next.reviewer.runs);
