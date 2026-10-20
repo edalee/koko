@@ -5,7 +5,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ## [Unreleased]
 
 ### Added
-- **Job days**: each worker job has its own days, such as Saturday only or once a week. Settings > Worker shows seven day switches on each job. A job without days runs Monday to Friday, so an older `worker.json` keeps its schedule (plan 035)
+- **Job days**: each worker job has its own days, such as Saturday only or once a week. Settings > Worker shows seven day switches on each job. A job without days runs Monday to Friday, so an older `worker.json` keeps its schedule. A day added after its run time waits until next week (plan 035)
 - **Lunch**: focus time no longer books over lunch, 12:00 to 13:00 by default. Settings > Worker can move lunch or switch it off. Lunch is not written to the calendar (plan 035)
 
 ## [0.5.15] - 2026-10-14
