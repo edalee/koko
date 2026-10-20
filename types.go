@@ -219,6 +219,9 @@ type SessionSummary struct {
 	PR            *SessionPR      `json:"pr,omitempty"`
 	Ticket        string          `json:"ticket"`    // the first Jira key found, or ""
 	UpdatedAt     int64           `json:"updatedAt"` // the file's modification time, unix millis
+	// NotFound is true when the session file does not exist. The summary is
+	// then empty, and the frontend keeps what it saved.
+	NotFound bool `json:"notFound,omitempty"`
 }
 
 // SessionPrompt is one prompt the user typed.

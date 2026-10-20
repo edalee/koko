@@ -408,7 +408,8 @@ export function useSessionTabs() {
         }
 
         // The latest summary of this tab's own conversation. If it cannot be
-        // read, the tab's last known one is kept.
+        // read, or its transcript is gone, the tab's last known one is kept. A
+        // tab with no conversation keeps none.
         const summary = claudeId
           ? savedSummary(await GetSessionSummary(tab.directory, claudeId).catch(() => null))
           : { title: undefined, recap: undefined, ticket: undefined };

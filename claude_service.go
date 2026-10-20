@@ -321,12 +321,14 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 		if len(out) == maxConversations {
 			break
 		}
+		// The entrypoint comes first, from a short read that is cached. Most
+		// files in a folder can be headless runs, and they need nothing more.
+		if ep, _ := transcriptEntrypoint(c.path, nil); isHeadless(ep) {
+			continue
+		}
 		head := readConversationHead(c.path)
 		if !head.belongsTo(dir) {
 			continue // another directory sharing this project folder
-		}
-		if isHeadless(head.entrypoint) {
-			continue
 		}
 		summary := cs.summaryOf(c.path, &head)
 		out = append(out, Conversation{
@@ -344,7 +346,7 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 type conversationHead struct {
 	title      string
 	cwd        string
-	entrypoint string // "sdk-" and more for a headless run, "cli" for an interactive one, "" in older files
+	entrypoint string // a value starting "sdk-" for a headless run, "cli" for an interactive one, "" in older files
 }
 
 // belongsTo reports whether the session file belongs to dir. A file with no

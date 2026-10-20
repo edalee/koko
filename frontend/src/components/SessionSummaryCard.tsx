@@ -19,8 +19,8 @@ interface SessionSummaryCardProps {
 }
 
 /**
- * The hover card of a session row (plan 036): the recap, branch, PR and
- * ticket, then the last prompts with their age.
+ * The hover card of a session row (plan 036): the ticket and title, the recap,
+ * the branch and PR, then the last prompts with their age.
  */
 export default function SessionSummaryCard({ summary, saved }: SessionSummaryCardProps) {
   const title = summary?.title || saved.title;

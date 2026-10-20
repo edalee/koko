@@ -623,8 +623,8 @@ func (tm *TerminalManager) detectClaudeSessionID(s *session, projectDir string, 
 				continue
 			}
 			// A headless run from another tool is never a tab's conversation.
-			// A file with no real record yet is skipped this round, because its
-			// kind is not yet known.
+			// A file with no record that names a cwd or an entrypoint is skipped
+			// this round, because its kind is not yet known.
 			entrypoint, written := transcriptEntrypoint(filepath.Join(projectDir, name), nil)
 			if isHeadless(entrypoint) {
 				preExisting[name] = true

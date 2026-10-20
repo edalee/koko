@@ -854,6 +854,7 @@ export namespace main {
 	    pr?: SessionPR;
 	    ticket: string;
 	    updatedAt: number;
+	    notFound?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionSummary(source);
@@ -869,6 +870,7 @@ export namespace main {
 	        this.pr = this.convertValues(source["pr"], SessionPR);
 	        this.ticket = source["ticket"];
 	        this.updatedAt = source["updatedAt"];
+	        this.notFound = source["notFound"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -9,11 +9,12 @@ export interface SavedSummary {
 
 /**
  * The fields to keep from a fetched summary. An empty summary clears them,
- * because the conversation has nothing to say yet. null means no summary was
- * read, so the caller keeps what it had.
+ * because the conversation has nothing to say yet. null means there is
+ * nothing to go on: no summary was read, or the transcript was not found. The
+ * caller then keeps what it had.
  */
 export function savedSummary(s: main.SessionSummary | null | undefined): SavedSummary | null {
-  if (!s) return null;
+  if (!s || s.notFound) return null;
   return {
     title: s.title || undefined,
     recap: s.recap || undefined,

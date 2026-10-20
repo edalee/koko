@@ -272,6 +272,32 @@ describe("saving the summary (plan 036)", () => {
     });
   });
 
+  it("keeps the saved summary at close when the transcript is gone", async () => {
+    mockGetSessions.mockResolvedValue({
+      sessions: [
+        {
+          slug: "app-1",
+          name: "app",
+          directory: "/work/app",
+          createdAt: 1,
+          status: "disconnected",
+          claudeSessionId: "u1",
+          title: "Saved title",
+          ticket: "ACME-5",
+        },
+      ],
+      recentDirs: [],
+    });
+    mockSummary.mockResolvedValue(summary({ notFound: true }));
+    const { result } = renderHook(() => useSessionTabs());
+    await waitFor(() => expect(result.current.tabs).toHaveLength(1));
+
+    await act(() => result.current.closeTab(result.current.tabs[0].id));
+
+    const saved = mockSave.mock.calls[mockSave.mock.calls.length - 1][0].sessions;
+    expect(saved[0]).toMatchObject({ status: "closed", title: "Saved title", ticket: "ACME-5" });
+  });
+
   it("updates a tab from a summary only when something changed", async () => {
     const { result } = renderHook(() => useSessionTabs());
     await waitFor(() => expect(result.current.tabs).toHaveLength(1));
@@ -282,6 +308,10 @@ describe("saving the summary (plan 036)", () => {
     const before = result.current.tabs;
     act(() => result.current.rememberSummaries(new Map([["u1", full]])));
     expect(result.current.tabs).toBe(before);
+
+    // A missing transcript keeps what was saved.
+    act(() => result.current.rememberSummaries(new Map([["u1", summary({ notFound: true })]])));
+    expect(result.current.tabs[0]).toMatchObject({ title: full.title, ticket: "ACME-123" });
 
     // An empty summary for the same conversation clears what was kept.
     act(() => result.current.rememberSummaries(new Map([["u1", summary()]])));

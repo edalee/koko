@@ -273,11 +273,11 @@ func (cs *ConfigService) load() {
 }
 
 // GetSessions returns persisted session state, migrating from legacy format if
-// needed. Closed sessions whose conversation is a headless run are left out
-// (plan 036).
+// needed. Sessions that point at a headless run are cleaned first (plan 036):
+// see withoutHeadlessRuns.
 func (cs *ConfigService) GetSessions() SessionsData {
 	sessions := cs.loadSessions()
-	sessions.Sessions = withoutHeadlessHistory(sessions.Sessions)
+	sessions.Sessions = withoutHeadlessRuns(sessions.Sessions)
 	return sessions
 }
 

@@ -65,24 +65,25 @@ func emptySummary() SessionSummary {
 	return SessionSummary{RecentPrompts: []SessionPrompt{}}
 }
 
+// notFoundSummary is the summary of a session file that does not exist. The
+// frontend then keeps what it saved, rather than clearing it.
+func notFoundSummary() SessionSummary {
+	s := emptySummary()
+	s.NotFound = true
+	return s
+}
+
 // summaryOf returns the summary of a session file, from the cache while the
 // file is unchanged. head is the file's head read, if the caller has one.
 func (cs *ClaudeService) summaryOf(path string, head *conversationHead) SessionSummary {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
-		return emptySummary()
+		return notFoundSummary()
 	}
 	if cached, ok := cs.summaries.get(path, info); ok {
 		return cached
 	}
 
-	if head == nil {
-		// Read once, for the entrypoint and for a title the tail may lack.
-		if _, cached := cachedEntrypoint(path); !cached {
-			h := readConversationHead(path)
-			head = &h
-		}
-	}
 	entrypoint, _ := transcriptEntrypoint(path, head)
 	s := emptySummary()
 	if !isHeadless(entrypoint) {
@@ -107,9 +108,13 @@ func (cs *ClaudeService) summaryOf(path string, head *conversationHead) SessionS
 // again, which costs only a head read per file.
 const entrypointCacheSize = 1024
 
-// entrypoints holds the entrypoint of each session file read so far. The first
+// entrypointPeek is how much of a session file's start is read for its
+// entrypoint. The first records are small, so this almost always holds one.
+const entrypointPeek = 8 * 1024
+
+// entrypoints holds the entrypoint of each session file once found. The first
 // records never change once written, so an entry never goes stale. This keeps
-// the head read off the polling path.
+// the read off the polling path and off a repeated listing.
 var entrypoints = struct {
 	mu sync.Mutex
 	m  map[string]string
@@ -125,45 +130,83 @@ func cachedEntrypoint(path string) (string, bool) {
 }
 
 // transcriptEntrypoint returns the entrypoint a session file's first records
-// name: "sdk-" and more for a headless run, "cli" for an interactive one, ""
-// in older files. written is false while the file has no real record yet, so
-// its kind is not yet known. head is the file's head read, if the caller has
-// one.
+// name: a value starting "sdk-" for a headless run, "cli" for an interactive
+// one, "" in older files. written is false until a record names a cwd or an
+// entrypoint, because until then the file's kind is unknown. head is the
+// file's head read, if the caller has one. Without it, only the first
+// entrypointPeek bytes are read.
 func transcriptEntrypoint(path string, head *conversationHead) (entrypoint string, written bool) {
 	if ep, ok := cachedEntrypoint(path); ok {
 		return ep, true
 	}
 
-	if head == nil {
-		h := readConversationHead(path)
-		head = &h
+	if head != nil {
+		entrypoint, written = head.entrypoint, head.entrypoint != "" || head.cwd != ""
+	} else {
+		entrypoint, written = peekEntrypoint(path)
 	}
-	if head.entrypoint != "" {
+	if entrypoint != "" {
 		entrypoints.mu.Lock()
 		if len(entrypoints.m) >= entrypointCacheSize {
 			entrypoints.m = make(map[string]string)
 		}
-		entrypoints.m[path] = head.entrypoint
+		entrypoints.m[path] = entrypoint
 		entrypoints.mu.Unlock()
 	}
+	return entrypoint, written
+}
+
+// peekEntrypoint reads the start of a session file for its entrypoint. Only a
+// file whose first entrypointPeek bytes hold none, such as one that opens
+// with a long pasted record, gets a full head read.
+func peekEntrypoint(path string) (entrypoint string, written bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	buf := make([]byte, entrypointPeek)
+	n, _ := io.ReadFull(f, buf)
+	_ = f.Close()
+	buf = buf[:n]
+
+	if ep := firstEntrypoint(buf); ep != "" {
+		return ep, true
+	}
+	if n < entrypointPeek {
+		// The whole file was read, and it names no entrypoint.
+		return "", cwdField.Match(buf)
+	}
+	head := readConversationHead(path)
 	return head.entrypoint, head.entrypoint != "" || head.cwd != ""
 }
 
-// withoutHeadlessHistory drops closed sessions whose conversation is a
-// headless run. Records saved before plan 036 can point at one.
-func withoutHeadlessHistory(records []SessionRecord) []SessionRecord {
+// withoutHeadlessRuns keeps saved sessions away from headless runs. Records
+// saved before plan 036 can point at one. A closed session is dropped. A saved
+// open tab keeps its directory but loses the conversation id, so it never
+// shows or resumes the run.
+func withoutHeadlessRuns(records []SessionRecord) []SessionRecord {
 	out := make([]SessionRecord, 0, len(records))
 	for _, r := range records {
-		if r.Status == "closed" && r.ClaudeSessionID != "" {
-			if path := sessionFilePath(r.Directory, r.ClaudeSessionID); path != "" {
-				if ep, _ := transcriptEntrypoint(path, nil); isHeadless(ep) {
-					continue
-				}
+		if r.ClaudeSessionID != "" && pointsAtHeadlessRun(r) {
+			if r.Status == "closed" {
+				continue
 			}
+			r.ClaudeSessionID = ""
 		}
 		out = append(out, r)
 	}
 	return out
+}
+
+// pointsAtHeadlessRun reports whether a saved session's conversation is a
+// headless run.
+func pointsAtHeadlessRun(r SessionRecord) bool {
+	path := sessionFilePath(r.Directory, r.ClaudeSessionID)
+	if path == "" {
+		return false
+	}
+	ep, _ := transcriptEntrypoint(path, nil)
+	return isHeadless(ep)
 }
 
 // sessionTicket picks the Jira key a session is about. The branch is the

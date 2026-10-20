@@ -101,6 +101,11 @@ func TestSessionTicket_Order(t *testing.T) {
 		{"ISO-8601 is not a key", SessionSummary{Title: "ISO-8601 dates"}, ""},
 		{"a term does not hide a key after it", SessionSummary{Title: "UTF-8 bug in ACME-77"}, "ACME-77"},
 		{"a digit in the project is not a key", SessionSummary{Title: "see A1B-2"}, ""},
+		{"an underscore after a key", SessionSummary{Branch: "CON-184_retry"}, "CON-184"},
+		{"an underscore before a key", SessionSummary{Branch: "feature_CON-184"}, "CON-184"},
+		{"a letter before a key", SessionSummary{Branch: "xCON-184"}, ""},
+		{"a letter after a key", SessionSummary{Title: "GPT-4o and CON-9"}, "CON-9"},
+		{"one letter is not a project", SessionSummary{Title: "X-1 and H-2"}, ""},
 		{"none", SessionSummary{}, ""},
 	}
 	for _, c := range cases {
@@ -149,24 +154,37 @@ func TestGetSessionSummary_TwoTranscriptsInOneFolder(t *testing.T) {
 }
 
 // No UUID, or one that is not a bare file name, gives an empty summary and
-// never the newest file.
+// never the newest file. A UUID with no file says so, so the frontend keeps
+// what it saved.
 func TestGetSessionSummary_NoUUIDIsEmpty(t *testing.T) {
 	workDir := t.TempDir()
 	projectDir := withFakeHome(t, workDir)
 	writeConv(t, projectDir, "other", time.Now(), titleLine("Someone else's"), humanLine("p"))
 
 	cs := NewClaudeService()
-	for _, uuid := range []string{"", ".", "..", "../other", "missing"} {
-		got, err := cs.GetSessionSummary(workDir, uuid)
+	for _, c := range []struct {
+		uuid string
+		want SessionSummary
+	}{
+		{"", emptySummary()},
+		{".", emptySummary()},
+		{"..", emptySummary()},
+		{"../other", emptySummary()},
+		{"missing", notFoundSummary()},
+	} {
+		got, err := cs.GetSessionSummary(workDir, c.uuid)
 		if err != nil {
-			t.Fatalf("%q: err %v", uuid, err)
+			t.Fatalf("%q: err %v", c.uuid, err)
 		}
-		if !reflect.DeepEqual(got, emptySummary()) {
-			t.Errorf("%q: expected empty, got %+v", uuid, got)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%q: got %+v, want %+v", c.uuid, got, c.want)
 		}
 		if got.RecentPrompts == nil {
-			t.Errorf("%q: prompts must be [] not null", uuid)
+			t.Errorf("%q: prompts must be [] not null", c.uuid)
 		}
+	}
+	if !notFoundSummary().NotFound {
+		t.Error("a missing file must say so")
 	}
 }
 
@@ -363,9 +381,10 @@ func TestReadSummary_StopsOnceTheMainFieldsAreFound(t *testing.T) {
 	}
 }
 
-// Closed sessions saved before plan 036 can point at a headless run. They are
-// left out of the history. Tabs and closed sessions of real conversations stay.
-func TestGetSessions_HidesHeadlessHistory(t *testing.T) {
+// Sessions saved before plan 036 can point at a headless run. A closed one is
+// left out of the history. A saved open tab stays, but without the run's id.
+// Sessions of real conversations are untouched.
+func TestGetSessions_HidesHeadlessRuns(t *testing.T) {
 	workDir := t.TempDir()
 	projectDir := withFakeHome(t, workDir)
 	now := time.Now()
@@ -378,16 +397,49 @@ func TestGetSessions_HidesHeadlessHistory(t *testing.T) {
 		{Slug: "a-2", Directory: workDir, ClaudeSessionID: "mixed", Status: "closed"},
 		{Slug: "a-3", Directory: workDir, ClaudeSessionID: "headless", Status: "disconnected"},
 		{Slug: "a-4", Directory: workDir, Status: "closed"},
+		{Slug: "a-5", Directory: workDir, ClaudeSessionID: "headless", Status: "active"},
+		{Slug: "a-6", Directory: workDir, ClaudeSessionID: "mixed", Status: "disconnected"},
 	}}
 	if err := cs.SaveSessions(saved); err != nil {
 		t.Fatal(err)
 	}
 
-	var slugs []string
+	var got []string
 	for _, r := range cs.GetSessions().Sessions {
-		slugs = append(slugs, r.Slug)
+		got = append(got, r.Slug+":"+r.ClaudeSessionID)
 	}
-	if want := []string{"a-2", "a-3", "a-4"}; !reflect.DeepEqual(slugs, want) {
-		t.Errorf("slugs = %v, want %v", slugs, want)
+	want := []string{"a-2:mixed", "a-3:", "a-4:", "a-5:", "a-6:mixed"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sessions = %v, want %v", got, want)
+	}
+}
+
+// The entrypoint comes from the first 8KB. A file that opens with a longer
+// record gets a full head read, so its entrypoint is still found.
+func TestPeekEntrypoint(t *testing.T) {
+	dir := t.TempDir()
+	small := writeConv(t, dir, "small", time.Now(),
+		`{"type":"queue-operation"}`,
+		`{"type":"user","cwd":"/repo","entrypoint":"sdk-go"}`,
+	)
+	if ep, written := peekEntrypoint(small); ep != "sdk-go" || !written {
+		t.Errorf("small: %q %v", ep, written)
+	}
+
+	long := writeConv(t, dir, "long", time.Now(),
+		fmt.Sprintf(`{"type":"user","message":{"role":"user","content":%q},"entrypoint":"sdk-cli","cwd":"/repo"}`, strings.Repeat("L", 3*entrypointPeek)),
+	)
+	if ep, written := peekEntrypoint(long); ep != "sdk-cli" || !written {
+		t.Errorf("long: %q %v", ep, written)
+	}
+
+	old := writeConv(t, dir, "old", time.Now(), `{"type":"user","cwd":"/repo"}`)
+	if ep, written := peekEntrypoint(old); ep != "" || !written {
+		t.Errorf("old: %q %v", ep, written)
+	}
+
+	empty := writeConv(t, dir, "empty", time.Now(), `{"type":"queue-operation"}`)
+	if ep, written := peekEntrypoint(empty); ep != "" || written {
+		t.Errorf("empty: %q %v", ep, written)
 	}
 }
