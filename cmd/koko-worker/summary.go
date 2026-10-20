@@ -15,8 +15,12 @@ import (
 // name and whether each one moved (changed status) in the period, and Claude
 // may turn the facts into a paragraph per person. Go builds every link.
 
-// summaryGH runs gh for the summary. Tests replace it.
-var summaryGH = gh
+// summaryGH runs gh for the summary, and summaryMembers reads the team.
+// Tests replace them.
+var (
+	summaryGH      = gh
+	summaryMembers = teamMembers
+)
 
 const (
 	// summaryFirst is how many PRs one search reads. A search that finds more
@@ -567,7 +571,7 @@ func runSummary(ctx context.Context, env Env) error {
 	}
 	start, end := summaryPeriod(env.cfg.Jobs[JobSummary], env.now, env.cfg.location(), env.state.SummaryCovered)
 	label := periodLabel(start, end)
-	members, err := teamMembers(ctx, s.Team)
+	members, err := summaryMembers(ctx, s.Team)
 	if err != nil {
 		return fmt.Errorf("summary: %w", err)
 	}
