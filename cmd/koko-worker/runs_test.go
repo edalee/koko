@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -309,7 +312,6 @@ func TestCleanCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
 	if got := gitRun(t, dir, "rev-parse", "HEAD"); got != head {
 		t.Errorf("HEAD %s, want %s", got, head)
 	}
@@ -320,7 +322,7 @@ func TestCleanCheckout(t *testing.T) {
 		t.Errorf("not clean: %q", got)
 	}
 	if dir != clone || strings.HasPrefix(dir, paths.Cache+string(filepath.Separator)) {
-		t.Errorf("checkout in %s, want the repos runs' own clone", dir)
+		t.Errorf("checkout in %s, want the repos runs' clone", dir)
 	}
 	if _, err := os.Stat(ran); err == nil {
 		t.Error("a hook ran during the checkout")
@@ -330,6 +332,16 @@ func TestCleanCheckout(t *testing.T) {
 	}
 	if out, _ := exec.Command("git", "-C", dir, "config", "--get", "core.hooksPath").Output(); len(out) > 0 {
 		t.Errorf("core.hooksPath is still %q", out)
+	}
+	release()
+
+	// A git step that fails deletes the clone, so the next run clones it fresh.
+	gitRun(t, clone, "remote", "set-url", "origin", filepath.Join(tmp, "gone"))
+	if _, _, err := cleanCheckout(context.Background(), paths, "acme/api"); err == nil {
+		t.Fatal("want an error from a missing origin")
+	}
+	if _, err := os.Stat(clone); !os.IsNotExist(err) {
+		t.Errorf("the broken clone is still there: %v", err)
 	}
 }
 
@@ -362,99 +374,297 @@ func TestRunCommandPicksTheRun(t *testing.T) {
 	}
 }
 
-func TestReposRunRetryRunsNoRepoTwice(t *testing.T) {
-	env, dms, _ := reposEnv(t, `echo "$1" >> "$COUNT"
-`)
-	count := filepath.Join(env.paths.Dir, "count")
-	t.Setenv("COUNT", count)
-	env.cfg.Reviewer.Command = strings.Replace(env.cfg.Reviewer.Command, " --update-deps", "", 1)
-	env.paths.State = filepath.Join(env.paths.Dir, "state.json")
-	env.persist = func(change func(*State)) error { return updateState(env.paths.State, change) }
-	env.slot = monday(8, 0)
-	send := env.send
-	failSend := true
-	env.send = func(ctx context.Context, m Message) error {
-		if failSend {
-			failSend = false
-			return errors.New("slack is down")
-		}
-		return send(ctx, m)
-	}
-	run := ReviewRun{Name: "weekly", Target: TargetRepos, Repos: []string{"acme/api", "acme/web"}}
-	ctx := context.Background()
-	ran := func() string {
-		b, _ := os.ReadFile(count)
-		return strings.TrimSpace(string(b))
-	}
+// scheduledRepos sets up a weekly repos run over acme/api and acme/web, due a
+// minute ago on every day, for runDue to run as the scheduler does. The tool
+// adds each repo it runs to a count file. DMs are kept, and fail while
+// failDM is set. Nothing reaches Slack or the network.
+type scheduledRepos struct {
+	cfg     Config
+	paths   Paths
+	run     DueRun
+	dms     []string
+	failDM  bool
+	count   string
+	failGet map[string]bool // repos whose checkout fails
+}
 
-	err := runRepos(ctx, env, run)
-	var reported reportedError
-	if !errors.As(err, &reported) || !strings.Contains(err.Error(), "could not send the DM") {
-		t.Fatalf("failed DM: %v", err)
+func newScheduledRepos(t *testing.T) *scheduledRepos {
+	t.Helper()
+	now := time.Now().UTC()
+	if now.Hour() == 0 && now.Minute() < 2 {
+		t.Skip("too close to midnight for a slot a minute ago")
 	}
-	if got := ran(); got != "acme/api\nacme/web" {
-		t.Fatalf("first try ran %q", got)
+	tmp := t.TempDir()
+	sr := &scheduledRepos{count: filepath.Join(tmp, "count"), failGet: map[string]bool{}}
+	sr.paths = Paths{
+		Config: filepath.Join(tmp, "worker.json"), Dir: tmp, State: filepath.Join(tmp, "state.json"),
+		Logs: filepath.Join(tmp, "logs"), Settings: filepath.Join(tmp, "claude-settings.json"),
+		ClaudeWrap: filepath.Join(tmp, "claude.sh"), Cache: filepath.Join(tmp, "repos"),
+		Reviewer: filepath.Join(tmp, "reviewer"), RepoRuns: filepath.Join(tmp, "repos-runs"),
 	}
-	// The retry runs no repo again, and sends the one DM.
-	if err := runRepos(ctx, env, run); err != nil {
-		t.Fatalf("retry: %v", err)
-	}
-	if got := ran(); got != "acme/api\nacme/web" {
-		t.Errorf("the retry ran a repo again: %q", got)
-	}
-	if len(*dms) != 1 || !strings.Contains((*dms)[0], "acme/api: done") || !strings.Contains((*dms)[0], "acme/web: done") {
-		t.Errorf("dms %q", *dms)
-	}
-	// With the DM sent, a further retry sends nothing.
-	if err := runRepos(ctx, env, run); err != nil || len(*dms) != 1 {
-		t.Errorf("after the DM: %v, dms %q", err, *dms)
-	}
-	// A Run now later that day runs every repo again, and sends its own DM.
-	runNow := env
-	runNow.noWait = true
-	if err := runRepos(ctx, runNow, run); err != nil {
-		t.Fatalf("Run now: %v", err)
-	}
-	if got := ran(); got != "acme/api\nacme/web\nacme/api\nacme/web" {
-		t.Errorf("Run now ran %q, want every repo again", got)
-	}
-	if len(*dms) != 2 {
-		t.Errorf("Run now dms %q, want a second DM", *dms)
-	}
-
-	// A repo the run was stopped in counts as failed, and does not run again.
-	env.slot = monday(8, 0).AddDate(0, 0, 7)
-	if err := updateState(env.paths.State, func(st *State) {
-		st.RepoRuns[repoRunKey("review:weekly", env.slot, "acme/api")] = RepoRecord{Status: repoStarted, At: env.slot}
-	}); err != nil {
+	prog := filepath.Join(tmp, "tool")
+	if err := os.WriteFile(prog, []byte("#!/bin/sh\necho \"$1\" >> "+sr.count+"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := runRepos(ctx, env, run); err == nil {
-		t.Error("want the stopped repo reported as failed")
+	cfg := defaultConfig()
+	cfg.Enabled, cfg.TimeZone = true, "UTC"
+	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = prog+" {repo}", "acme"
+	cfg.Reviewer.Runs = []ReviewRun{{
+		Name: "weekly", Target: TargetRepos, Repos: []string{"acme/api", "acme/web"},
+		JobConfig: JobConfig{Enabled: true, Times: []string{now.Add(-time.Minute).Format("15:04")}, Days: slices.Clone(dayNames)},
+	}}
+	for _, job := range fixedJobs {
+		jc := cfg.Jobs[job]
+		jc.Enabled = false
+		cfg.Jobs[job] = jc
 	}
-	if got := ran(); got != "acme/api\nacme/web\nacme/api\nacme/web\nacme/web" {
-		t.Errorf("ran %q, want only acme/web again", got)
+	sr.cfg = cfg
+	sr.writeConfig(t)
+	st := loadState(sr.paths.State)
+	syncTimes(cfg, &st, now.Add(-48*time.Hour))
+	if err := saveState(sr.paths.State, st); err != nil {
+		t.Fatal(err)
 	}
-	if dm := (*dms)[len(*dms)-1]; !strings.Contains(dm, "acme/api: failed (the run stopped before it finished") {
-		t.Errorf("DM %q", dm)
+	for _, r := range dueRuns(cfg, st, time.Now()) {
+		if r.Job == "review:weekly" {
+			sr.run = r
+		}
+	}
+	if sr.run.Job == "" {
+		t.Fatal("the weekly run is not due")
+	}
+
+	oldOnline, oldSender, oldCheckout := online, dmSender, repoCheckout
+	t.Cleanup(func() { online, dmSender, repoCheckout = oldOnline, oldSender, oldCheckout })
+	online = func(context.Context) bool { return true }
+	dmSender = func(SlackConfig) func(context.Context, Message) error {
+		return func(_ context.Context, m Message) error {
+			if sr.failDM {
+				sr.failDM = false
+				return errors.New("slack is down")
+			}
+			sr.dms = append(sr.dms, m.Sections...)
+			return nil
+		}
+	}
+	repoCheckout = func(_ context.Context, _ Paths, repo string) (string, func(), error) {
+		if sr.failGet[repo] {
+			delete(sr.failGet, repo)
+			return "", nil, errors.New("fetch: could not resolve host")
+		}
+		dir := filepath.Join(tmp, "checkouts", strings.ReplaceAll(repo, "/", "__"))
+		return dir, func() {}, os.MkdirAll(dir, 0o700)
+	}
+	return sr
+}
+
+func (sr *scheduledRepos) writeConfig(t *testing.T) {
+	t.Helper()
+	data, err := json.Marshal(sr.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sr.paths.Config, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestTailWriterKeepsABoundedTail(t *testing.T) {
+// ran is the repos the tool ran, in order.
+func (sr *scheduledRepos) ran() string {
+	b, _ := os.ReadFile(sr.count)
+	return strings.Join(strings.Fields(string(b)), " ")
+}
+
+// record is the slot's run record.
+func (sr *scheduledRepos) record() RunRecord {
+	return loadState(sr.paths.State).Runs[slotKey(sr.run.Job, sr.run.Slots[0])]
+}
+
+// retryNow makes the slot's retry due now, not in retryInterval.
+func (sr *scheduledRepos) retryNow(t *testing.T) {
+	t.Helper()
+	if err := updateState(sr.paths.State, func(st *State) {
+		rec := st.Runs[slotKey(sr.run.Job, sr.run.Slots[0])]
+		rec.NextTry = time.Now().Add(-time.Second)
+		st.Runs[slotKey(sr.run.Job, sr.run.Slots[0])] = rec
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAFailedDMRetriesAndRunsNoRepoTwice(t *testing.T) {
+	sr := newScheduledRepos(t)
+	sr.failDM = true
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	if rec := sr.record(); rec.Status != StatusRetry || rec.Reported {
+		t.Fatalf("after the failed DM: %+v, want a retry", rec)
+	}
+	if got := sr.ran(); got != "acme/api acme/web" {
+		t.Fatalf("ran %q", got)
+	}
+	sr.retryNow(t)
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	if rec := sr.record(); rec.Status != StatusOK || !rec.Reported {
+		t.Errorf("after the retry: %+v, want ok", rec)
+	}
+	if got := sr.ran(); got != "acme/api acme/web" {
+		t.Errorf("the retry ran a repo again: %q", got)
+	}
+	if len(sr.dms) != 1 || !strings.Contains(sr.dms[0], "acme/api: done") || !strings.Contains(sr.dms[0], "acme/web: done") {
+		t.Errorf("dms %q", sr.dms)
+	}
+}
+
+func TestAFailedCheckoutRetriesThatRepoOnly(t *testing.T) {
+	sr := newScheduledRepos(t)
+	sr.failGet["acme/web"] = true
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	rec := sr.record()
+	if rec.Status != StatusRetry || !strings.Contains(rec.Message, "could not get acme/web") {
+		t.Fatalf("after the failed checkout: %+v", rec)
+	}
+	if _, saved := loadState(sr.paths.State).RepoRuns[repoRunKey(sr.run.Job, sr.run.Slots[0], "acme/web")]; saved {
+		t.Error("the repo whose checkout failed was saved, so no retry would run it")
+	}
+	if got := sr.ran(); got != "acme/api" || len(sr.dms) != 0 {
+		t.Fatalf("ran %q, dms %q: want acme/api only, and no DM yet", got, sr.dms)
+	}
+	sr.retryNow(t)
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	if got := sr.ran(); got != "acme/api acme/web" {
+		t.Errorf("ran %q, want acme/web only on the retry", got)
+	}
+	if len(sr.dms) != 1 || !strings.Contains(sr.dms[0], "acme/web: done") {
+		t.Errorf("dms %q", sr.dms)
+	}
+	if rec := sr.record(); rec.Status != StatusOK {
+		t.Errorf("after the retry: %+v", rec)
+	}
+}
+
+func TestAStoppedRepoDoesNotRunAgain(t *testing.T) {
+	sr := newScheduledRepos(t)
+	if err := updateState(sr.paths.State, func(st *State) {
+		st.RepoRuns[repoRunKey(sr.run.Job, sr.run.Slots[0], "acme/api")] = RepoRecord{Status: repoStarted, At: time.Now()}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	if got := sr.ran(); got != "acme/web" {
+		t.Errorf("ran %q, want only acme/web", got)
+	}
+	if len(sr.dms) != 1 || !strings.Contains(sr.dms[0], "acme/api: failed (the run stopped before it finished") {
+		t.Errorf("dms %q", sr.dms)
+	}
+	if rec := sr.record(); rec.Status != StatusFailed {
+		t.Errorf("record %+v, want failed and reported", rec)
+	}
+}
+
+func TestSwitchingTheRunOffStopsIt(t *testing.T) {
+	sr := newScheduledRepos(t)
+	checkout := repoCheckout
+	repoCheckout = func(ctx context.Context, p Paths, repo string) (string, func(), error) {
+		// You switch the run off while the first repo runs.
+		sr.cfg.Reviewer.Runs[0].Enabled = false
+		sr.writeConfig(t)
+		return checkout(ctx, p, repo)
+	}
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	if got := sr.ran(); got != "acme/api" {
+		t.Errorf("ran %q, want acme/api only", got)
+	}
+	if len(sr.dms) != 1 || !strings.Contains(sr.dms[0], "Stopped before the other repos, because the run is switched off.") {
+		t.Errorf("dms %q", sr.dms)
+	}
+	if rec := sr.record(); rec.Status != StatusFailed || !strings.Contains(rec.Message, "stopped") {
+		t.Errorf("record %+v, want a final stop", rec)
+	}
+}
+
+func TestRunNowKeepsNoSlotRecords(t *testing.T) {
+	sr := newScheduledRepos(t)
+	env := newEnv(sr.cfg, sr.paths, false)
+	env.noWait = true
+	run, _ := sr.cfg.reviewRun(sr.run.Job)
+	env.cfg.Reviewer = env.cfg.Reviewer.forRun(run)
+	if err := runRepos(context.Background(), env, run); err != nil {
+		t.Fatal(err)
+	}
+	st := loadState(sr.paths.State)
+	if len(st.RepoRuns) != 0 {
+		t.Errorf("Run now saved repo records: %v", st.RepoRuns)
+	}
+	for k, r := range st.Runs {
+		if r.Reported {
+			t.Errorf("Run now marked %s reported", k)
+		}
+	}
+	// The scheduled run of the slot then runs every repo, with one DM.
+	runDue(context.Background(), sr.cfg, sr.paths, sr.run)
+	if got := sr.ran(); got != "acme/api acme/web acme/api acme/web" {
+		t.Errorf("ran %q", got)
+	}
+	if len(sr.dms) != 2 {
+		t.Errorf("dms %q, want one from Run now and one from the slot", sr.dms)
+	}
+}
+
+func TestTailWriterKeepsTheLastLineAndLinks(t *testing.T) {
 	var tw tailWriter
 	for i := range 100 {
 		_, _ = fmt.Fprintf(&tw, "line %d https://example.com/%d\n", i, i%7)
 	}
+	// A link seen before moves to the end.
+	_, _ = fmt.Fprintf(&tw, "again https://example.com/0\n\n")
+	if got := tw.lastLine(); got != "again https://example.com/0" {
+		t.Errorf("last line %q", got)
+	}
+	want := []string{"https://example.com/4", "https://example.com/5", "https://example.com/6", "https://example.com/1", "https://example.com/0"}
+	if !slices.Equal(tw.urls, want) {
+		t.Errorf("urls %q, want %q", tw.urls, want)
+	}
 	_, _ = tw.Write([]byte(strings.Repeat("x", 3*maxLineBytes)))
-	lines := strings.Split(tw.tail(), "\n")
-	if len(lines) != outputLines || lines[0] != "line 81 https://example.com/4" || len(lines[outputLines-1]) != maxLineBytes {
-		t.Errorf("tail: %d lines, first %q, last %d bytes", len(lines), lines[0], len(lines[outputLines-1]))
+	if got := tw.lastLine(); len(got) != maxLineBytes {
+		t.Errorf("a long last line kept %d bytes", len(got))
 	}
-	if len(tw.urls) != maxURLs || tw.urls[0] != "https://example.com/0" {
-		t.Errorf("urls %q", tw.urls)
+}
+
+func TestUninstallStopsADetachedRun(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{Dir: dir}
+	start := func() *exec.Cmd {
+		cmd := exec.Command("sleep", "30")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+		return cmd
 	}
-	if len(tw.lines) > outputLines {
-		t.Errorf("kept %d lines", len(tw.lines))
+	ours, other := start(), start()
+	write := func(job string, pid int, started string) {
+		if err := os.WriteFile(pidPath(paths, job), []byte(fmt.Sprintf("%d %s\n", pid, started)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("review:weekly", ours.Process.Pid, processStart(ours.Process.Pid))
+	// A pid file whose start time does not match belongs to a process that
+	// took the pid later, so it is left alone.
+	write("review:monthly", other.Process.Pid, "Mon Jan  1 00:00:00 2001")
+	stopDetachedRuns(paths)
+	done := make(chan error, 1)
+	go func() { done <- ours.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the detached run is still running")
+	}
+	if err := other.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Errorf("the other process was stopped: %v", err)
+	}
+	if files, _ := filepath.Glob(filepath.Join(dir, "*.pid")); len(files) != 0 {
+		t.Errorf("pid files left: %v", files)
 	}
 }
 

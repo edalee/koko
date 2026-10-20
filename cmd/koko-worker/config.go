@@ -269,7 +269,7 @@ type Paths struct {
 	ClaudeWrap string // worker/reviewer-claude.sh
 	Cache      string // ~/.cache/koko-worker/repos, cache clones of the PRs' repos
 	Reviewer   string // ~/.cache/koko-worker/reviewer, the managed reviewer clone
-	RepoRuns   string // ~/.cache/koko-worker/repos-runs, the repos runs' own clones
+	RepoRuns   string // ~/.cache/koko-worker/repos-runs, clones every repos run shares, and reviews never use
 }
 
 func workerPaths() Paths {
@@ -432,9 +432,10 @@ func (j JobConfig) withDefaults(times []string) JobConfig {
 	return j
 }
 
-// jobNames are the fixed jobs, then one job per run. A run with a bad name,
-// or the same name as an earlier run, is left out: its name would make a bad
-// lock file name. runProblem and `check reviewer` report it.
+// jobNames are the fixed jobs, then one job per run. A run with a bad name is
+// left out, because the name would make a bad lock file name. So is a run
+// named like an earlier run, which would share its job. runProblem and check
+// reviewer report both.
 func (c Config) jobNames() []string {
 	names := slices.Clone(fixedJobs)
 	seen := map[string]bool{}
@@ -471,8 +472,8 @@ func (c Config) reviewRun(job string) (ReviewRun, bool) {
 }
 
 // resolveJob turns a job name from the CLI into a job in the config. A bare
-// "review" is the first PRs run that is on, else the first PRs run, as the
-// single review job was before runs. It never starts a repos run.
+// "review" is the first PRs run that is on, else the first PRs run, never a
+// repos run.
 func (c Config) resolveJob(job string) (string, error) {
 	if job == JobReview {
 		run, ok := c.firstPRsRun()

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -62,6 +63,12 @@ func runWorker(timeout time.Duration, args ...string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = cleanEnv()
+	// On timeout koko-worker gets SIGTERM, not SIGKILL, so it stops the tool
+	// it runs, which is in a process group of its own. That takes up to about
+	// 70 seconds, then it records the run. A worker still running after
+	// workerStopWait gets SIGKILL.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = workerStopWait
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return string(out), fmt.Errorf("koko-worker %s timed out", args[0])
@@ -194,15 +201,61 @@ func (w *WorkerService) Check(name string) (string, error) {
 	return runWorker(10*time.Minute, args...)
 }
 
+// workerStopWait is how long koko-worker gets to stop after SIGTERM.
+const workerStopWait = 3 * time.Minute
+
 // RunNow runs a job at once. With test set, it returns the message instead
-// of sending it, and books nothing. The limit is long because a review run
-// reviews each new PR in turn, up to 45 minutes each.
+// of sending it, and books nothing. The time limit comes from runNowLimit.
 func (w *WorkerService) RunNow(job string, test bool) (string, error) {
 	args := []string{"run", job}
 	if test {
 		args = append(args, "--test")
 	}
-	return runWorker(4*time.Hour, args...)
+	limit := runNowMinimum
+	if raw, err := w.GetConfig(); err == nil && !test {
+		limit = runNowLimit(raw, job)
+	}
+	return runWorker(limit, args...)
+}
+
+// runNowMinimum is the least time a Run now gets. A review run reviews each
+// new PR in turn, up to 45 minutes each by default.
+const runNowMinimum = 4 * time.Hour
+
+// runNowLimit is the time limit for a Run now of job: for a repos run, its
+// repos times its time limit per repo, plus 10 minutes, and never less than
+// runNowMinimum. A repo's default limit, 60 minutes, matches repoTimeoutMins
+// in cmd/koko-worker/config.go.
+func runNowLimit(workerJSON, job string) time.Duration {
+	name, ok := strings.CutPrefix(job, "review:")
+	if !ok {
+		return runNowMinimum
+	}
+	var cfg struct {
+		Reviewer struct {
+			Runs []struct {
+				Name           string   `json:"name"`
+				Target         string   `json:"target"`
+				Repos          []string `json:"repos"`
+				TimeoutMinutes int      `json:"timeoutMinutes"`
+			} `json:"runs"`
+		} `json:"reviewer"`
+	}
+	if json.Unmarshal([]byte(workerJSON), &cfg) != nil {
+		return runNowMinimum
+	}
+	for _, run := range cfg.Reviewer.Runs {
+		if run.Name != name || run.Target != "repos" {
+			continue
+		}
+		per := run.TimeoutMinutes
+		if per <= 0 {
+			per = 60
+		}
+		limit := time.Duration(len(run.Repos)*per)*time.Minute + 10*time.Minute
+		return max(limit, runNowMinimum)
+	}
+	return runNowMinimum
 }
 
 // ReadLog returns the end of the worker's log.

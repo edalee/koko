@@ -138,10 +138,12 @@ func startAgent() error {
 	return fmt.Errorf("launchctl bootstrap: %s", strings.TrimSpace(string(out)))
 }
 
-// uninstall stops the agent, removes its plist and cancels any booked wake.
-// Config, state, logs and the copied binary stay.
+// uninstall stops the agent and any repos run it started in its own process,
+// removes its plist and cancels any booked wake. Config, state, logs and the
+// copied binary stay.
 func uninstall(paths Paths) error {
 	stopAgent()
+	stopDetachedRuns(paths)
 	if err := os.Remove(agentPlistPath()); err != nil && !os.IsNotExist(err) {
 		return err
 	}

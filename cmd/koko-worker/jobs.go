@@ -32,12 +32,14 @@ type Env struct {
 	test   bool   // print instead of DM or comment, book nothing
 	// timeout caps one PR or one repo of a run. Zero means reviewTimeout.
 	timeout time.Duration
-	// slot is the first slot a scheduled run, or a Run now, covers. A repos
-	// run keys its repos' outcomes on it. Zero means none.
+	// slot is the first slot a scheduled run covers. A scheduled repos run
+	// keys its repos' outcomes on it. Zero means none.
 	slot time.Time
+	// scheduled is true for a run the scheduler started, not a Run now.
+	scheduled bool
 	// noWait makes a Run now fail at once on a held lock, not wait.
 	noWait bool
-	state  *State // read-only snapshot taken when the run started
+	state  *State // read-only snapshot. A review or repos run loads it again after it takes the reviewer lock.
 	now    time.Time
 	// persist changes the state on disk under a lock. It does nothing in test mode.
 	persist func(change func(*State)) error

@@ -20,22 +20,22 @@ import (
 // once per repo, for a tool that changes repos, such as one that updates
 // dependencies. It has no markers, review records or comments:
 //
-//   - The command runs in the run's own clone of the repo, reset to the newest
-//     commit of the default branch, with no hooks. Reviews of PRs never use
-//     these clones. {reviewer}, {claude} and {repo} are filled in. {pr}, {url}
-//     and {sha} name a PR, so runProblem refuses them.
+//   - The command runs in a clone of the repo that only repos runs use, reset
+//     to the newest commit of the default branch, with no hooks. {reviewer},
+//     {claude} and {repo} are filled in. {pr}, {url} and {sha} name a PR, so
+//     runProblem refuses them.
 //   - The environment carries REVIEW_REPO and RUN_KIND=repos. gh and git are
 //     not the read-only stand-ins of a review, so the tool can push and open
 //     PRs, which is its job. {claude} is the review wrapper, which denies some
 //     commands, such as git push, but is not a guard.
 //   - Exit code 0 means done, 2 means nothing to do, anything else failed.
 //
-// Repos run one after another. Each repo's outcome is saved for the slot as
-// it ends, so a retry of the slot never runs a repo twice. One Slack DM
-// reports them all.
+// Repos run one after another. A scheduled run saves each repo's outcome for
+// the slot as it ends, so a retry of the slot never runs a repo twice. One
+// Slack DM reports them all.
 
 // The statuses one repo of a repos run can end in. repoStarted is saved
-// before the repo runs, so a retry knows a repo the run was stopped in.
+// once the repo's tool starts, so a retry knows a repo the run was stopped in.
 const (
 	repoStarted = "started"
 	repoDone    = "done"
@@ -62,31 +62,28 @@ type repoOutcome struct {
 	repo   string
 	status string   // repoDone, repoNothing or repoFailed
 	why    string   // for a failure: the error, then the last line of output
-	tail   string   // the last outputLines lines of output
 	urls   []string // links in the output, such as a PR the tool opened
-	log    string   // the worker's log of the run
+	log    string   // path of the file with this repo's command output
 }
 
 func (o repoOutcome) record() RepoRecord {
 	return RepoRecord{Status: o.status, Why: o.why, URLs: o.urls, Log: o.log, At: time.Now()}
 }
 
-// outputLines is how many lines from the end of a repo's output go in
-// repoOutcome.tail. The whole output goes to the log file as it comes.
-const outputLines = 20
-
-// maxLineBytes caps a line of output kept in memory. Longer lines are cut.
+// maxLineBytes caps the line of output kept in memory. Longer lines are cut.
 const maxLineBytes = 4096
 
-// maxURLs is how many links from a repo's output the DM shows.
+// maxURLs is how many links from a repo's output the DM shows: the last ones,
+// because a tool prints the link to the PR it opened near the end.
 const maxURLs = 5
 
 var urlRe = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
 
-// tailWriter keeps the last outputLines lines of what is written to it, and
-// the first maxURLs links, so a tool's output never grows the memory.
+// tailWriter keeps the last line of what is written to it, and the last
+// maxURLs links, so a tool's output never grows the memory. The whole output
+// goes to the repo's log file.
 type tailWriter struct {
-	lines   []string
+	last    string
 	partial []byte
 	urls    []string
 }
@@ -114,37 +111,41 @@ func (t *tailWriter) keep(b []byte) {
 	}
 }
 
+// line takes one whole line: its links, and the line itself if it has text.
+// A link seen before moves to the end.
 func (t *tailWriter) line(l string) {
 	for _, u := range urlRe.FindAllString(l, -1) {
 		u = strings.TrimRight(u, ".,;:")
-		if len(t.urls) < maxURLs && !slices.Contains(t.urls, u) {
-			t.urls = append(t.urls, u)
+		t.urls = append(slices.DeleteFunc(t.urls, func(s string) bool { return s == u }), u)
+		if len(t.urls) > maxURLs {
+			t.urls = t.urls[len(t.urls)-maxURLs:]
 		}
 	}
-	t.lines = append(t.lines, l)
-	if len(t.lines) > outputLines {
-		t.lines = t.lines[len(t.lines)-outputLines:]
+	if s := strings.TrimSpace(l); s != "" {
+		t.last = s
 	}
 }
 
-// tail is the last outputLines lines, with a last line that has no newline.
-func (t *tailWriter) tail() string {
-	lines := t.lines
-	if len(t.partial) > 0 {
-		lines = append(append([]string{}, lines...), string(t.partial))
+// lastLine is the last line of output with text, a last line without a
+// newline too.
+func (t *tailWriter) lastLine() string {
+	if s := strings.TrimSpace(string(t.partial)); s != "" {
+		return s
 	}
-	return lastLines(strings.Join(lines, "\n"), outputLines)
+	return t.last
 }
 
 // repoCheckout gives a clean checkout of repo's default branch and a
 // function to release it. Tests swap it for a local folder.
 var repoCheckout = cleanCheckout
 
-// cleanCheckout makes the repos runs' own clone of repo a clean copy of the
-// newest commit on its default branch, and holds the clone's lock until
-// released. It removes any hooks first: a tool may install some, such as with
-// a hooks path, and git would run them on the next checkout. A clone with
-// local changes or stray files is reset: only the worker uses it.
+// cleanCheckout makes the repos runs' clone of repo, which every repos run
+// shares, a clean copy of the newest commit on its default branch, and holds
+// the clone's lock until released. It removes any hooks first: a tool may
+// install some, such as with a hooks path, and git would run them on the next
+// checkout. A clone with local changes or stray files is reset: only the
+// worker uses it. If a git step fails, the clone is deleted, so the next run
+// clones it fresh rather than meet the same broken clone.
 func cleanCheckout(ctx context.Context, paths Paths, repo string) (string, func(), error) {
 	dir := filepath.Join(paths.RepoRuns, strings.ReplaceAll(repo, "/", "__"))
 	if err := os.MkdirAll(paths.RepoRuns, 0o700); err != nil {
@@ -155,6 +156,7 @@ func cleanCheckout(ctx context.Context, paths Paths, repo string) (string, func(
 		return "", nil, err
 	}
 	fail := func(err error) (string, func(), error) {
+		_ = os.RemoveAll(dir)
 		unlock()
 		return "", nil, err
 	}
@@ -163,7 +165,6 @@ func cleanCheckout(ctx context.Context, paths Paths, repo string) (string, func(
 		out, err := exec.CommandContext(cloneCtx, "gh", "repo", "clone", repo, dir, "--", "--filter=blob:none", "--quiet").CombinedOutput()
 		cancel()
 		if err != nil {
-			_ = os.RemoveAll(dir) // a half-made clone would break every later run
 			return fail(fmt.Errorf("clone %s: %v: %s", repo, err, truncate(strings.TrimSpace(string(out)), 300)))
 		}
 	}
@@ -223,16 +224,45 @@ func removeHooks(dir string) error {
 	return nil
 }
 
+// stopError is a scheduled repos run that stopped because you switched the
+// worker or the run off, or removed the run. runDue records it as final.
+type stopError struct{ error }
+
+// stopReason says why a scheduled run of job should stop, or "". It reads
+// worker.json again. A file it cannot read is no reason: the run goes on.
+func stopReason(env Env, job string) string {
+	cfg, err := loadConfig(env.paths.Config)
+	if err != nil {
+		return ""
+	}
+	run, ok := cfg.reviewRun(job)
+	switch {
+	case !cfg.Enabled:
+		return "the worker is switched off"
+	case !ok:
+		return "the run was removed"
+	case !run.Enabled:
+		return "the run is switched off"
+	}
+	return ""
+}
+
 // runRepos runs the command once per repo of run, one after another, then
 // sends one DM about them all. A test run prints what it would run, and runs
 // nothing, because the tool changes the repos.
 //
-// With a slot, each repo's outcome is saved as it ends. A scheduled retry of
-// the slot, after a stop or a failed DM, takes the saved outcomes and runs
-// only the repos not yet started. A repo the run was stopped in counts as
-// failed, and does not run again, because the tool may have pushed part of
-// its work. A Run now (noWait) always runs every repo and sends the DM, but
-// saves its outcomes, so a later retry of its slot skips them too.
+// A scheduled run saves each repo's outcome for its slot. A repo is saved
+// once its tool starts, so a retry of the slot, after a stop, a failed DM or
+// a failed checkout, runs only the repos whose tool never started. A repo the
+// run was stopped in counts as failed, and does not run again, because the
+// tool may have pushed part of its work. A repo whose clone or fetch failed is
+// not saved: the error is one to retry, and the DM waits for that repo.
+//
+// A scheduled run reads worker.json again before each repo, and stops if you
+// switched the worker or the run off, or removed the run.
+//
+// A Run now never reads or writes the slot's records: it runs every repo and
+// sends its own DM.
 func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 	job := reviewJob(run.Name)
 	if !env.test {
@@ -265,20 +295,25 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 	if err := os.WriteFile(env.paths.ClaudeWrap, []byte(claudeWrapper), 0o700); err != nil {
 		return err
 	}
-	keep := !env.slot.IsZero()
-	resume := keep && !env.noWait
+	scheduled := env.scheduled && !env.slot.IsZero()
 	save := func(repo string, rec RepoRecord) error {
-		if !keep {
+		if !scheduled {
 			return nil
 		}
 		return env.persist(func(st *State) { st.RepoRuns[repoRunKey(job, env.slot, repo)] = rec })
 	}
 	var outcomes []repoOutcome
+	var pending []string // repos whose checkout failed, for a retry
 	for _, repo := range run.Repos {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if scheduled {
+			if why := stopReason(env, job); why != "" {
+				return stopRepos(env, run, outcomes, why)
+			}
 		}
-		if rec, ok := env.state.RepoRuns[repoRunKey(job, env.slot, repo)]; resume && ok {
+		if ctx.Err() != nil {
+			break
+		}
+		if rec, ok := env.state.RepoRuns[repoRunKey(job, env.slot, repo)]; scheduled && ok {
 			o := repoOutcome{repo: repo, status: rec.Status, why: rec.Why, urls: rec.URLs, log: rec.Log}
 			if o.status == repoStarted {
 				o.status, o.why = repoFailed, "the run stopped before it finished, so it does not run again in this slot"
@@ -286,15 +321,45 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 			outcomes = append(outcomes, o)
 			continue
 		}
+		dir, release, err := repoCheckout(ctx, env.paths, repo)
+		if err != nil {
+			log.Printf("%s: %s: could not get the repo: %v", job, repo, err)
+			pending = append(pending, fmt.Sprintf("%s (%s)", repo, truncate(err.Error(), 200)))
+			continue
+		}
 		if err := save(repo, RepoRecord{Status: repoStarted, At: time.Now()}); err != nil {
+			release()
 			return err
 		}
-		o := runInRepo(ctx, env, cli, repo)
+		o := runInRepo(ctx, env, cli, repo, dir)
+		release()
 		log.Printf("%s: %s: %s %s", job, repo, o.status, o.why)
 		if err := save(repo, o.record()); err != nil {
 			return err
 		}
 		outcomes = append(outcomes, o)
+	}
+	if ctx.Err() != nil {
+		if scheduled {
+			if why := stopReason(env, job); why != "" {
+				return stopRepos(env, run, outcomes, why)
+			}
+		}
+		return ctx.Err()
+	}
+	if len(pending) > 0 {
+		// No DM yet: it waits for these repos. A retry runs only them.
+		return fmt.Errorf("%s: could not get %s, trying again. So far: %s", run.Name, strings.Join(pending, ", "), outcomeLine(outcomes))
+	}
+	if !scheduled || !env.state.Runs[slotKey(job, env.slot)].Reported {
+		if err := env.notify(ctx, reposMessage(run, outcomes)); err != nil {
+			// Not reported, so the slot retries. The retry finds every repo
+			// saved, and only sends the DM.
+			return fmt.Errorf("%s: could not send the DM, trying again: %w", run.Name, err)
+		}
+		if err := markReported(env, job, scheduled); err != nil {
+			return err
+		}
 	}
 	var failed []string
 	for _, o := range outcomes {
@@ -302,26 +367,50 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 			failed = append(failed, o.repo+": "+o.why)
 		}
 	}
-	if !resume || !env.state.Runs[slotKey(job, env.slot)].Reported {
-		if err := env.notify(ctx, reposMessage(run, outcomes)); err != nil {
-			// No repo runs again: a retry finds them saved, and sends the DM.
-			return reportedError{fmt.Errorf("%s: could not send the DM: %w", run.Name, err)}
-		}
-		if keep {
-			if err := env.persist(func(st *State) {
-				rec := st.Runs[slotKey(job, env.slot)]
-				rec.Reported = true
-				st.Runs[slotKey(job, env.slot)] = rec
-			}); err != nil {
-				return err
-			}
-		}
-	}
 	if len(failed) > 0 {
 		// The DM has said so, so the scheduler does not send another.
 		return reportedError{fmt.Errorf("%s: %s", run.Name, strings.Join(failed, "; "))}
 	}
 	return nil
+}
+
+// markReported saves that the slot's DM went out, for a scheduled run.
+func markReported(env Env, job string, scheduled bool) error {
+	if !scheduled {
+		return nil
+	}
+	return env.persist(func(st *State) {
+		rec := st.Runs[slotKey(job, env.slot)]
+		rec.Reported = true
+		st.Runs[slotKey(job, env.slot)] = rec
+	})
+}
+
+// stopRepos ends a scheduled run you stopped: one DM with the repos done so
+// far and why it stopped, then a stopError. The run's context may be
+// cancelled, so the DM gets its own.
+func stopRepos(env Env, run ReviewRun, outcomes []repoOutcome, why string) error {
+	job := reviewJob(run.Name)
+	log.Printf("%s: stopped: %s", job, why)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	msg := reposMessage(run, outcomes) + fmt.Sprintf("Stopped before the other repos, because %s.\n", why)
+	if err := env.notify(ctx, msg); err == nil {
+		_ = markReported(env, job, true)
+	}
+	return stopError{fmt.Errorf("%s stopped: %s", run.Name, why)}
+}
+
+// outcomeLine is the outcomes in one line, such as "acme/api: done".
+func outcomeLine(outcomes []repoOutcome) string {
+	if len(outcomes) == 0 {
+		return "no repo ran"
+	}
+	var parts []string
+	for _, o := range outcomes {
+		parts = append(parts, o.repo+": "+o.status)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // repoCommand is the command for one repo: the program, its arguments and
@@ -332,16 +421,10 @@ func repoCommand(env Env, cli, repo string) (cmdEnv []string, prog string, args 
 	return reviewerCommand(env.cfg.Reviewer.Command, cli, env.paths.ClaudeWrap, p, "")
 }
 
-// runInRepo runs the command in a clean checkout of repo. The output goes to
-// the repo's log as it comes, and only its tail stays in memory.
-func runInRepo(ctx context.Context, env Env, cli, repo string) repoOutcome {
+// runInRepo runs the command for repo in its checkout dir. The output goes to
+// the repo's log as it comes, and only its last line stays in memory.
+func runInRepo(ctx context.Context, env Env, cli, repo, dir string) repoOutcome {
 	o := repoOutcome{repo: repo, status: repoFailed}
-	dir, release, err := repoCheckout(ctx, env.paths, repo)
-	if err != nil {
-		o.why = truncate(err.Error(), 300)
-		return o
-	}
-	defer release()
 	cmdEnv, prog, args, err := repoCommand(env, cli, repo)
 	if err != nil {
 		o.why = err.Error()
@@ -365,7 +448,7 @@ func runInRepo(ctx context.Context, env Env, cli, repo string) repoOutcome {
 	cmd.Stdout, cmd.Stderr = out, out
 	err = cmd.Run()
 
-	o.tail, o.urls = tail.tail(), tail.urls
+	o.urls = tail.urls
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
@@ -375,7 +458,7 @@ func runInRepo(ctx context.Context, env Env, cli, repo string) repoOutcome {
 	case errors.As(err, &exit) && exit.ExitCode() == skipExit:
 		o.status = repoNothing
 	default:
-		o.why = truncate(fmt.Sprintf("%v: %s", err, lastLines(o.tail, 1)), 300)
+		o.why = truncate(fmt.Sprintf("%v: %s", err, tail.lastLine()), 300)
 	}
 	return o
 }

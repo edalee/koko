@@ -98,9 +98,9 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		}
 
 	case "reviewer":
-		// The runs share the source and the program, so the shared settings
-		// stand for them. Any run's own problem fails the check, a bad name
-		// or target too.
+		// Every run uses the same reviewer source and program, so the check
+		// tests them once. A problem in any run, such as a bad name or
+		// target, fails the check.
 		rv := cfg.Reviewer
 		var runErr error
 		for _, run := range cfg.Reviewer.Runs {

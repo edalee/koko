@@ -197,7 +197,7 @@ func lockFile(path string) (func(), error) {
 	}, nil
 }
 
-// errBusy is a Run now that found its job, or another run, at work.
+// errBusy is the error a Run now gets when its job, or another run, holds the lock.
 var errBusy = errors.New("another run is working, try again when it ends")
 
 // tryLockFile takes an exclusive lock on path if nobody holds it, or fails

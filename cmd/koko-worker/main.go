@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -88,13 +90,18 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+// dmSender gives the function that sends your Slack DMs. Tests swap it, so
+// they never reach Slack.
+var dmSender = func(cfg SlackConfig) func(context.Context, Message) error {
+	return newSlack(cfg).post
+}
+
 func newEnv(cfg Config, paths Paths, test bool) Env {
 	st := loadState(paths.State)
-	slack := newSlack(cfg.Slack)
 	env := Env{
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
 		claude:      claudeRunner{settingsPath: paths.Settings},
-		send:        slack.post,
+		send:        dmSender(cfg.Slack),
 		post:        postComment,
 		findComment: findComment,
 		prHead:      prHead,
@@ -200,9 +207,6 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 		env.now = day.Add(7 * time.Hour)
 	}
 	slots := manualSlots(cfg, job, env.now)
-	if len(slots) > 0 {
-		env.slot = slots[0]
-	}
 	runErr := runJob(ctx, env, job, *pr)
 	if !*test && runErr == nil && *pr == "" {
 		run := DueRun{Job: job, Slots: slots}
@@ -334,8 +338,8 @@ var startRun = func(paths Paths, job string) (func() error, error) {
 
 // startDetached starts a due repos run in its own process, unless it is still
 // running, its lock is held, or it ended less than retryInterval ago. The
-// child records the slot. The wait stops a child that died before it could
-// record from starting again on every tick.
+// child records the slot. If a child dies before it records the slot, the
+// retryInterval wait stops startDetached from starting it again on every tick.
 func startDetached(paths Paths, job string, now time.Time) {
 	if d, ok := detached[job]; ok {
 		select {
@@ -369,11 +373,16 @@ func startDetached(paths Paths, job string, now time.Time) {
 
 // runScheduled is the process startDetached starts: it runs job's due slots
 // under the job's lock, as serveTick would, and records them. It logs to
-// worker.log and keeps the Mac awake.
+// worker.log and keeps the Mac awake. Its pid file lets uninstall stop it.
 func runScheduled(ctx context.Context, cfg Config, paths Paths, job string) error {
 	if l, err := openRotatingLog(agentLogPath(paths), logCap); err == nil {
 		log.SetOutput(l)
 		defer func() { _ = l.Close() }()
+	}
+	if remove, err := writePidFile(paths, job); err == nil {
+		defer remove()
+	} else {
+		log.Printf("%s: pid file: %v", job, err)
 	}
 	for _, run := range dueRuns(cfg, loadState(paths.State), time.Now()) {
 		if run.Job == job {
@@ -383,6 +392,55 @@ func runScheduled(ctx context.Context, cfg Config, paths Paths, job string) erro
 		}
 	}
 	return nil
+}
+
+// pidPath is the file a detached run keeps next to its job lock: its pid and
+// its start time, so uninstall stops it, and never a process that took the
+// pid later.
+func pidPath(paths Paths, job string) string { return filepath.Join(paths.Dir, job+".pid") }
+
+// processStart is when pid started, as ps prints it, or "" if there is no
+// such process.
+func processStart(pid int) string {
+	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// writePidFile writes this process's pid file for job, and gives the function
+// that removes it.
+func writePidFile(paths Paths, job string) (func(), error) {
+	pid := os.Getpid()
+	path := pidPath(paths, job)
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d %s\n", pid, processStart(pid))), 0o600); err != nil {
+		return nil, err
+	}
+	return func() { _ = os.Remove(path) }, nil
+}
+
+// stopDetachedRuns stops the repos runs serveTick started in their own
+// process. Each gets SIGTERM to its process group, if its pid still belongs
+// to it, and then stops its tool. uninstall calls this, so switching the
+// worker off stops a repos run. A restart of the agent does not.
+func stopDetachedRuns(paths Paths) {
+	files, _ := filepath.Glob(filepath.Join(paths.Dir, "*.pid"))
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		pidText, start, _ := strings.Cut(strings.TrimSpace(string(data)), " ")
+		pid, err := strconv.Atoi(pidText)
+		if err == nil && pid > 1 && start != "" && processStart(pid) == start {
+			// Setsid made the run's process group id its pid.
+			if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+				log.Printf("stop %s: %v", filepath.Base(f), err)
+			}
+		}
+		_ = os.Remove(f)
+	}
 }
 
 // lastLogPrune is when serveTick last pruned old review logs. Once a day is
@@ -404,13 +462,19 @@ func runDue(ctx context.Context, cfg Config, paths Paths, run DueRun) {
 	}
 	log.Printf("%s: running for %s", run.Job, run.Slots[len(run.Slots)-1].Format("15:04"))
 	env := newEnv(cfg, paths, false)
-	env.slot = run.Slots[0]
+	env.slot, env.scheduled = run.Slots[0], true
 	err = runJob(ctx, env, run.Job, "")
 	status, msg := StatusOK, ""
 	var reported reportedError
+	var stopped stopError
 	switch {
 	case err == nil:
 		log.Printf("%s: done", run.Job)
+	case errors.As(err, &stopped):
+		// You stopped it, and the DM has said so. Checked before the network,
+		// because a stop cancels the run's context, which reads as offline.
+		status, msg = StatusFailed, err.Error()
+		log.Printf("%s: %v", run.Job, err)
 	case !online(ctx):
 		// Only a real loss of internet counts as a network wait. An error that
 		// merely mentions the network counts as a failure, so it cannot retry
@@ -466,7 +530,9 @@ func stillDue(cfg Config, st State, run DueRun) bool {
 // online is true if Slack's API answers, as a test of the internet. A job
 // that fails while offline waits for the internet and retries, instead of
 // counting as failed.
-func online(ctx context.Context) bool {
+//
+// It is a variable so tests can say they are online without the network.
+var online = func(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "HEAD", "https://slack.com/api/api.test", nil)
