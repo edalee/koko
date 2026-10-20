@@ -4,7 +4,7 @@
 
 - Every job runs Monday to Friday. A job cannot run on fewer days, or once a week.
 - Focus time books every free gap, lunch included, unless lunch is on the calendar.
-- The review worker has one command and one schedule. A second review with other arguments, such as a weekly one, is not possible.
+- The review worker has one command and one schedule. A second run with other arguments, such as a weekly one over repos, is not possible.
 - The Worker tab is one long page. Shared settings sit apart from the jobs that use them, and the review card mixes how the reviewer runs with which PRs it reviews.
 - Nothing tells you what the team did the day before.
 
@@ -14,7 +14,7 @@ Four small PRs, in this order. Each one ships on its own.
 
 1. Job days and a lunch blocker.
 2. A clearer Worker tab.
-3. Several reviewer runs.
+3. Several runs of the reviewer command, for PRs or for repos.
 4. A team summary job.
 
 Koko stays generic. No code, default, example or help text names a reviewer tool or a company. Examples use `acme`.
@@ -48,22 +48,40 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 - The stand-up card says its Team PRs list uses the review worker's team.
 - `WorkerSettings.tsx` splits into a shell and one component per job. Behaviour does not change.
 
-## 3. Several reviewer runs
+## 3. Several runs of the reviewer command
 
 `reviewer.runs` is a list. Each run has:
 
 | Field | Meaning |
 |---|---|
-| `name` | Shown in the UI and in status, for example "daily" |
+| `name` | Shown in the UI and in status, for example "daily". Up to 32 lowercase letters, digits and dashes, unique |
 | `args` | Words added after the base command |
-| `days`, `times` | Its schedule, as in part 1 |
-| `mine`, `team` | Its PR scopes and age limits |
-| `markerPrefix` | Its own marker, so its comments count apart from other runs |
+| `enabled`, `days`, `times` | Its schedule, as in part 1 |
+| `target` | `"prs"` (the default) or `"repos"` |
+| `mine`, `team` | PRs runs: its PR scopes and age limits |
+| `repos` | Repos runs: the `"owner/repo"` names to work on |
+| `timeoutMinutes` | The limit for one PR or one repo. Default 45 for PRs, 60 for repos |
 
-- The source, logs folder and base command stay shared.
-- Each run keeps its own record of reviewed PRs, so a weekly run reviews a PR the daily run already reviewed.
-- Each run is a scheduled job named `review:<name>`, with its own lock, slots and status.
-- An older `worker.json` becomes one run named "daily" with the old times and scopes. Nothing changes until you add a run.
+- The source, logs folder, base command, marker, orgs and excluded repos stay shared.
+- Each run is a scheduled job named `review:<name>`, with its own lock, slots and status. The name is part of the lock file's name, so it is short.
+- `koko-worker run review:<name>` runs one run. `run review` runs the first PRs run.
+- Runs take one shared lock, so only one run works at a time. They share the reviewer clone and the cache clones.
+- An older `worker.json` becomes one PRs run named "daily", with the old `jobs.review` times, days and switch, and the old scopes. Nothing changes until you add a run. The worker then ignores `jobs.review`, and the UI writes only `reviewer.runs`.
+- The stand-up uses the team, repos and age limit of the first PRs run that is on.
+
+**PRs runs** work as the single review job did: once per PR, with the shared marker, the record of reviewed PRs and the comments. Runs share that record, so a PR is reviewed once, whichever run reaches it first.
+
+**Repos runs** are for a tool that changes repos, such as one that updates dependencies:
+
+- The command runs once per repo, one after another. Its working folder is the worker's cache clone of the repo, reset to the newest commit of the default branch, with no stray files.
+- `{reviewer}`, `{claude}` and `{repo}` are filled in. `{pr}`, `{url}` and `{sha}` name a PR, so the worker refuses a repos run whose command uses them.
+- The environment carries `REVIEW_REPO` and `RUN_KIND=repos`. gh and git are not read-only, so the tool can push and open PRs.
+- Exit 0 means done, 2 means nothing to do, anything else failed. The worker keeps the last 20 lines of output and a log per repo.
+- After the run, one Slack DM lists each repo as done, nothing to do or failed, with any link in its output, and the log of a failure.
+- No markers, review records or comments.
+- A test run prints the command for each repo and runs nothing.
+
+Example: a "weekly" repos run on Mondays at 08:00 with the arguments `--update-deps`, over `acme/api` and `acme/web`.
 
 ## 4. Team summary
 
@@ -115,4 +133,3 @@ A new `summary` job. Default: off, 08:30, Monday to Friday.
 
 - A cron syntax. Days and times cover the daily and weekly cases.
 - Posting the summary to a channel.
-- Reviewer runs that sweep repos rather than PRs.

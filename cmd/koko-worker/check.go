@@ -98,12 +98,20 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		}
 
 	case "reviewer":
-		rv := cfg.Reviewer
+		// The runs share the source and the program, so one run stands for
+		// them. Any run's own problem fails the check.
+		rv := cfg.Reviewer.forRun(cfg.standupRun())
+		var runErr error
+		for _, run := range cfg.Reviewer.Runs {
+			if err := cfg.runProblem(run); err != nil && runErr == nil {
+				runErr = fmt.Errorf("%s run: %w", run.Name, err)
+			}
+		}
 		cli := cfg.reviewerCLI(workerPaths())
 		_, cloneErr := os.Stat(filepath.Join(workerPaths().Reviewer, ".git"))
 		switch {
-		case rv.problem() != nil:
-			r.Detail = rv.problem().Error()
+		case runErr != nil:
+			r.Detail = runErr.Error()
 			r.Fix = "Fix the reviewer settings in Settings > Worker > Review worker."
 		case !rv.usesReviewer():
 			r.OK, r.Detail = true, "runs "+commandProgram(rv.Command)

@@ -158,8 +158,23 @@ func testConfig() Config {
 	cfg.Enabled = true
 	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "acme-review {pr}", "acme"
 	cfg.Reviewer.Team = TeamScopeConfig{Enabled: true, MaxAgeDays: 4, Team: "acme/platform"}
-	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: cfg.Jobs[JobReview].Times}
+	cfg.Reviewer.Runs[0].Enabled = true
+	cfg.Reviewer.Runs[0].Team = cfg.Reviewer.Team
 	return cfg
+}
+
+// reviewDaily is the job name of the one run a default config has.
+var reviewDaily = reviewJob(legacyRun)
+
+// setJob sets the switch, times and days of a fixed job or a review run.
+func setJob(cfg *Config, name string, jc JobConfig) {
+	for i, run := range cfg.Reviewer.Runs {
+		if reviewJob(run.Name) == name {
+			cfg.Reviewer.Runs[i].JobConfig = jc
+			return
+		}
+	}
+	cfg.Jobs[name] = jc
 }
 
 // readyState is a state in which every time in cfg was set a week earlier.
@@ -197,7 +212,7 @@ func TestDueRuns(t *testing.T) {
 	})
 	t.Run("lid opened at 13:00 catches up once per job", func(t *testing.T) {
 		got := dueString(dueRuns(cfg, empty, monday(13, 0)))
-		if got != "standup[07:00] focus[09:15] review[09:30,12:00]" {
+		if got != "standup[07:00] focus[09:15] review:daily[09:30,12:00]" {
 			t.Errorf("got %q", got)
 		}
 	})
@@ -233,7 +248,7 @@ func TestDueRuns(t *testing.T) {
 	})
 	t.Run("job switched off", func(t *testing.T) {
 		c := testConfig()
-		c.Jobs[JobReview] = JobConfig{Enabled: false, Times: []string{"09:30"}}
+		setJob(&c, reviewDaily, JobConfig{Enabled: false, Times: []string{"09:30"}})
 		st := readyState(c)
 		if got := dueString(dueRuns(c, st, monday(9, 40))); got != "standup[07:00] focus[09:15]" {
 			t.Errorf("got %q", got)
@@ -256,16 +271,16 @@ func TestJobDays(t *testing.T) {
 		if got := dueString(dueRuns(cfg, st, saturday)); got != "standup[07:00]" {
 			t.Errorf("Saturday: got %q", got)
 		}
-		if got := dueString(dueRuns(cfg, st, monday(13, 0))); got != "focus[09:15] review[09:30,12:00]" {
+		if got := dueString(dueRuns(cfg, st, monday(13, 0))); got != "focus[09:15] review:daily[09:30,12:00]" {
 			t.Errorf("Monday: got %q", got)
 		}
 	})
 	t.Run("a job once a week", func(t *testing.T) {
 		cfg := testConfig()
-		cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}, Days: []string{"wed"}}
+		setJob(&cfg, reviewDaily, JobConfig{Enabled: true, Times: []string{"09:30"}, Days: []string{"wed"}})
 		st := readyState(cfg)
 		wednesday := monday(10, 0).AddDate(0, 0, 2)
-		if got := dueString(dueRuns(cfg, st, wednesday)); got != "standup[07:00] focus[09:15] review[09:30]" {
+		if got := dueString(dueRuns(cfg, st, wednesday)); got != "standup[07:00] focus[09:15] review:daily[09:30]" {
 			t.Errorf("Wednesday: got %q", got)
 		}
 		if got := dueString(dueRuns(cfg, st, wednesday.AddDate(0, 0, -1))); got != "standup[07:00] focus[09:15]" {
@@ -301,7 +316,7 @@ func TestAddedDayWaitsAWeek(t *testing.T) {
 	if got := dueString(dueRuns(cfg, st, saturday.AddDate(0, 0, 7))); got != "standup[07:00]" {
 		t.Errorf("next Saturday: got %q", got)
 	}
-	if got := dueString(dueRuns(cfg, st, monday(13, 0).AddDate(0, 0, 7))); got != "standup[07:00] focus[09:15] review[09:30,12:00]" {
+	if got := dueString(dueRuns(cfg, st, monday(13, 0).AddDate(0, 0, 7))); got != "standup[07:00] focus[09:15] review:daily[09:30,12:00]" {
 		t.Errorf("Monday, active all along: got %q", got)
 	}
 }
@@ -312,7 +327,7 @@ func TestStateFromBeforeDaysKeepsToday(t *testing.T) {
 	syncTimes(cfg, &st, monday(0, 0).AddDate(0, 0, -7)) // times only, as an older worker recorded
 	st.DaysAdded = nil
 	syncTimes(cfg, &st, monday(10, 0))
-	if got := dueString(dueRuns(cfg, st, monday(10, 0))); got != "standup[07:00] focus[09:15] review[09:30]" {
+	if got := dueString(dueRuns(cfg, st, monday(10, 0))); got != "standup[07:00] focus[09:15] review:daily[09:30]" {
 		t.Errorf("after the update: got %q", got)
 	}
 }
@@ -337,8 +352,9 @@ func TestFocusOnAnotherDaySaysSo(t *testing.T) {
 
 func TestNextSlotSkipsToAnAllowedDay(t *testing.T) {
 	cfg := testConfig()
-	for _, job := range allJobs {
-		cfg.Jobs[job] = JobConfig{Enabled: false, Times: cfg.Jobs[job].Times}
+	for _, job := range cfg.jobNames() {
+		jc, _ := cfg.job(job)
+		setJob(&cfg, job, JobConfig{Enabled: false, Times: jc.Times})
 	}
 	cfg.Jobs[JobStandup] = JobConfig{Enabled: true, Times: []string{"07:00"}, Days: []string{"thu", "sat"}}
 	tests := []struct {
@@ -493,12 +509,12 @@ func TestConfigValidate(t *testing.T) {
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("defaults invalid: %v", err)
 	}
-	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"9.30"}}
+	setJob(&cfg, reviewDaily, JobConfig{Enabled: true, Times: []string{"9.30"}})
 	if err := cfg.validate(); err == nil {
 		t.Error("want an error for a bad time")
 	}
 	cfg = defaultConfig()
-	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}, Days: []string{"mon", "funday"}}
+	setJob(&cfg, reviewDaily, JobConfig{Enabled: true, Times: []string{"09:30"}, Days: []string{"mon", "funday"}})
 	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "funday") {
 		t.Errorf("bad day: got %v", err)
 	}
@@ -570,7 +586,7 @@ func TestManualSlots(t *testing.T) {
 		t.Errorf("stand-up: got %v", got)
 	}
 	// The review run by hand at 12:05 covers 09:30 and 12:00, not 14:00.
-	got := manualSlots(cfg, JobReview, monday(12, 5))
+	got := manualSlots(cfg, reviewDaily, monday(12, 5))
 	if len(got) != 2 || got[1].Format("15:04") != "12:00" {
 		t.Errorf("review: got %v", got)
 	}
@@ -640,8 +656,8 @@ func TestLoadConfigKeepsDefaults(t *testing.T) {
 	if cfg.Reviewer.Source != SourceManaged || cfg.TimeZone != def.TimeZone || cfg.Focus.WindowStart != "09:00" {
 		t.Errorf("empty values not defaulted: %+v", cfg)
 	}
-	if got := strings.Join(cfg.Jobs[JobReview].Times, ","); got != "09:30,12:00,14:00" {
-		t.Errorf("review times = %q", got)
+	if review, _ := cfg.job(reviewDaily); !review.Enabled || strings.Join(review.Times, ",") != "09:30,12:00,14:00" {
+		t.Errorf("review = %+v, want on at the default times", review)
 	}
 	if cfg.JiraSite != "acme.atlassian.net" {
 		t.Errorf("jira site = %q, want the host only", cfg.JiraSite)
@@ -702,11 +718,11 @@ func TestTimeMovedEarlierWaitsForTomorrow(t *testing.T) {
 
 func TestJobSwitchedOnLateWaitsForTomorrow(t *testing.T) {
 	cfg := testConfig()
-	cfg.Jobs[JobReview] = JobConfig{Enabled: false, Times: []string{"09:30"}}
+	setJob(&cfg, reviewDaily, JobConfig{Enabled: false, Times: []string{"09:30"}})
 	st := readyState(cfg)
-	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}}
+	setJob(&cfg, reviewDaily, JobConfig{Enabled: true, Times: []string{"09:30"}})
 	syncTimes(cfg, &st, monday(10, 0))
-	if got := dueString(dueRuns(cfg, st, monday(10, 0))); strings.Contains(got, JobReview) {
+	if got := dueString(dueRuns(cfg, st, monday(10, 0))); strings.Contains(got, reviewDaily) {
 		t.Errorf("review ran straight after being switched on: %q", got)
 	}
 }

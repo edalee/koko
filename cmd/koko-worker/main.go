@@ -70,8 +70,10 @@ func usage() {
 	fmt.Fprint(os.Stderr, `Usage:
   koko-worker serve                      run the scheduler (launchd starts this)
   koko-worker run <job> [--test [--date YYYY-MM-DD]] [--pr URL]
-                                         run standup, focus, review or summary now. --test prints
-                                         instead of sending a DM, and books nothing.
+                                         run standup, focus, summary or review:<run> now.
+                                         review alone is the first PRs run. --test prints
+                                         instead of sending a DM, books nothing, and runs
+                                         nothing in a repos run.
                                          --date runs as if it were 07:00 that day
   koko-worker check [name]               check connections: slack, github, claude, jira, calendar, reviewer, summary, wake
   koko-worker status                     JSON status for the Koko app
@@ -124,10 +126,22 @@ func runJob(ctx context.Context, env Env, job, onlyURL string) error {
 		return runStandup(ctx, env)
 	case JobFocus:
 		return runFocus(ctx, env)
-	case JobReview:
-		return runReview(ctx, env, onlyURL)
 	case JobSummary:
 		return runSummary(ctx, env)
+	}
+	if run, ok := env.cfg.reviewRun(job); ok {
+		if err := env.cfg.runProblem(run); err != nil {
+			return fmt.Errorf("%s: %w. Fix it in Settings > Worker > Review worker", job, err)
+		}
+		env.cfg.Reviewer = env.cfg.Reviewer.forRun(run)
+		env.timeout = run.timeout()
+		if run.Target == TargetRepos {
+			if onlyURL != "" {
+				return fmt.Errorf("%s works on repos, so --pr does not apply", job)
+			}
+			return runRepos(ctx, env, run)
+		}
+		return runReview(ctx, env, onlyURL)
 	}
 	return fmt.Errorf("unknown job %q", job)
 }
@@ -142,13 +156,17 @@ func cmdRun(ctx context.Context, paths Paths, args []string) error {
 	pr := fs.String("pr", "", "review only: review this PR URL")
 	date := fs.String("date", "", "with --test: run as if it were 07:00 on this day (YYYY-MM-DD)")
 	if len(args) == 0 {
-		return fmt.Errorf("run needs a job: standup, focus, review or summary")
+		return fmt.Errorf("run needs a job: standup, focus, summary, review or review:<run>")
 	}
-	job := args[0]
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	cfg, err := loadConfig(paths.Config)
+	if err != nil {
+		return err
+	}
+	// Before the lock, so an unknown name leaves no lock file behind.
+	job, err := cfg.resolveJob(args[0])
 	if err != nil {
 		return err
 	}
@@ -381,8 +399,8 @@ func cmdStatus(paths Paths) error {
 	}
 	out["reviewer"] = reviewer
 	jobs := map[string]jobStatus{}
-	for _, job := range allJobs {
-		jc := cfg.Jobs[job]
+	for _, job := range cfg.jobNames() {
+		jc, _ := cfg.job(job)
 		js := jobStatus{Enabled: jc.Enabled, Times: jc.Times}
 		for _, r := range st.Runs {
 			if r.Job == job && (js.LastRun == nil || r.At.After(js.LastRun.At)) {

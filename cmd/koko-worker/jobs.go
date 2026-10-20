@@ -30,10 +30,20 @@ type Env struct {
 	// online is true if the internet answers.
 	online func(ctx context.Context) bool
 	test   bool   // print instead of DM or comment, book nothing
+	// timeout caps one PR or one repo of a run. Zero means reviewTimeout.
+	timeout time.Duration
 	state  *State // read-only snapshot taken when the run started
 	now    time.Time
 	// persist changes the state on disk under a lock. It does nothing in test mode.
 	persist func(change func(*State)) error
+}
+
+// runTimeout caps one PR or one repo of the run at work.
+func (e Env) runTimeout() time.Duration {
+	if e.timeout > 0 {
+		return e.timeout
+	}
+	return reviewTimeout
 }
 
 // notify sends a DM of one section.
@@ -86,6 +96,9 @@ func jiraOffNote(site string, prs int) string {
 }
 
 func runStandup(ctx context.Context, env Env) error {
+	// The team PRs, repos and age limit are those of the first PRs run that
+	// is switched on.
+	env.cfg.Reviewer = env.cfg.Reviewer.forRun(env.cfg.standupRun())
 	loc := env.cfg.location()
 	now := env.now.In(loc)
 
@@ -662,6 +675,18 @@ func reviewKey(repo string, number int, sha string) string {
 }
 
 func runReview(ctx context.Context, env Env, onlyURL string) error {
+	// Runs share the reviewer clone, its wrapper and the unposted comments, so
+	// one run reviews at a time. The state is read again under the lock, to
+	// see what the run before posted.
+	if !env.test {
+		unlock, err := lockFile(filepath.Join(env.paths.Dir, "reviewer.lock"))
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		st := loadState(env.paths.State)
+		env.state = &st
+	}
 	// Before the PR loop, so a reviewer that cannot run marks nothing reviewed.
 	cli, err := prepareReviewer(ctx, env)
 	if err != nil {
@@ -1132,7 +1157,7 @@ type reviewSkippedError struct{ error }
 // lock, or the PR is closed or a draft.
 const skipExit = 2
 
-// reviewTimeout caps one review. On timeout, the reviewer's whole process
+// reviewTimeout is the default cap on one review. On timeout, the reviewer's whole process
 // group gets SIGTERM, so its trap can remove its lock. A plain kill would leave the lock
 // behind and block every later review of that PR.
 const reviewTimeout = 45 * time.Minute
@@ -1178,7 +1203,8 @@ func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA s
 	_ = os.MkdirAll(env.paths.Logs, 0o700)
 	_ = os.Remove(resultPath) // a result from an earlier run must not count
 
-	ctx, cancel := context.WithTimeout(ctx, reviewTimeout)
+	limit := env.runTimeout()
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmdEnv, prog, args, err := reviewerCommand(rv.Command, cli, env.paths.ClaudeWrap, p, headSHA)
 	if err != nil {
@@ -1201,7 +1227,7 @@ func runReviewer(ctx context.Context, env Env, cli string, p SearchPR, headSHA s
 
 	_ = os.WriteFile(logPath, append(stderr.Bytes(), stdout.Bytes()...), 0o600)
 	if ctx.Err() == context.DeadlineExceeded {
-		return reviewOutcome{}, fmt.Errorf("timed out after %s", reviewTimeout)
+		return reviewOutcome{}, fmt.Errorf("timed out after %s", limit)
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == skipExit {

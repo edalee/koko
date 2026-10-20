@@ -124,8 +124,8 @@ func syncTimes(cfg Config, st *State, now time.Time) {
 	}
 	times, days := map[string]bool{}, map[string]bool{}
 	if cfg.Enabled {
-		for _, job := range allJobs {
-			jc := cfg.Jobs[job]
+		for _, job := range cfg.jobNames() {
+			jc, _ := cfg.job(job)
 			if !jc.Enabled {
 				continue
 			}
@@ -257,8 +257,8 @@ func dueRuns(cfg Config, st State, now time.Time) []DueRun {
 		return nil
 	}
 	var out []DueRun
-	for _, job := range allJobs {
-		jc, ok := cfg.Jobs[job]
+	for _, job := range cfg.jobNames() {
+		jc, ok := cfg.job(job)
 		if !ok || !jc.Enabled || !jc.runsOn(now) {
 			continue
 		}
@@ -312,7 +312,8 @@ func recordRun(st *State, run DueRun, status, message string, now time.Time) {
 func manualSlots(cfg Config, job string, now time.Time) []time.Time {
 	now = now.In(cfg.location())
 	var out []time.Time
-	for _, clock := range cfg.Jobs[job].Times {
+	jc, _ := cfg.job(job)
+	for _, clock := range jc.Times {
 		slot := atClock(now, clock)
 		if job == JobStandup || job == JobSummary || !now.Before(slot) {
 			out = append(out, slot)
@@ -341,8 +342,8 @@ func nextSlot(cfg Config, now time.Time) (time.Time, bool) {
 	var best time.Time
 	for d := 0; d <= 8; d++ {
 		day := now.AddDate(0, 0, d)
-		for _, job := range allJobs {
-			jc := cfg.Jobs[job]
+		for _, job := range cfg.jobNames() {
+			jc, _ := cfg.job(job)
 			if !jc.Enabled || !jc.runsOn(day) {
 				continue
 			}

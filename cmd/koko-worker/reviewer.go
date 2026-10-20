@@ -13,8 +13,8 @@ import (
 
 // prepareReviewer makes the reviewer CLI ready and returns its path.
 //
-// Bad reviewer settings fail only the review job, so the stand-up and focus
-// time keep running. A command without {reviewer} runs its own program, and
+// Bad reviewer settings fail only the run, so the stand-up and focus time
+// keep running. runJob has checked the rest of the run's settings. A command without {reviewer} runs its own program, and
 // the result is "". A local reviewer runs as it is.
 //
 // A managed reviewer is the worker's own clone of Reviewer.Repo, so the
@@ -28,7 +28,7 @@ import (
 // lock, so a scheduled review may be reading from the clone at the time.
 func prepareReviewer(ctx context.Context, env Env) (string, error) {
 	r := env.cfg.Reviewer
-	if err := r.problem(); err != nil {
+	if err := r.commandProblem(); err != nil {
 		return "", fmt.Errorf("review: %w. Fix it in Settings > Worker > Review worker", err)
 	}
 	if !r.usesReviewer() {
