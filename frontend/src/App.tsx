@@ -29,6 +29,7 @@ import { useSafeWorking } from "./hooks/useSafeWorking";
 import { useSessionActivity } from "./hooks/useSessionActivity";
 import { useSessionBranches } from "./hooks/useSessionBranches";
 import { useSessionContext } from "./hooks/useSessionContext";
+import { useSessionSummaries } from "./hooks/useSessionSummaries";
 import { reloadAction, useSessionTabs } from "./hooks/useSessionTabs";
 import { useSubagents } from "./hooks/useSubagents";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
@@ -44,6 +45,7 @@ export default function App() {
     reconnectTab,
     renameTab,
     handleSessionExit,
+    rememberSummaries,
     history,
     forgetConversations,
     clearHistory,
@@ -87,6 +89,11 @@ export default function App() {
   const connectedIds = tabs.filter((t) => t.connected).map((t) => t.id);
   const sessionStates = useSessionActivity(connectedIds);
   const sessionBranches = useSessionBranches(tabs.map((t) => t.directory));
+  const sessionSummaries = useSessionSummaries(tabs, sessionStates);
+  // Keep each tab's title, recap and ticket, so they are saved with it.
+  useEffect(() => {
+    rememberSummaries(sessionSummaries);
+  }, [sessionSummaries, rememberSummaries]);
   const { prs, loading, errors: prErrors, refresh } = useGitHub();
   const visiblePRCount = prs.filter((p) => !isHiddenPR(hiddenPRs, p)).length;
   const activeTab = tabs.find((t) => t.id === activeTabId);
@@ -300,6 +307,7 @@ export default function App() {
               activeSessionId={activeTabId}
               sessionStates={sessionStates}
               sessionBranches={sessionBranches}
+              sessionSummaries={sessionSummaries}
               onSessionSelect={selectTab}
               onNewSession={() => openSessionDialog()}
               onDeleteSession={requestCloseTab}
@@ -351,9 +359,12 @@ export default function App() {
                             <p className="text-xs text-muted-foreground truncate">
                               {tab.directory.replace(/^\/Users\/[^/]+/, "~")}
                             </p>
-                            {tab.lastMsg && (
-                              <p className="text-xs text-white/40 italic line-clamp-3 leading-relaxed">
-                                {tab.lastMsg}
+                            {tab.title && (
+                              <p className="text-xs text-white/80 line-clamp-2">{tab.title}</p>
+                            )}
+                            {tab.recap && (
+                              <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">
+                                {tab.recap}
                               </p>
                             )}
                             {tab.reconnectError && (

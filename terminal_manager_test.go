@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -233,10 +234,19 @@ func newDetectSession(id string, startedAt, lastSubmitAt time.Time) *session {
 	}
 }
 
+// writeJSONL writes an interactive session file. Its first record names the
+// "cli" entrypoint, as Claude Code's own files do.
 func writeJSONL(t *testing.T, dir, name string, modTime time.Time) {
 	t.Helper()
+	writeJSONLAs(t, dir, name, "cli", modTime)
+}
+
+// writeJSONLAs writes a session file with the given entrypoint.
+func writeJSONLAs(t *testing.T, dir, name, entrypoint string, modTime time.Time) {
+	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+	body := fmt.Sprintf(`{"type":"user","cwd":"/tmp","entrypoint":%q}`+"\n", entrypoint)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 	if err := os.Chtimes(path, modTime, modTime); err != nil {
@@ -342,6 +352,83 @@ func TestDetectClaudeSessionID_RefusesTwoCandidates(t *testing.T) {
 	if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
 		t.Fatalf("expected no capture with two candidates, got %q", got)
 	}
+}
+
+// A headless run from another tool in the same directory writes a new file
+// too. It must never become the tab's conversation (plan 036).
+func TestDetectClaudeSessionID_SkipsHeadlessRuns(t *testing.T) {
+	t.Run("claims the interactive file beside a headless one", func(t *testing.T) {
+		dir := t.TempDir()
+		tm := newTestManager()
+		s := newDetectSession("test-mixed", time.Now().Add(-time.Minute), time.Now())
+
+		preExisting := listJSONL(dir)
+		writeJSONLAs(t, dir, "headless.jsonl", "sdk-cli", time.Now())
+		writeJSONL(t, dir, "mine.jsonl", time.Now())
+
+		go tm.detectClaudeSessionID(s, dir, preExisting)
+		defer close(s.done)
+
+		if got := waitForUUID(s, 3*time.Second); got != "mine" {
+			t.Fatalf("expected mine, got %q", got)
+		}
+	})
+
+	t.Run("claims nothing with only a headless file", func(t *testing.T) {
+		dir := t.TempDir()
+		tm := newTestManager()
+		s := newDetectSession("test-headless", time.Now().Add(-time.Minute), time.Now())
+
+		preExisting := listJSONL(dir)
+		writeJSONLAs(t, dir, "headless.jsonl", "sdk-cli", time.Now())
+
+		go tm.detectClaudeSessionID(s, dir, preExisting)
+		defer close(s.done)
+
+		if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+			t.Fatalf("expected no capture, got %q", got)
+		}
+	})
+
+	t.Run("claims nothing with only a Go SDK file", func(t *testing.T) {
+		dir := t.TempDir()
+		tm := newTestManager()
+		s := newDetectSession("test-sdk-go", time.Now().Add(-time.Minute), time.Now())
+
+		preExisting := listJSONL(dir)
+		writeJSONLAs(t, dir, "headless.jsonl", "sdk-go", time.Now())
+
+		go tm.detectClaudeSessionID(s, dir, preExisting)
+		defer close(s.done)
+
+		if got := waitForUUID(s, 1500*time.Millisecond); got != "" {
+			t.Fatalf("expected no capture, got %q", got)
+		}
+	})
+
+	t.Run("waits for a file with no record yet", func(t *testing.T) {
+		dir := t.TempDir()
+		tm := newTestManager()
+		s := newDetectSession("test-empty", time.Now().Add(-time.Minute), time.Now())
+
+		preExisting := listJSONL(dir)
+		path := filepath.Join(dir, "later.jsonl")
+		if err := os.WriteFile(path, []byte(`{"type":"queue-operation"}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		go tm.detectClaudeSessionID(s, dir, preExisting)
+		defer close(s.done)
+
+		if got := waitForUUID(s, 1200*time.Millisecond); got != "" {
+			t.Fatalf("expected no capture before a record, got %q", got)
+		}
+		// Once Claude writes the first real record, the file is claimed.
+		writeJSONL(t, dir, "later.jsonl", time.Now())
+		if got := waitForUUID(s, 3*time.Second); got != "later" {
+			t.Fatalf("expected later, got %q", got)
+		}
+	})
 }
 
 func TestNoteSubmit_IgnoresBracketedPaste(t *testing.T) {

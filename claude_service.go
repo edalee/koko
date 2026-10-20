@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,8 +16,11 @@ import (
 	"time"
 )
 
-// ClaudeService provides session context data (MCP servers, agents, commands).
-type ClaudeService struct{}
+// ClaudeService provides session context data (MCP servers, agents, commands),
+// and reads the conversations Claude Code stores.
+type ClaudeService struct {
+	summaries summaryCache
+}
 
 // NewClaudeService creates a ClaudeService.
 func NewClaudeService() *ClaudeService {
@@ -231,39 +233,6 @@ func parseAgentsList(output string) []AgentInfo {
 	return agents
 }
 
-// GetLastMessage returns the last assistant text from the most recent Claude session for a directory.
-func (cs *ClaudeService) GetLastMessage(dir string) (string, error) {
-	// Claude stores sessions at ~/.claude/projects/-<path-with-dashes>/
-	sessionDir := claudeProjectDir(dir)
-
-	entries, err := os.ReadDir(sessionDir)
-	if err != nil {
-		return "", nil // no sessions for this dir
-	}
-
-	// Find most recent .jsonl by mod time
-	var newest string
-	var newestTime int64
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().UnixMilli() > newestTime {
-			newestTime = info.ModTime().UnixMilli()
-			newest = filepath.Join(sessionDir, e.Name())
-		}
-	}
-	if newest == "" {
-		return "", nil
-	}
-
-	return lastAssistantText(newest), nil
-}
-
 // maxConversations caps how many sessions the picker offers. A single
 // directory can hold hundreds, and each one costs two file reads.
 const maxConversations = 20
@@ -285,11 +254,15 @@ const headLineCap = 256 * 1024
 // cwdField finds a cwd key in raw JSON. Used only on records too long to parse.
 var cwdField = regexp.MustCompile(`"cwd":"((?:[^"\\]|\\.)*)"`)
 
+// entrypointField finds an entrypoint key in raw JSON, as cwdField does. Inside
+// a string value the quotes are escaped, so only a real key matches.
+var entrypointField = regexp.MustCompile(`"entrypoint":"([^"\\]*)"`)
+
 // tailChunk is how much is read from the end of a session file at a time.
 const tailChunk = 64 * 1024
 
-// tailBudget caps the backwards search. Beyond this a session has no recent
-// assistant message worth showing.
+// tailBudget caps each backwards read of a session file for its summary.
+// Records further back are not read.
 const tailBudget = 2 * 1024 * 1024
 
 // ListConversations returns the Claude conversations stored for a directory,
@@ -301,7 +274,8 @@ const tailBudget = 2 * 1024 * 1024
 // separates them.
 //
 // Conversations Koko did not start are included on purpose. A plain `claude`
-// run in the directory is exactly the history a user wants back.
+// run in the directory is exactly the history a user wants back. Headless
+// runs from other tools are not: nobody resumes those.
 func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 	sessionDir := claudeProjectDir(dir)
 	if sessionDir == "" {
@@ -347,14 +321,20 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 		if len(out) == maxConversations {
 			break
 		}
+		// The entrypoint comes first, from a short read that is cached. Most
+		// files in a folder can be headless runs, and they need nothing more.
+		if ep, _ := transcriptEntrypoint(c.path, nil); isHeadless(ep) {
+			continue
+		}
 		head := readConversationHead(c.path)
 		if !head.belongsTo(dir) {
 			continue // another directory sharing this project folder
 		}
+		summary := cs.summaryOf(c.path, &head)
 		out = append(out, Conversation{
 			UUID:       c.uuid,
-			Title:      head.title,
-			Preview:    lastAssistantText(c.path),
+			Title:      summary.Title,
+			Recap:      summary.Recap,
 			ModifiedAt: c.modified.UnixMilli(),
 			SizeBytes:  c.size,
 		})
@@ -364,8 +344,9 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 
 // conversationHead is what a head read of a session file yields.
 type conversationHead struct {
-	title string
-	cwd   string
+	title      string
+	cwd        string
+	entrypoint string // a value starting "sdk-" for a headless run, "cli" for an interactive one, "" in older files
 }
 
 // belongsTo reports whether the session file belongs to dir. A file with no
@@ -377,13 +358,18 @@ func (h conversationHead) belongsTo(dir string) bool {
 	return h.cwd == "" || sameDir(h.cwd, dir)
 }
 
-// readConversationHead reads the start of a session file for its title and
-// working directory.
+// readConversationHead reads the start of a session file for its title,
+// working directory and entrypoint.
 //
-// Claude writes its own "ai-title" record near the top. Files from older
-// versions may not have one, so the first real user prompt is the fallback.
-// Meta and sidechain records are skipped: they are injected context and
-// subagent turns, not what the user typed.
+// Claude writes its own "ai-title" record near the top, and rewrites it later.
+// The listing takes the latest from the tail, so this first one is only a
+// fallback. Files from older versions may not have one, so the first prompt the
+// user typed is the fallback after that. It follows the summary's rule: a user
+// record with a human origin, not meta and not a sidechain.
+//
+// The entrypoint comes from the first record that has one, which is also the
+// first with a cwd. It is not part of the stop rule, because older files have
+// none.
 func readConversationHead(path string) conversationHead {
 	f, err := os.Open(path)
 	if err != nil {
@@ -406,14 +392,21 @@ func readConversationHead(path string) conversationHead {
 			// ai-title written after it. Take the last cwd match, because in
 			// a user record cwd follows the message body.
 			salvaged := lastCWD(line)
+			entrypoint := firstEntrypoint(line)
 			for isPrefix && err == nil {
 				line, isPrefix, err = r.ReadLine()
 				if m := lastCWD(line); m != "" {
 					salvaged = m
 				}
+				if entrypoint == "" {
+					entrypoint = firstEntrypoint(line)
+				}
 			}
 			if head.cwd == "" {
 				head.cwd = salvaged
+			}
+			if head.entrypoint == "" {
+				head.entrypoint = entrypoint
 			}
 			if err != nil {
 				break
@@ -425,9 +418,13 @@ func readConversationHead(path string) conversationHead {
 			Type        string `json:"type"`
 			AiTitle     string `json:"aiTitle"`
 			CWD         string `json:"cwd"`
+			Entrypoint  string `json:"entrypoint"`
 			IsMeta      bool   `json:"isMeta"`
 			IsSidechain bool   `json:"isSidechain"`
-			Message     struct {
+			Origin      *struct {
+				Kind string `json:"kind"`
+			} `json:"origin"`
+			Message struct {
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		}
@@ -437,10 +434,14 @@ func readConversationHead(path string) conversationHead {
 		if head.cwd == "" && entry.CWD != "" {
 			head.cwd = entry.CWD
 		}
+		if head.entrypoint == "" {
+			head.entrypoint = entry.Entrypoint
+		}
 		if head.title == "" && entry.Type == "ai-title" && entry.AiTitle != "" {
 			head.title = shorten(entry.AiTitle, 120)
 		}
-		if fallback == "" && entry.Type == "user" && !entry.IsMeta && !entry.IsSidechain {
+		human := entry.Origin != nil && entry.Origin.Kind == "human"
+		if fallback == "" && entry.Type == "user" && human && !entry.IsMeta && !entry.IsSidechain {
 			fallback = shorten(userContentText(entry.Message.Content), 120)
 		}
 		if head.title != "" && head.cwd != "" {
@@ -465,6 +466,15 @@ func lastCWD(fragment []byte) string {
 		return ""
 	}
 	return cwd
+}
+
+// firstEntrypoint returns the first entrypoint value in a fragment of raw
+// JSON, or "".
+func firstEntrypoint(fragment []byte) string {
+	if m := entrypointField.FindSubmatch(fragment); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 // userContentText pulls plain text out of a user message. The content is
@@ -506,114 +516,6 @@ func shorten(s string, n int) string {
 		return string(r[:max(n, 0)])
 	}
 	return string(r[:n-3]) + "..."
-}
-
-// lastAssistantText returns the last assistant message in a JSONL file.
-//
-// It walks backwards in chunks rather than reading one fixed window. A single
-// attachment or tool result can be hundreds of kilobytes, so a fixed 64KB tail
-// often began inside one record and missed the assistant message just before
-// it. That left most previews empty.
-func lastAssistantText(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return ""
-	}
-	size := info.Size()
-
-	for window := int64(tailChunk); ; window *= 2 {
-		if window > tailBudget {
-			window = tailBudget
-		}
-		offset := size - window
-		atStart := offset <= 0
-		if atStart {
-			offset = 0
-		}
-
-		buf := make([]byte, size-offset)
-		if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
-			return ""
-		}
-
-		lines := bytes.Split(buf, []byte("\n"))
-		// Unless the window reached the start of the file, the first line is
-		// a fragment of a record that began earlier.
-		if !atStart && len(lines) > 0 {
-			lines = lines[1:]
-		}
-		for i := len(lines) - 1; i >= 0; i-- {
-			if text := extractAssistantText(lines[i]); text != "" {
-				return shorten(text, 120)
-			}
-		}
-
-		if atStart || window >= tailBudget {
-			return ""
-		}
-	}
-}
-
-// extractAssistantText extracts text content from a JSONL entry.
-// Handles both formats:
-//   - type:"assistant" with message.content[] (current Claude Code format)
-//   - type:"progress" with data.message.message.content[] (legacy format)
-func extractAssistantText(line []byte) string {
-	if !strings.Contains(string(line), `"assistant"`) {
-		return ""
-	}
-
-	var entry struct {
-		Type    string `json:"type"`
-		Message struct {
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"message"`
-		Data struct {
-			Message struct {
-				Message struct {
-					Role    string `json:"role"`
-					Content []struct {
-						Type string `json:"type"`
-						Text string `json:"text"`
-					} `json:"content"`
-				} `json:"message"`
-			} `json:"message"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(line, &entry); err != nil {
-		return ""
-	}
-
-	// Current format: type:"assistant", message.role:"assistant"
-	if entry.Type == "assistant" && entry.Message.Role == "assistant" {
-		for _, block := range entry.Message.Content {
-			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
-				return strings.TrimSpace(block.Text)
-			}
-		}
-	}
-
-	// Legacy format: type:"progress", data.message.message.role:"assistant"
-	if entry.Type == "progress" && entry.Data.Message.Message.Role == "assistant" {
-		for _, block := range entry.Data.Message.Message.Content {
-			if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
-				return strings.TrimSpace(block.Text)
-			}
-		}
-	}
-
-	return ""
 }
 
 // skillFrontmatterField reads a specific field from YAML frontmatter in a SKILL.md file.

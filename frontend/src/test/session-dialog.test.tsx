@@ -16,7 +16,7 @@ const mockCreateWorktree = CreateWorktree as ReturnType<typeof vi.fn>;
 const conv = (uuid: string, title: string, minutesAgo = 5) => ({
   uuid,
   title,
-  preview: `${title} preview`,
+  recap: `${title} recap`,
   modifiedAt: Date.now() - minutesAgo * 60_000,
   sizeBytes: 100,
 });

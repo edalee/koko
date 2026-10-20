@@ -6,8 +6,8 @@ export function GetAgents(arg1:string):Promise<Array<main.AgentInfo>>;
 
 export function GetCommands(arg1:string):Promise<Array<main.CommandInfo>>;
 
-export function GetLastMessage(arg1:string):Promise<string>;
-
 export function GetMCPServers(arg1:string):Promise<Array<main.MCPServer>>;
+
+export function GetSessionSummary(arg1:string,arg2:string):Promise<main.SessionSummary>;
 
 export function ListConversations(arg1:string):Promise<Array<main.Conversation>>;

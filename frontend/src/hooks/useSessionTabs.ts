@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GetLastMessage } from "../../wailsjs/go/main/ClaudeService";
+import { GetSessionSummary } from "../../wailsjs/go/main/ClaudeService";
 import { GetSessions, SaveSessions } from "../../wailsjs/go/main/ConfigService";
 import {
   CloseSession,
@@ -7,7 +7,9 @@ import {
   GetClaudeSessionID,
   GetSessionSlug,
 } from "../../wailsjs/go/main/TerminalManager";
+import type { main } from "../../wailsjs/go/models";
 import { EventsOn } from "../../wailsjs/runtime/runtime";
+import { savedSummary } from "../lib/summary";
 import type { SessionHistoryEntry, SessionTab } from "../types";
 
 const MAX_HISTORY = 50;
@@ -95,6 +97,9 @@ export function useSessionTabs() {
               createdAt: number;
               claudeSessionId?: string;
               lastMsg?: string;
+              title?: string;
+              recap?: string;
+              ticket?: string;
               worktreePath?: string;
               worktreeCreated?: boolean;
             }) => ({
@@ -106,6 +111,9 @@ export function useSessionTabs() {
               connected: false,
               claudeSessionId: r.claudeSessionId || "",
               lastMsg: r.lastMsg || "",
+              title: r.title || undefined,
+              recap: r.recap || undefined,
+              ticket: r.ticket || undefined,
               worktreePath: r.worktreePath || undefined,
               worktreeCreated: r.worktreeCreated || undefined,
             }),
@@ -120,6 +128,9 @@ export function useSessionTabs() {
             createdAt: r.createdAt,
             closedAt: r.closedAt || 0,
             lastMessage: r.lastMsg || "",
+            title: r.title || undefined,
+            recap: r.recap || undefined,
+            ticket: r.ticket || undefined,
             claudeSessionId: r.claudeSessionId || "",
             worktreePath: r.worktreePath || undefined,
           }));
@@ -149,6 +160,9 @@ export function useSessionTabs() {
         createdAt: t.createdAt,
         status: t.connected ? "active" : "disconnected",
         lastMsg: t.lastMsg || "",
+        title: t.title || "",
+        recap: t.recap || "",
+        ticket: t.ticket || "",
         worktreePath: t.worktreePath || "",
         worktreeCreated: t.worktreeCreated || false,
       })),
@@ -161,6 +175,9 @@ export function useSessionTabs() {
         closedAt: h.closedAt,
         status: "closed",
         lastMsg: h.lastMessage || "",
+        title: h.title || "",
+        recap: h.recap || "",
+        ticket: h.ticket || "",
         worktreePath: h.worktreePath || "",
       })),
     ];
@@ -182,6 +199,9 @@ export function useSessionTabs() {
           createdAt: t.createdAt,
           status: t.connected ? "active" : "disconnected",
           lastMsg: t.lastMsg || "",
+          title: t.title || "",
+          recap: t.recap || "",
+          ticket: t.ticket || "",
           worktreePath: t.worktreePath || "",
           worktreeCreated: t.worktreeCreated || false,
         })),
@@ -194,6 +214,9 @@ export function useSessionTabs() {
           closedAt: h.closedAt,
           status: "closed",
           lastMsg: h.lastMessage || "",
+          title: h.title || "",
+          recap: h.recap || "",
+          ticket: h.ticket || "",
           worktreePath: h.worktreePath || "",
         })),
       ];
@@ -324,6 +347,11 @@ export function useSessionTabs() {
                   reconnectError: undefined,
                   // A fresh conversation's id arrives later, on the event.
                   claudeSessionId: claudeSessionId || undefined,
+                  // Another conversation, so the old one's summary no longer
+                  // describes the tab. The same one keeps it until the next poll.
+                  ...(claudeSessionId && claudeSessionId === t.claudeSessionId
+                    ? {}
+                    : { title: undefined, recap: undefined, ticket: undefined }),
                 }
               : t,
           ),
@@ -369,13 +397,6 @@ export function useSessionTabs() {
     async (tabId: string, worktreeRemoved = false) => {
       const tab = tabs.find((t) => t.id === tabId);
       if (tab) {
-        let lastMessage = "";
-        try {
-          lastMessage = await GetLastMessage(tab.directory);
-        } catch {
-          // ignore
-        }
-
         // Capture Claude session ID before closing
         let claudeId = tab.claudeSessionId || "";
         if (!claudeId && tab.connected) {
@@ -386,13 +407,20 @@ export function useSessionTabs() {
           }
         }
 
+        // The latest summary of this tab's own conversation. If it cannot be
+        // read, or its transcript is gone, the tab's last known one is kept. A
+        // tab with no conversation keeps none.
+        const summary = claudeId
+          ? savedSummary(await GetSessionSummary(tab.directory, claudeId).catch(() => null))
+          : { title: undefined, recap: undefined, ticket: undefined };
+
         const newEntry: SessionHistoryEntry = {
           slug: tab.slug,
           name: tab.name,
           directory: tab.directory,
           createdAt: tab.createdAt,
           closedAt: Date.now(),
-          lastMessage,
+          ...(summary ?? { title: tab.title, recap: tab.recap, ticket: tab.ticket }),
           claudeSessionId: claudeId,
           // Only a worktree Koko created and the user kept. One removed in
           // the close dialog is gone, and one made by hand is not Koko's to
@@ -446,13 +474,15 @@ export function useSessionTabs() {
       // after the id swap.
       if (reconnectingRef.current.has(tabId)) return;
       setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, connected: false } : t)));
-      // Capture last message for the context card on reconnect
+      // Read the summary once more for the reconnect card, since the process
+      // may have written a last title or recap as it ended.
       const tab = tabs.find((t) => t.id === tabId);
-      if (tab) {
-        GetLastMessage(tab.directory)
-          .then((msg) => {
-            if (msg) {
-              setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, lastMsg: msg } : t)));
+      if (tab?.claudeSessionId) {
+        GetSessionSummary(tab.directory, tab.claudeSessionId)
+          .then((s) => {
+            const saved = savedSummary(s);
+            if (saved) {
+              setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, ...saved } : t)));
             }
           })
           .catch(() => {});
@@ -460,6 +490,27 @@ export function useSessionTabs() {
     },
     [tabs],
   );
+
+  // Keeps each tab's title, recap and ticket in step with the polled
+  // summaries, so they are saved with the tab. An unchanged poll returns the
+  // same array, so sessions.json is written only on a real change.
+  const rememberSummaries = useCallback((summaries: Map<string, main.SessionSummary>) => {
+    setTabs((prev) => {
+      let changed = false;
+      const next = prev.map((t) => {
+        const saved = t.claudeSessionId ? savedSummary(summaries.get(t.claudeSessionId)) : null;
+        if (
+          !saved ||
+          (saved.title === t.title && saved.recap === t.recap && saved.ticket === t.ticket)
+        ) {
+          return t;
+        }
+        changed = true;
+        return { ...t, ...saved };
+      });
+      return changed ? next : prev;
+    });
+  }, []);
 
   // Forgets every closed session. Claude's conversations and any worktrees
   // stay where they are: the picker reads Claude's files, not this list.
@@ -513,6 +564,7 @@ export function useSessionTabs() {
     reconnectTab,
     renameTab,
     handleSessionExit,
+    rememberSummaries,
     history,
     clearHistory,
     forgetConversations,

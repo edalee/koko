@@ -272,8 +272,18 @@ func (cs *ConfigService) load() {
 	_ = json.Unmarshal(data, &cs.config)
 }
 
-// GetSessions returns persisted session state, migrating from legacy format if needed.
+// GetSessions returns persisted session state, migrating from legacy format if
+// needed. Sessions that point at a headless run are cleaned first (plan 036):
+// see withoutHeadlessRuns.
 func (cs *ConfigService) GetSessions() SessionsData {
+	sessions := cs.loadSessions()
+	sessions.Sessions = withoutHeadlessRuns(sessions.Sessions)
+	return sessions
+}
+
+// loadSessions reads persisted session state, migrating from legacy format if
+// needed.
+func (cs *ConfigService) loadSessions() SessionsData {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 

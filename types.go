@@ -21,11 +21,16 @@ type SessionRecord struct {
 	CreatedAt       int64  `json:"createdAt"`
 	ClosedAt        int64  `json:"closedAt,omitempty"`
 	Status          string `json:"status"`                 // "active", "disconnected", "closed"
-	LastMsg         string `json:"lastMsg,omitempty"`      // last assistant message snippet
+	LastMsg         string `json:"lastMsg,omitempty"`      // Claude's last reply, kept only from sessions saved before plan 036
 	WorktreePath    string `json:"worktreePath,omitempty"` // the session's worktree, created by Koko or opened from the Worktrees module
 	// WorktreeCreated is true only when Koko created the worktree. Settings
 	// removes only these in bulk, never one the user made by hand.
 	WorktreeCreated bool `json:"worktreeCreated,omitempty"`
+	// The conversation's summary when the session was saved (plan 036), so a
+	// closed session still shows what it was about.
+	Title  string `json:"title,omitempty"`
+	Recap  string `json:"recap,omitempty"`
+	Ticket string `json:"ticket,omitempty"`
 }
 
 // SessionsData holds all persisted session state.
@@ -196,10 +201,40 @@ type Worktree struct {
 // session picker.
 type Conversation struct {
 	UUID       string `json:"uuid"`       // the session file's name
-	Title      string `json:"title"`      // Claude's own title, else the first prompt
-	Preview    string `json:"preview"`    // last assistant message, truncated
+	Title      string `json:"title"`      // Claude's latest title, else the first prompt
+	Recap      string `json:"recap"`      // Claude's latest away summary, if any
 	ModifiedAt int64  `json:"modifiedAt"` // unix millis
 	SizeBytes  int64  `json:"sizeBytes"`
+}
+
+// SessionSummary is what one conversation is about, built only from the
+// user's own prompts and the records Claude Code writes (plan 036).
+type SessionSummary struct {
+	Title      string `json:"title"`      // the latest ai-title, else the first prompt
+	Recap      string `json:"recap"`      // the latest away_summary
+	LastPrompt string `json:"lastPrompt"` // the last-prompt record, else the newest prompt
+	// The user's last prompts, newest first. Never null.
+	RecentPrompts []SessionPrompt `json:"recentPrompts"`
+	Branch        string          `json:"branch"`
+	PR            *SessionPR      `json:"pr,omitempty"`
+	Ticket        string          `json:"ticket"`    // the first Jira key found, or ""
+	UpdatedAt     int64           `json:"updatedAt"` // the file's modification time, unix millis
+	// NotFound is true when the session file does not exist. The summary is
+	// then empty, and the frontend keeps what it saved.
+	NotFound bool `json:"notFound,omitempty"`
+}
+
+// SessionPrompt is one prompt the user typed.
+type SessionPrompt struct {
+	Text      string `json:"text"`
+	Timestamp int64  `json:"timestamp"` // unix millis, 0 if unknown
+}
+
+// SessionPR is the pull request a conversation last linked to.
+type SessionPR struct {
+	Number int    `json:"number"`
+	Repo   string `json:"repo"`
+	URL    string `json:"url"`
 }
 
 // DeleteResult reports a bulk conversation delete. Deleted lists the ids, so

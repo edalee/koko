@@ -156,9 +156,9 @@ export default function ConversationPicker({
                       {holderAction(holder)}
                     </span>
                   ) : (
-                    c.preview && (
-                      <span className="block text-[11px] text-muted-foreground/60 italic truncate">
-                        {c.preview}
+                    c.recap && (
+                      <span className="block text-[11px] text-muted-foreground truncate">
+                        {c.recap}
                       </span>
                     )
                   )}
