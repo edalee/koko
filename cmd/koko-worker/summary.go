@@ -301,8 +301,12 @@ Then reply with the single word DONE. Do not summarise the tickets.`, toolSearch
 		if c.IsError {
 			continue
 		}
+		found, ok := parseJiraSearch(c.Result)
+		if !ok {
+			return out, fmt.Errorf("unreadable Jira search result: %s", truncate(c.Result, 200))
+		}
 		moved := map[string]bool{}
-		for _, t := range parseJiraSearch(c.Result) {
+		for _, t := range found {
 			moved[t.Key] = true
 		}
 		for asked, t := range tickets {
@@ -319,29 +323,31 @@ Then reply with the single word DONE. Do not summarise the tickets.`, toolSearch
 }
 
 // parseJiraSearch reads a searchJiraIssuesUsingJql result. The issues are a
-// list, under "issues" or "issues.nodes".
-func parseJiraSearch(raw string) []jiraTicket {
+// list, under "issues" or "issues.nodes". ok is false if neither is there,
+// so an error in any other shape is not taken for "nothing moved".
+func parseJiraSearch(raw string) (tickets []jiraTicket, ok bool) {
 	var v struct {
 		Issues json.RawMessage `json:"issues"`
 	}
-	if json.Unmarshal([]byte(raw), &v) != nil {
-		return nil
+	if json.Unmarshal([]byte(raw), &v) != nil || len(v.Issues) == 0 {
+		return nil, false
 	}
 	var items []json.RawMessage
 	if json.Unmarshal(v.Issues, &items) != nil {
 		var wrapped struct {
-			Nodes []json.RawMessage `json:"nodes"`
+			Nodes *[]json.RawMessage `json:"nodes"`
 		}
-		_ = json.Unmarshal(v.Issues, &wrapped)
-		items = wrapped.Nodes
+		if json.Unmarshal(v.Issues, &wrapped) != nil || wrapped.Nodes == nil {
+			return nil, false
+		}
+		items = *wrapped.Nodes
 	}
-	var out []jiraTicket
 	for _, it := range items {
 		if t, ok := parseJiraIssue(string(it)); ok {
-			out = append(out, t)
+			tickets = append(tickets, t)
 		}
 	}
-	return out
+	return tickets, true
 }
 
 // addTickets puts each moved ticket under the person whose PR names it.

@@ -7,7 +7,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ### Added
 - **Job days**: each worker job has its own days, such as Saturday only or once a week. Settings > Worker shows seven day switches on each job. A job without days runs Monday to Friday, so an older `worker.json` keeps its schedule. A day added after its run time waits until next week (plan 035)
 - **Lunch**: focus time no longer books over lunch, 12:00 to 13:00 by default. Settings > Worker can move lunch or switch it off. Lunch is not written to the calendar (plan 035)
-- **Team summary**: a new worker job, off by default, sends a Slack DM at 08:30 with what each member of a team merged, opened and reviewed on the previous working day. With a Jira site, it adds the tickets they moved. Claude writes a paragraph per person, and the DM falls back to lists if that fails (plan 035)
+- **Team summary**: a new worker job sends a Slack DM at 08:30. It lists what each member of a team merged, opened and reviewed on the previous working day. It is off by default. With a Jira site, it adds the tickets they moved. Claude writes a paragraph per person, and the DM falls back to lists if that fails (plan 035)
 
 ### Changed
 - **Worker tab**: Settings > Worker is easier to read. General holds the shared settings and the connection checks. Each job has its own card with its schedule, settings, Test and Run now, and output. The review card splits how the reviewer runs from which PRs it reviews (plan 035)

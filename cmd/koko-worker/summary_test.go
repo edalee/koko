@@ -303,13 +303,22 @@ func TestSummaryProseFallsBackToLists(t *testing.T) {
 func TestParseJiraSearch(t *testing.T) {
 	issue := `{"key": "PROJ-1", "webUrl": "https://acme.atlassian.net/browse/PROJ-1", "fields": {"summary": "Login fails", "status": {"name": "Done", "statusCategory": {"key": "done"}}}}`
 	for _, raw := range []string{`{"issues": [` + issue + `]}`, `{"issues": {"nodes": [` + issue + `]}}`} {
-		got := parseJiraSearch(raw)
-		if len(got) != 1 || got[0].Key != "PROJ-1" || got[0].Status != "Done" {
-			t.Errorf("%s: got %+v", raw, got)
+		got, ok := parseJiraSearch(raw)
+		if !ok || len(got) != 1 || got[0].Key != "PROJ-1" || got[0].Status != "Done" {
+			t.Errorf("%s: got %+v, %v", raw, got, ok)
 		}
 	}
-	if got := parseJiraSearch("not json"); got != nil {
-		t.Errorf("got %+v", got)
+	// An empty list is a real answer: nothing moved.
+	for _, raw := range []string{`{"issues": []}`, `{"issues": {"nodes": []}}`} {
+		if got, ok := parseJiraSearch(raw); !ok || len(got) != 0 {
+			t.Errorf("%s: got %+v, %v", raw, got, ok)
+		}
+	}
+	// Anything else is not, such as a JQL error in plain text.
+	for _, raw := range []string{"not json", `{"errorMessages": ["The value 'X-1' does not exist"]}`, `{"issues": {"total": 0}}`} {
+		if got, ok := parseJiraSearch(raw); ok {
+			t.Errorf("%s: got %+v, want not ok", raw, got)
+		}
 	}
 }
 
