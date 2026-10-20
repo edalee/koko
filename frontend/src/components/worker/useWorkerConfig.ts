@@ -23,6 +23,8 @@ export function useWorkerConfig() {
     end: DEFAULTS.lunch.end,
   });
   const [lunchError, setLunchError] = useState<string | null>(null);
+  // loaded turns true once worker.json is read, or failed to read.
+  const [loaded, setLoaded] = useState(false);
   // savedZone is the time zone last read or saved, for a typo to fall back to.
   const savedZone = useRef(DEFAULTS.timeZone);
 
@@ -39,7 +41,8 @@ export function useWorkerConfig() {
         savedZone.current = loaded.timeZone;
         setCfg(loaded);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoaded(true));
     refreshStatus();
     const timer = setInterval(refreshStatus, 30_000);
     return () => clearInterval(timer);
@@ -103,6 +106,7 @@ export function useWorkerConfig() {
 
   return {
     cfg,
+    loaded,
     setCfg,
     status,
     refreshStatus,

@@ -108,6 +108,12 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     render(<WorkerSettings />);
     const review = openCard("Review worker");
     expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+
+    // Typing a repo sets the reviewer up, but the group stays open.
+    const repo = within(review).getByRole("textbox", { name: "Repo" });
+    fireEvent.focus(repo);
+    fireEvent.change(repo, { target: { value: "a" } });
+    expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
   });
 
   it("names the review worker's team on the stand-up card", async () => {

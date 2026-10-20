@@ -38,7 +38,8 @@ export default function JobCard({
   const [open, setOpen] = useState(false);
   const job = cfg.jobs[jobKey] ?? DEFAULTS.jobs[jobKey];
   const last = status?.jobs?.[jobKey]?.lastRun;
-  const next = nextSlot(job, cfg.timeZone);
+  // With the worker off, no job runs next.
+  const next = cfg.enabled ? nextSlot(job, cfg.timeZone) : null;
   const titleId = `job-${jobKey}-title`;
   const bodyId = `job-${jobKey}-body`;
 

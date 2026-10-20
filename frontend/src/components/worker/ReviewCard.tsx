@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
 import RepoList from "../RepoList";
 import Toggle from "../Toggle";
@@ -11,12 +11,16 @@ const days = (value: string) => Number.parseInt(value, 10) || 0;
 // ReviewCard is the review worker. "Reviewer" is how it runs, and it starts
 // closed once a reviewer is set up. "Which PRs" is what it reviews.
 export default function ReviewCard(props: CardProps) {
-  const { cfg, status, save, setReviewer, saveReviewer } = props.api;
+  const { cfg, loaded, status, save, setReviewer, saveReviewer } = props.api;
   const r = cfg.reviewer;
   const setUp = r.source === "managed" ? r.repo.trim() !== "" : r.path.trim() !== "";
-  // null follows setUp, so the group opens on a new install.
+  // The group opens on a new install. It is decided once, when worker.json
+  // is read, so typing the first repo does not close it.
   const [open, setOpen] = useState<boolean | null>(null);
   const shown = open ?? !setUp;
+  useEffect(() => {
+    if (loaded) setOpen((o) => o ?? !setUp);
+  }, [loaded]);
 
   const summary = !setUp
     ? "Not set up"
@@ -29,7 +33,7 @@ export default function ReviewCard(props: CardProps) {
       {...props}
       jobKey="review"
       name="Review worker"
-      about="Reviews each PR once and posts the review as comments on the PR, as you. Test prints the comments instead."
+      about="Reviews each PR once and posts the review as comments on the PR, as you. One Slack line says each review is posted. Test prints the comments instead."
       multi
       done="Done. The reviews are on the PRs."
     >
@@ -42,7 +46,13 @@ export default function ReviewCard(props: CardProps) {
             title={<span className="block text-xs text-white/85 font-medium">Reviewer</span>}
             summary={shown ? "How the review runs" : summary}
           />
-          <div id="reviewer-body" hidden={!shown} className="space-y-3">
+          <div
+            id="reviewer-body"
+            hidden={!shown}
+            // A field in use keeps the group open, even before the config loads.
+            onFocusCapture={() => setOpen((o) => o ?? true)}
+            className="space-y-3"
+          >
             <p className="text-[10px] text-tertiary leading-relaxed">
               Any CLI that follows the reviewer contract (plans 030 and 031). It reviews one PR and
               never posts. The worker posts its comments. If there is nothing to report, it posts
