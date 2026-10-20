@@ -12,6 +12,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 - **Session summaries**: each session row shows its ticket and Claude's title for the conversation, else your last prompt. A hover card shows the recap, branch, PR and your last ten prompts. The reconnect card, history and picker show the title and recap in place of Claude's last reply. Headless runs from other tools no longer appear in the picker or the history, and a tab never claims one as its conversation (plan 036)
 
+- **Stable signing**: `make build` signs Koko.app with a "Koko Local" certificate from your keychain. Every build keeps one signature, so macOS stops asking again for the file and folder access you already gave Koko and the worker. `make signing-cert` creates the certificate once. Without it, the app keeps its ad-hoc signature
+
 ### Changed
 - **Worker tab**: Settings > Worker is easier to read. General holds the shared settings and the connection checks. Each job has its own card with its schedule, settings, Test and Run now, and output. The review card splits how the reviewer runs from which PRs it reviews (plan 035)
 

@@ -105,6 +105,7 @@ The app is not notarised, and macOS XProtect can remove an unsigned app after it
 git clone https://github.com/edalee/koko.git
 cd koko
 make install-fe
+make signing-cert   # once, so macOS keeps Koko's permissions across builds
 make build
 cp -R build/bin/Koko.app /Applications/
 ```
@@ -170,6 +171,8 @@ make test-worker    # koko-worker tests (its own Go module)
 ```
 
 To update, run `git pull` and build again.
+
+On macOS, run `make signing-cert` once before your first build. It creates a self-signed "Koko Local" code-signing certificate in your login keychain, and asks for your login password to trust it. `make build` then signs Koko.app with it. Without it, each build gets a new ad-hoc signature, and macOS asks again for the file and folder access you gave Koko and the worker. Set `SIGN_ID` to use another certificate.
 
 ## How it works
 
