@@ -52,8 +52,9 @@ type State struct {
 	ReviewerCommit  string    `json:"reviewerCommit,omitempty"`
 	ReviewerBranch  string    `json:"reviewerBranch,omitempty"`
 	ReviewerUpdated time.Time `json:"reviewerUpdated,omitempty"`
-	// SummaryCovered is where the last real team summary's period ended. The
-	// next summary starts there, so a missed run loses no day.
+	// SummaryCovered is where the period of the last summary sent as a DM
+	// (not a test run) ended. The next summary starts there, so a missed run
+	// loses no day, within the 7 days a summary reaches back.
 	SummaryCovered time.Time `json:"summaryCovered,omitempty"`
 }
 

@@ -35,7 +35,7 @@ func TestSummaryPeriod(t *testing.T) {
 			"2026-10-30 00:00 CET", "2026-11-02 00:00 CET", "Friday 30 October to Sunday 1 November"},
 	}
 	for _, c := range cases {
-		start, end := summaryPeriod(c.job, c.now, cet, time.Time{})
+		start, end, _ := summaryPeriod(c.job, c.now, cet, time.Time{})
 		const f = "2006-01-02 15:04 MST"
 		if start.Format(f) != c.start || end.Format(f) != c.end {
 			t.Errorf("%s: got %s to %s, want %s to %s", c.name, start.Format(f), end.Format(f), c.start, c.end)
@@ -46,7 +46,7 @@ func TestSummaryPeriod(t *testing.T) {
 	}
 
 	// Summer time ends on Sunday 25 October, so that weekend is an hour longer.
-	start, end := summaryPeriod(weekdays, time.Date(2026, 10, 26, 8, 30, 0, 0, cet), cet, time.Time{})
+	start, end, _ := summaryPeriod(weekdays, time.Date(2026, 10, 26, 8, 30, 0, 0, cet), cet, time.Time{})
 	if start.Format("Mon 15:04 MST") != "Fri 00:00 CEST" || end.Format("Mon 15:04 MST") != "Mon 00:00 CET" || end.Sub(start) != 73*time.Hour {
 		t.Errorf("over the clock change: %s to %s (%s)", start, end, end.Sub(start))
 	}
@@ -57,22 +57,31 @@ func TestSummaryPeriodFromCovered(t *testing.T) {
 	tuesday := time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
 	const f = "Mon 2 15:04"
 	cases := []struct {
-		name    string
-		covered time.Time
-		start   string
+		name           string
+		covered        time.Time
+		start, skipped string
 	}{
 		// Monday's summary did not run, so Tuesday's covers Friday to Monday.
-		{"a missed run", time.Date(2026, 10, 16, 0, 0, 0, 0, cet), "Fri 16 00:00"},
-		{"the usual day", time.Date(2026, 10, 19, 0, 0, 0, 0, cet), "Mon 19 00:00"},
-		{"at most 7 days", time.Date(2026, 9, 1, 0, 0, 0, 0, cet), "Tue 13 00:00"},
+		{"a missed run", time.Date(2026, 10, 16, 0, 0, 0, 0, cet), "Fri 16 00:00", ""},
+		{"the usual day", time.Date(2026, 10, 19, 0, 0, 0, 0, cet), "Mon 19 00:00", ""},
+		{"exactly 7 days", time.Date(2026, 10, 13, 0, 0, 0, 0, cet), "Tue 13 00:00", ""},
+		// The cap says where the days it leaves out begin.
+		{"more than 7 days", time.Date(2026, 9, 1, 0, 0, 0, 0, cet), "Tue 13 00:00", "Tue 1 00:00"},
 		// A second run on the same day repeats today's summary.
-		{"today already covered", time.Date(2026, 10, 20, 0, 0, 0, 0, cet), "Mon 19 00:00"},
-		{"nothing covered yet", time.Time{}, "Mon 19 00:00"},
+		{"today already covered", time.Date(2026, 10, 20, 0, 0, 0, 0, cet), "Mon 19 00:00", ""},
+		{"nothing covered yet", time.Time{}, "Mon 19 00:00", ""},
 	}
 	for _, c := range cases {
-		start, end := summaryPeriod(weekdays, tuesday, cet, c.covered)
+		start, end, skipped := summaryPeriod(weekdays, tuesday, cet, c.covered)
 		if start.Format(f) != c.start || end.Format(f) != "Tue 20 00:00" {
 			t.Errorf("%s: got %s to %s, want %s to Tue 20 00:00", c.name, start.Format(f), end.Format(f), c.start)
+		}
+		got := ""
+		if !skipped.IsZero() {
+			got = skipped.Format(f)
+		}
+		if got != c.skipped {
+			t.Errorf("%s: skipped from %q, want %q", c.name, got, c.skipped)
 		}
 	}
 }
@@ -307,14 +316,14 @@ func TestSummaryMessage(t *testing.T) {
 func TestParseProse(t *testing.T) {
 	people := summaryPeople()[:2]
 	text := "```json\n" + `{"alice": "Alice merged api#1 and closed PROJ-1.", "bob": "Bob opened api#2 and api#7.", "mallory": "Hi."}` + "\n```"
-	got, err := parseProse(text, people)
+	got, dropped, err := parseProse(text, people)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["alice"] == "" || got["bob"] != "" || got["mallory"] != "" {
-		t.Errorf("paragraphs = %v, want alice only (bob names a PR not in his facts)", got)
+	if got["alice"] == "" || got["bob"] != "" || got["mallory"] != "" || strings.Join(dropped, ",") != "bob" {
+		t.Errorf("paragraphs = %v, dropped %v, want alice only (bob names a PR not in his facts)", got, dropped)
 	}
-	if _, err := parseProse("I cannot help with that.", people); err == nil {
+	if _, _, err := parseProse("I cannot help with that.", people); err == nil {
 		t.Error("want an error for a reply without JSON")
 	}
 	if p := prosePrompt("Monday 19 October", people); !strings.Contains(p, `"ref": "api#1"`) || strings.Contains(p, "https://") {
@@ -470,5 +479,106 @@ func TestRunSummaryCoversMissedDays(t *testing.T) {
 	last := strings.Join(f.calls[len(f.calls)-1], " ")
 	if !strings.Contains(last, "updated:>=2026-10-19T22:00:00Z") {
 		t.Errorf("Wednesday searched from the wrong time: %s", last)
+	}
+}
+
+// A paragraph may name any key its person's PRs carry in their titles or
+// branches, even with Jira off or for a PR they only reviewed.
+func TestParseProseAllowsKeysFromThePRs(t *testing.T) {
+	people := []personFacts{
+		{Login: "alice", Reviewed: []prFact{{Ref: "api#2", Title: "CON-184: add caching", Author: "bob"}}},
+		{Login: "bob", Merged: []prFact{{Ref: "api#3", Title: "Read files as UTF-8", branch: "fix/PROJ-9-encoding"}}},
+		{Login: "carol", Opened: []prFact{{Ref: "api#4", Title: "Tidy up", key: "PROJ-12"}}},
+		{Login: "dave", Opened: []prFact{{Ref: "api#5", Title: "Tidy up"}}},
+	}
+	text := `{"alice": "alice reviewed api#2 for CON-184.", "bob": "bob merged api#3 (PROJ-9), which reads UTF-8.",
+		"carol": "carol opened api#4 for PROJ-12.", "dave": "dave opened api#5 for PROJ-77."}`
+	got, dropped, err := parseProse(text, people)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["alice"] == "" || got["bob"] == "" || got["carol"] == "" || got["dave"] != "" || strings.Join(dropped, ",") != "dave" {
+		t.Errorf("paragraphs = %v, dropped %v, want all but dave", got, dropped)
+	}
+	// dave still shows, as lists.
+	msg := printMessage(summaryMessage("Monday 19 October", people, got, nil))
+	if !strings.Contains(msg, "*dave*\n• Opened") {
+		t.Errorf("dave is missing:\n%s", msg)
+	}
+}
+
+// fakeSummaryRun installs a fake gh that answers with reply, and a fake team
+// of alice and bob, and returns the config and paths for runSummary.
+func fakeSummaryRun(t *testing.T, reply func(q map[string]string) (string, error)) (*fakeSummaryGH, Config, Paths) {
+	t.Helper()
+	f := &fakeSummaryGH{reply: reply}
+	f.install(t)
+	saved := summaryMembers
+	summaryMembers = func(context.Context, string) (map[string]bool, error) {
+		return map[string]bool{"alice": true, "bob": true}, nil
+	}
+	t.Cleanup(func() { summaryMembers = saved })
+	cfg := defaultConfig()
+	cfg.TimeZone = "Europe/Paris"
+	cfg.Summary = SummaryConfig{Team: "acme/platform"} // no Jira, no prose
+	dir := t.TempDir()
+	return f, cfg, Paths{State: dir + "/state.json", Settings: dir + "/claude-settings.json"}
+}
+
+func emptyReply(q map[string]string) (string, error) {
+	data := map[string]any{}
+	for k := range q {
+		data["s"+strings.TrimPrefix(k, "q")] = map[string]any{"issueCount": 0, "nodes": []any{}}
+	}
+	return jsonString(map[string]any{"data": data}), nil
+}
+
+// A failed GitHub batch sends no DM and keeps the stored end, so the
+// scheduler's retry, or the next summary, still covers the period.
+func TestRunSummaryRetriesAFailedBatch(t *testing.T) {
+	_, cfg, paths := fakeSummaryRun(t, func(map[string]string) (string, error) {
+		return "", errors.New("gh api: HTTP 502")
+	})
+	covered := time.Date(2026, 10, 19, 0, 0, 0, 0, cet)
+	if err := saveState(paths.State, State{SummaryCovered: covered}); err != nil {
+		t.Fatal(err)
+	}
+	env := newEnv(cfg, paths, false)
+	env.now = time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
+	sent := false
+	env.send = func(context.Context, Message) error { sent = true; return nil }
+	err := runSummary(context.Background(), env)
+	var reported reportedError
+	if err == nil || errors.As(err, &reported) || !strings.Contains(err.Error(), "Could not read GitHub for alice, bob") {
+		t.Errorf("err = %v, want a retryable error naming the members", err)
+	}
+	if sent {
+		t.Error("a DM went out without some members")
+	}
+	if got := loadState(paths.State).SummaryCovered; !got.Equal(covered) {
+		t.Errorf("stored end moved to %s", got)
+	}
+}
+
+// After more than 7 days without a summary, the DM names the days it leaves out.
+func TestRunSummaryNotesSkippedDays(t *testing.T) {
+	_, cfg, paths := fakeSummaryRun(t, emptyReply)
+	if err := saveState(paths.State, State{SummaryCovered: time.Date(2026, 10, 5, 0, 0, 0, 0, cet)}); err != nil {
+		t.Fatal(err)
+	}
+	env := newEnv(cfg, paths, false)
+	env.now = time.Date(2026, 10, 20, 8, 30, 0, 0, cet)
+	var got string
+	env.send = func(_ context.Context, msg Message) error { got = printMessage(msg); return nil }
+	if err := runSummary(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"*Team summary, Tuesday 13 to Monday 19 October*",
+		"_No summary ran for more than 7 days, so this leaves out Monday 5 to Monday 12 October._",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message lacks %q:\n%s", want, got)
+		}
 	}
 }
