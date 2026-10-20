@@ -18,6 +18,7 @@ import { type ReconnectChoice, type ResumeTarget, reconnectMessage } from "../ho
 import type { SessionHistoryEntry, SessionTab } from "../types";
 import ConfirmDialog from "./ConfirmDialog";
 import ConversationPicker, { type ConversationHolder, holderAction } from "./ConversationPicker";
+import { TicketChip } from "./SessionSummaryCard";
 
 function timeAgo(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -84,8 +85,8 @@ interface PendingSelection {
 function historyConversation(entry: SessionHistoryEntry): main.Conversation {
   return {
     uuid: entry.claudeSessionId ?? "",
-    title: entry.name,
-    preview: entry.lastMessage ?? "",
+    title: entry.title || entry.name,
+    recap: entry.recap ?? "",
     modifiedAt: entry.closedAt,
     sizeBytes: 0,
   };
@@ -99,8 +100,8 @@ function historyConversation(entry: SessionHistoryEntry): main.Conversation {
 function tabConversation(tab: SessionTab): main.Conversation {
   return {
     uuid: tab.claudeSessionId ?? "",
-    title: tab.name,
-    preview: tab.lastMsg ?? "",
+    title: tab.title || tab.name,
+    recap: tab.recap ?? "",
     modifiedAt: 0,
     sizeBytes: 0,
   };
@@ -766,7 +767,21 @@ export default function SessionDialog({
                             <span className="text-[10px] text-tertiary block truncate">
                               {shortenPath(entry.directory)}
                             </span>
-                            {entry.lastMessage && (
+                            {entry.title && (
+                              <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                                {entry.ticket && <TicketChip ticket={entry.ticket} />}
+                                <span className="text-[11px] text-white/70 truncate">
+                                  {entry.title}
+                                </span>
+                              </span>
+                            )}
+                            {entry.recap && (
+                              <span className="text-[10px] text-muted-foreground block truncate mt-0.5">
+                                {entry.recap}
+                              </span>
+                            )}
+                            {/* Sessions closed before plan 036 have only Claude's last reply. */}
+                            {!entry.title && !entry.recap && entry.lastMessage && (
                               <span className="text-[10px] text-muted-foreground/50 block truncate mt-0.5 italic">
                                 {entry.lastMessage}
                               </span>

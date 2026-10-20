@@ -259,7 +259,7 @@ export namespace main {
 	export class Conversation {
 	    uuid: string;
 	    title: string;
-	    preview: string;
+	    recap: string;
 	    modifiedAt: number;
 	    sizeBytes: number;
 	
@@ -271,7 +271,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.uuid = source["uuid"];
 	        this.title = source["title"];
-	        this.preview = source["preview"];
+	        this.recap = source["recap"];
 	        this.modifiedAt = source["modifiedAt"];
 	        this.sizeBytes = source["sizeBytes"];
 	    }
@@ -779,6 +779,36 @@ export namespace main {
 	        this.claudeSessionId = source["claudeSessionId"];
 	    }
 	}
+	export class SessionPR {
+	    number: number;
+	    repo: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionPR(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.number = source["number"];
+	        this.repo = source["repo"];
+	        this.url = source["url"];
+	    }
+	}
+	export class SessionPrompt {
+	    text: string;
+	    timestamp: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionPrompt(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.timestamp = source["timestamp"];
+	    }
+	}
 	export class SessionRecord {
 	    slug: string;
 	    name: string;
@@ -790,6 +820,9 @@ export namespace main {
 	    lastMsg?: string;
 	    worktreePath?: string;
 	    worktreeCreated?: boolean;
+	    title?: string;
+	    recap?: string;
+	    ticket?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionRecord(source);
@@ -807,7 +840,54 @@ export namespace main {
 	        this.lastMsg = source["lastMsg"];
 	        this.worktreePath = source["worktreePath"];
 	        this.worktreeCreated = source["worktreeCreated"];
+	        this.title = source["title"];
+	        this.recap = source["recap"];
+	        this.ticket = source["ticket"];
 	    }
+	}
+	export class SessionSummary {
+	    title: string;
+	    recap: string;
+	    lastPrompt: string;
+	    recentPrompts: SessionPrompt[];
+	    branch: string;
+	    pr?: SessionPR;
+	    ticket: string;
+	    updatedAt: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.recap = source["recap"];
+	        this.lastPrompt = source["lastPrompt"];
+	        this.recentPrompts = this.convertValues(source["recentPrompts"], SessionPrompt);
+	        this.branch = source["branch"];
+	        this.pr = this.convertValues(source["pr"], SessionPR);
+	        this.ticket = source["ticket"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class SessionsData {
 	    sessions: SessionRecord[];

@@ -99,7 +99,13 @@ export interface SessionTab {
   createdAt: number;
   connected: boolean;
   claudeSessionId?: string;
+  // Claude's last reply, kept only from sessions saved before plan 036.
   lastMsg?: string;
+  // The conversation's latest summary (plan 036). Kept on the tab, so a
+  // restart or a dead session still shows what it was about.
+  title?: string;
+  recap?: string;
+  ticket?: string;
   // The session's worktree: one Koko created, or one opened from the
   // Worktrees module. Used on session close to offer to clean it up.
   worktreePath?: string;
@@ -116,7 +122,12 @@ export interface SessionHistoryEntry {
   directory: string;
   createdAt: number;
   closedAt: number;
+  // Claude's last reply, kept only from sessions closed before plan 036.
   lastMessage?: string;
+  // The conversation's summary when the session closed (plan 036).
+  title?: string;
+  recap?: string;
+  ticket?: string;
   claudeSessionId?: string;
   // A worktree Koko created for the session and the user kept at close.
   // Settings > General can remove these later (plan 028 step 7b). The folder

@@ -12,8 +12,12 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
+import type { main } from "../../wailsjs/go/models";
 import type { SessionState } from "../hooks/useSessionActivity";
+import { summaryLine } from "../lib/summary";
 import type { SessionTab } from "../types";
+import HoverCard from "./HoverCard";
+import SessionSummaryCard, { TicketChip } from "./SessionSummaryCard";
 
 function dirBasename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
@@ -25,6 +29,8 @@ interface SessionSidebarProps {
   activeSessionId: string | null;
   sessionStates: Map<string, SessionState>;
   sessionBranches?: Map<string, string>;
+  // Each conversation's summary, keyed by Claude session UUID (plan 036).
+  sessionSummaries?: Map<string, main.SessionSummary>;
   onSessionSelect: (sessionId: string) => void;
   onNewSession: () => void;
   onDeleteSession: (sessionId: string) => void;
@@ -46,6 +52,7 @@ export default function SessionSidebar({
   activeSessionId,
   sessionStates,
   sessionBranches,
+  sessionSummaries,
   onSessionSelect,
   onNewSession,
   onDeleteSession,
@@ -60,11 +67,20 @@ export default function SessionSidebar({
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const summaryOf = useCallback(
+    (s: SessionTab) => (s.claudeSessionId ? sessionSummaries?.get(s.claudeSessionId) : undefined),
+    [sessionSummaries],
+  );
+
+  const query = searchQuery.toLowerCase();
   const filteredSessions = searchQuery
-    ? sessions.filter(
-        (s) =>
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.directory.toLowerCase().includes(searchQuery.toLowerCase()),
+    ? sessions.filter((s) =>
+        [
+          s.name,
+          s.directory,
+          summaryLine(summaryOf(s), s),
+          summaryOf(s)?.ticket || s.ticket || "",
+        ].some((text) => text.toLowerCase().includes(query)),
       )
     : sessions;
 
@@ -212,125 +228,163 @@ export default function SessionSidebar({
                         // Collision = >1 connected session sharing the same dir
                         const connectedInGroup = group.sessions.filter((s) => s.connected).length;
                         const hasCollision = connectedInGroup > 1 && session.connected;
+                        const summary = summaryOf(session);
+                        const line = summaryLine(summary, session);
+                        const ticket = summary?.ticket || session.ticket;
 
                         return (
-                          // biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: session item
-                          <div
+                          <HoverCard
                             key={session.id}
-                            className={`group flex items-center gap-2.5 ${isMulti ? "ml-4" : ""} pl-3 pr-2 py-2 rounded-lg cursor-pointer transition-all ${
-                              isActive
-                                ? "bg-white/[0.08] border border-accent/20 glow-accent"
-                                : state === "approval"
-                                  ? "hover:bg-white/[0.05] border border-warning/30"
-                                  : "hover:bg-white/[0.05] border border-transparent"
-                            }`}
-                            onClick={() => onSessionSelect(session.id)}
+                            content={
+                              isEditing ? null : (
+                                <SessionSummaryCard summary={summary} saved={session} />
+                              )
+                            }
                           >
-                            {/* Status dot */}
-                            <span
-                              className={`size-2 rounded-full shrink-0 ${
-                                state === "approval"
-                                  ? "bg-warning animate-pulse"
-                                  : state === "disconnected"
-                                    ? "bg-white/20"
-                                    : "bg-accent/70"
-                              }`}
-                            />
-
-                            {/* Name */}
-                            <div className="flex-1 min-w-0">
-                              {isEditing ? (
-                                <input
-                                  ref={inputRef}
-                                  value={editValue}
-                                  onChange={(e) => setEditValue(e.target.value)}
-                                  onBlur={commitRename}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") commitRename();
-                                    if (e.key === "Escape") setEditingId(null);
-                                    e.stopPropagation();
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="text-sm text-white bg-white/[0.08] border border-accent/20 rounded px-1.5 py-0.5 w-full outline-none"
-                                />
-                              ) : (
-                                // biome-ignore lint/a11y/noStaticElementInteractions: double-click rename
-                                <div
-                                  className="flex items-center gap-1.5 min-w-0"
-                                  onDoubleClick={(e) => {
-                                    e.stopPropagation();
-                                    startRename(session);
-                                  }}
-                                >
-                                  <span
-                                    className={`text-sm truncate ${
-                                      state === "disconnected" ? "text-white/50" : "text-white"
-                                    }`}
-                                  >
-                                    {session.name}
-                                  </span>
-                                  {hasCollision && (
-                                    <span
-                                      className="shrink-0 text-warning"
-                                      title="Another session is using this directory — consider a worktree"
-                                    >
-                                      <AlertTriangle className="size-3" />
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              <div className="flex items-center gap-2 mt-0.5">
-                                {!session.connected && (
-                                  <span className="text-[10px] text-tertiary">Click to resume</span>
-                                )}
-                                {branch && (
-                                  <span
-                                    className="flex items-center gap-1 text-[10px] text-tertiary truncate"
-                                    title={`Branch: ${branch}`}
-                                  >
-                                    <GitBranch className="size-2.5 shrink-0" />
-                                    <span className="truncate">{branch}</span>
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex items-center gap-1 shrink-0">
-                              {shortcutKey && (
-                                <kbd className="text-[10px] text-tertiary font-mono px-1 rounded bg-white/[0.04] border border-white/[0.06] leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity">
-                                  ⌘{shortcutKey}
-                                </kbd>
-                              )}
-                              {/* Live sessions only: a disconnected tab is
-                                  reconnected by clicking it. */}
-                              {onReloadSession && session.connected && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onReloadSession(session.id);
-                                  }}
-                                  className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                  title="Reload session"
-                                  aria-label={`Reload ${session.slug || session.name}`}
-                                >
-                                  <RotateCw className="size-3.5 text-muted-foreground hover:text-accent" />
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDeleteSession(session.id);
+                            {(describedBy) => (
+                              // biome-ignore lint/a11y/useSemanticElements: the row holds its own buttons, which a button cannot
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                aria-describedby={describedBy}
+                                className={`group flex items-center gap-2.5 ${isMulti ? "ml-4" : ""} pl-3 pr-2 py-2 rounded-lg cursor-pointer transition-all outline-none focus-visible:ring-1 focus-visible:ring-accent/50 ${
+                                  isActive
+                                    ? "bg-white/[0.08] border border-accent/20 glow-accent"
+                                    : state === "approval"
+                                      ? "hover:bg-white/[0.05] border border-warning/30"
+                                      : "hover:bg-white/[0.05] border border-transparent"
+                                }`}
+                                onClick={() => onSessionSelect(session.id)}
+                                onKeyDown={(e) => {
+                                  // Only the row itself. Enter on a button inside,
+                                  // or in the rename field, is theirs.
+                                  if (e.target !== e.currentTarget) return;
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    onSessionSelect(session.id);
+                                  }
                                 }}
-                                className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="Close session"
                               >
-                                <X className="size-3.5 text-muted-foreground hover:text-error" />
-                              </button>
-                            </div>
-                          </div>
+                                {/* Status dot */}
+                                <span
+                                  className={`size-2 rounded-full shrink-0 ${
+                                    state === "approval"
+                                      ? "bg-warning animate-pulse"
+                                      : state === "disconnected"
+                                        ? "bg-white/20"
+                                        : "bg-accent/70"
+                                  }`}
+                                />
+
+                                {/* Name */}
+                                <div className="flex-1 min-w-0">
+                                  {isEditing ? (
+                                    <input
+                                      ref={inputRef}
+                                      value={editValue}
+                                      onChange={(e) => setEditValue(e.target.value)}
+                                      onBlur={commitRename}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") commitRename();
+                                        if (e.key === "Escape") setEditingId(null);
+                                        e.stopPropagation();
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-sm text-white bg-white/[0.08] border border-accent/20 rounded px-1.5 py-0.5 w-full outline-none"
+                                    />
+                                  ) : (
+                                    // biome-ignore lint/a11y/noStaticElementInteractions: double-click rename
+                                    <div
+                                      className="flex items-center gap-1.5 min-w-0"
+                                      onDoubleClick={(e) => {
+                                        e.stopPropagation();
+                                        startRename(session);
+                                      }}
+                                    >
+                                      <span
+                                        className={`text-sm truncate ${
+                                          state === "disconnected" ? "text-white/50" : "text-white"
+                                        }`}
+                                      >
+                                        {session.name}
+                                      </span>
+                                      {hasCollision && (
+                                        <span
+                                          className="shrink-0 text-warning"
+                                          title="Another session is using this directory — consider a worktree"
+                                        >
+                                          <AlertTriangle className="size-3" />
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {/* What the conversation is about (plan 036) */}
+                                  {(ticket || line) && (
+                                    <div
+                                      className="flex items-center gap-1.5 mt-0.5 min-w-0"
+                                      data-testid="session-summary-line"
+                                    >
+                                      {ticket && <TicketChip ticket={ticket} />}
+                                      {line && (
+                                        <span className="text-[11px] text-muted-foreground truncate">
+                                          {line}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    {!session.connected && (
+                                      <span className="text-[10px] text-tertiary">
+                                        Click to resume
+                                      </span>
+                                    )}
+                                    {branch && (
+                                      <span className="flex items-center gap-1 text-[10px] text-tertiary truncate">
+                                        <GitBranch className="size-2.5 shrink-0" />
+                                        <span className="truncate">{branch}</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {shortcutKey && (
+                                    <kbd className="text-[10px] text-tertiary font-mono px-1 rounded bg-white/[0.04] border border-white/[0.06] leading-relaxed opacity-0 group-hover:opacity-100 transition-opacity">
+                                      ⌘{shortcutKey}
+                                    </kbd>
+                                  )}
+                                  {/* Live sessions only: a disconnected tab is
+                                  reconnected by clicking it. */}
+                                  {onReloadSession && session.connected && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onReloadSession(session.id);
+                                      }}
+                                      className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                      title="Reload session"
+                                      aria-label={`Reload ${session.slug || session.name}`}
+                                    >
+                                      <RotateCw className="size-3.5 text-muted-foreground hover:text-accent" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onDeleteSession(session.id);
+                                    }}
+                                    className="p-0.5 hover:bg-white/10 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                    title="Close session"
+                                  >
+                                    <X className="size-3.5 text-muted-foreground hover:text-error" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </HoverCard>
                         );
                       })}
                   </div>

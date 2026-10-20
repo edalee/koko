@@ -10,12 +10,16 @@ export function GetCommands(arg1) {
   return window['go']['main']['ClaudeService']['GetCommands'](arg1);
 }
 
-export function GetLastMessage(arg1) {
-  return window['go']['main']['ClaudeService']['GetLastMessage'](arg1);
+export function GetLastMessage(arg1, arg2) {
+  return window['go']['main']['ClaudeService']['GetLastMessage'](arg1, arg2);
 }
 
 export function GetMCPServers(arg1) {
   return window['go']['main']['ClaudeService']['GetMCPServers'](arg1);
+}
+
+export function GetSessionSummary(arg1, arg2) {
+  return window['go']['main']['ClaudeService']['GetSessionSummary'](arg1, arg2);
 }
 
 export function ListConversations(arg1) {
