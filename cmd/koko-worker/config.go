@@ -16,9 +16,10 @@ const (
 	JobStandup = "standup"
 	JobFocus   = "focus"
 	JobReview  = "review"
+	JobSummary = "summary"
 )
 
-var allJobs = []string{JobStandup, JobFocus, JobReview}
+var allJobs = []string{JobStandup, JobFocus, JobReview, JobSummary}
 
 var markerPrefixRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
@@ -103,6 +104,17 @@ func (j JobConfig) runsOn(t time.Time) bool {
 	return slices.Contains(j.days(), dayNames[t.Weekday()])
 }
 
+// SummaryConfig is the team summary: whose work it reports, and where.
+type SummaryConfig struct {
+	Team  string   `json:"team"`  // "org/team-slug"
+	Repos []string `json:"repos"` // "owner/repo" names. Empty means every repo in the team's org
+	// Jira lists the tickets the team moved. It needs a Jira site.
+	Jira bool `json:"jira"`
+	// Prose has Claude write a paragraph per person. Off, or if Claude fails,
+	// the DM lists the facts.
+	Prose bool `json:"prose"`
+}
+
 // SlackConfig is the bot that sends the DMs. Koko's own Slack settings are not used.
 type SlackConfig struct {
 	BotToken string `json:"botToken"`
@@ -138,8 +150,10 @@ type Config struct {
 	Slack    SlackConfig    `json:"slack"`
 	Focus    FocusConfig    `json:"focus"`
 	// Lunch decodes over its default, so a file without it keeps lunch on.
-	Lunch LunchConfig          `json:"lunch"`
-	Jobs  map[string]JobConfig `json:"jobs"`
+	Lunch LunchConfig `json:"lunch"`
+	// Summary decodes over its default too, so Jira and Prose start on.
+	Summary SummaryConfig        `json:"summary"`
+	Jobs    map[string]JobConfig `json:"jobs"`
 }
 
 func defaultConfig() Config {
@@ -154,11 +168,14 @@ func defaultConfig() Config {
 			Team: TeamScopeConfig{MaxAgeDays: 4},
 		},
 		Focus: FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
-		Lunch: LunchConfig{Enabled: true, Start: "12:00", End: "13:00"},
+		Lunch:   LunchConfig{Enabled: true, Start: "12:00", End: "13:00"},
+		Summary: SummaryConfig{Jira: true, Prose: true},
 		Jobs: map[string]JobConfig{
 			JobStandup: {Enabled: true, Times: []string{"07:00"}},
 			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
 			JobReview:  {Enabled: false, Times: []string{"09:30", "12:00", "14:00"}},
+			// No team is set, so the summary starts off.
+			JobSummary: {Enabled: false, Times: []string{"08:30"}},
 		},
 	}
 }
@@ -276,6 +293,8 @@ func (c *Config) fillDefaults() {
 	if c.Lunch.End == "" {
 		c.Lunch.End = def.Lunch.End
 	}
+	c.Summary.Team = strings.TrimSpace(c.Summary.Team)
+	c.Summary.Repos = trimList(c.Summary.Repos)
 	if c.Jobs == nil {
 		c.Jobs = map[string]JobConfig{}
 	}
@@ -386,6 +405,23 @@ func (r ReviewerConfig) problem() error {
 	for _, repo := range r.ExcludeRepos {
 		if !ownerRepo(repo) {
 			return fmt.Errorf("excluded repo %q, want owner/repo", repo)
+		}
+	}
+	return nil
+}
+
+// problem is what stops the summary from running, or nil. Only the summary
+// job and `check summary` fail on it.
+func (s SummaryConfig) problem() error {
+	if s.Team == "" {
+		return fmt.Errorf("no summary team is set")
+	}
+	if org, team, ok := strings.Cut(s.Team, "/"); !ok || org == "" || team == "" || strings.Contains(team, "/") {
+		return fmt.Errorf("summary team %q, want org/team-slug", s.Team)
+	}
+	for _, repo := range s.Repos {
+		if !ownerRepo(repo) {
+			return fmt.Errorf("summary repo %q, want owner/repo", repo)
 		}
 	}
 	return nil
