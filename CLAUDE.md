@@ -50,7 +50,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `git_service.go` — Branch name, file changes, file diffs, repo slug detection
 - `process_monitor.go`: child process tree scan for the subagent monitor
 - `config_service.go` — Atomic writes, API key, hidden PRs
-- `claude_service.go` — Last message extraction, listing a directory's stored conversations, and the file helpers for deleting them
+- `claude_service.go` — Listing a directory's stored conversations, the head read, and the file helpers for deleting them
 - `session_summary.go`: `ClaudeService.GetSessionSummary`, one conversation's title, recap, prompts, branch, PR and ticket, read from its transcript and cached (plan 036). `jira_key.go` holds the Jira key rule
 - `conversation_delete.go`: `App.DeleteConversation` and `DeleteConversations`, with the ownership checks (plan 028 step 7a)
 - `slack_commands.go` — Slack bot DM command handler
