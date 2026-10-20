@@ -383,6 +383,7 @@ For each person, write one short paragraph in plain English: what they merged, o
 Rules:
 - Use only the facts given. Do not add reasons, outcomes, opinions or anything else they do not say.
 - Name PRs by their ref, such as api#12, and tickets by their key.
+- Refer to each person by their login. Do not guess anyone's pronouns.
 - British spelling. Active voice. At most three sentences per person.
 
 Reply with only a JSON object from each login to its paragraph, such as {"alice": "..."}.
