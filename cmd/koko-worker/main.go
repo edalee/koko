@@ -280,14 +280,18 @@ func serveTick(ctx context.Context, cfg Config, paths Paths) {
 // so it starts in its own process (startDetached), and the loop goes on. A
 // PRs run waits for a later tick while a run holds the shared reviewer lock,
 // so it never stalls the loop either.
+//
+// The repos runs start after the other jobs, so a PRs run due in the same
+// tick never meets a lock a repos run has just taken.
 func runDueJobs(ctx context.Context, cfg Config, paths Paths, due []DueRun, now time.Time) {
+	var repos []string
 	for _, run := range due {
 		if ctx.Err() != nil {
 			return
 		}
 		if r, ok := cfg.reviewRun(run.Job); ok {
 			if r.Target == TargetRepos {
-				startDetached(paths, run.Job, now)
+				repos = append(repos, run.Job)
 				continue
 			}
 			if !lockFree(filepath.Join(paths.Dir, "reviewer.lock")) {
@@ -296,6 +300,9 @@ func runDueJobs(ctx context.Context, cfg Config, paths Paths, due []DueRun, now 
 			}
 		}
 		runDue(ctx, cfg, paths, run)
+	}
+	for _, job := range repos {
+		startDetached(paths, job, now)
 	}
 }
 

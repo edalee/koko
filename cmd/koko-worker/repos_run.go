@@ -227,10 +227,12 @@ func removeHooks(dir string) error {
 // sends one DM about them all. A test run prints what it would run, and runs
 // nothing, because the tool changes the repos.
 //
-// With a slot, each repo's outcome is saved as it ends. A retry of the slot,
-// after a stop or a failed DM, takes the saved outcomes and runs only the
-// repos not yet started. A repo the run was stopped in counts as failed, and
-// does not run again, because the tool may have pushed part of its work.
+// With a slot, each repo's outcome is saved as it ends. A scheduled retry of
+// the slot, after a stop or a failed DM, takes the saved outcomes and runs
+// only the repos not yet started. A repo the run was stopped in counts as
+// failed, and does not run again, because the tool may have pushed part of
+// its work. A Run now (noWait) always runs every repo and sends the DM, but
+// saves its outcomes, so a later retry of its slot skips them too.
 func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 	job := reviewJob(run.Name)
 	if !env.test {
@@ -264,6 +266,7 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 		return err
 	}
 	keep := !env.slot.IsZero()
+	resume := keep && !env.noWait
 	save := func(repo string, rec RepoRecord) error {
 		if !keep {
 			return nil
@@ -275,7 +278,7 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if rec, ok := env.state.RepoRuns[repoRunKey(job, env.slot, repo)]; keep && ok {
+		if rec, ok := env.state.RepoRuns[repoRunKey(job, env.slot, repo)]; resume && ok {
 			o := repoOutcome{repo: repo, status: rec.Status, why: rec.Why, urls: rec.URLs, log: rec.Log}
 			if o.status == repoStarted {
 				o.status, o.why = repoFailed, "the run stopped before it finished, so it does not run again in this slot"
@@ -299,7 +302,7 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 			failed = append(failed, o.repo+": "+o.why)
 		}
 	}
-	if !keep || !env.state.Runs[slotKey(job, env.slot)].Reported {
+	if !resume || !env.state.Runs[slotKey(job, env.slot)].Reported {
 		if err := env.notify(ctx, reposMessage(run, outcomes)); err != nil {
 			// No repo runs again: a retry finds them saved, and sends the DM.
 			return reportedError{fmt.Errorf("%s: could not send the DM: %w", run.Name, err)}

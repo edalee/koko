@@ -72,10 +72,10 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 **Decisions** (from the review of this part):
 
 1. **Own clones for repos runs.** A repos run works in its own clones under `~/.cache/koko-worker/repos-runs`, with their own locks. PR reviews never use them. Before each repo, the worker unsets `core.hooksPath` and deletes the clone's hooks, all but git's samples, so no hook a tool left runs on the next checkout.
-2. **No repo runs twice in a slot.** Each repo's outcome is saved for the slot as it ends. A retry, after a failed DM or a stop, takes the saved outcomes and runs only the repos not yet started. A repo the run was stopped in counts as failed and does not run again, because the tool may have pushed part of its work. The DM goes out once per slot.
+2. **No repo runs twice in a slot.** Each repo's outcome is saved for the slot as it ends. A retry, after a failed DM or a stop, takes the saved outcomes and runs only the repos not yet started. A repo the run was stopped in counts as failed and does not run again, because the tool may have pushed part of its work. The DM goes out once per slot. A Run now always runs every repo and sends its own DM, and saves its outcomes for the slot too.
 3. **`{claude}` in a repos run** is the review wrapper. It denies some commands, such as `git push`, but it is no guard. A repos run gets the real gh and git on purpose, because its tool opens PRs. ADR-034 says so.
 4. **A bare `run review`** starts only a PRs run, as above.
-5. **Long repos runs.** The scheduler starts a due repos run in its own process (`koko-worker run review:<name> --scheduled`), so the stand-up and focus time run on time. It still takes the run's lock. A PRs run that comes due while a run holds the shared lock waits for a later tick.
+5. **Long repos runs.** The scheduler starts a due repos run in its own process (`koko-worker run review:<name> --scheduled`), so the stand-up and focus time run on time. It still takes the run's lock. In a tick, the other due jobs run first. A PRs run that comes due while a run holds the shared lock waits for a later tick.
 6. **Run now on a held lock** fails at once with "another run is working, try again when it ends". Scheduled runs wait.
 7. **A bad or repeated run name, or a bad target,** fails only that run and `check reviewer`, as plan 030 says for bad reviewer values. A run with a bad name, or the second of two with one name, gets no job at all, because its name would make a bad lock file name. The UI does not save either.
 

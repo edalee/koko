@@ -409,6 +409,18 @@ func TestReposRunRetryRunsNoRepoTwice(t *testing.T) {
 	if err := runRepos(ctx, env, run); err != nil || len(*dms) != 1 {
 		t.Errorf("after the DM: %v, dms %q", err, *dms)
 	}
+	// A Run now later that day runs every repo again, and sends its own DM.
+	runNow := env
+	runNow.noWait = true
+	if err := runRepos(ctx, runNow, run); err != nil {
+		t.Fatalf("Run now: %v", err)
+	}
+	if got := ran(); got != "acme/api\nacme/web\nacme/api\nacme/web" {
+		t.Errorf("Run now ran %q, want every repo again", got)
+	}
+	if len(*dms) != 2 {
+		t.Errorf("Run now dms %q, want a second DM", *dms)
+	}
 
 	// A repo the run was stopped in counts as failed, and does not run again.
 	env.slot = monday(8, 0).AddDate(0, 0, 7)
@@ -420,7 +432,7 @@ func TestReposRunRetryRunsNoRepoTwice(t *testing.T) {
 	if err := runRepos(ctx, env, run); err == nil {
 		t.Error("want the stopped repo reported as failed")
 	}
-	if got := ran(); got != "acme/api\nacme/web\nacme/web" {
+	if got := ran(); got != "acme/api\nacme/web\nacme/api\nacme/web\nacme/web" {
 		t.Errorf("ran %q, want only acme/web again", got)
 	}
 	if dm := (*dms)[len(*dms)-1]; !strings.Contains(dm, "acme/api: failed (the run stopped before it finished") {
@@ -524,4 +536,43 @@ func TestRepoRunsStartInTheirOwnProcess(t *testing.T) {
 	if len(started) != 2 {
 		t.Errorf("not started again after the wait: %q", started)
 	}
+}
+
+func TestPRsRunsGoBeforeRepoRunsInATick(t *testing.T) {
+	dir := t.TempDir()
+	paths := Paths{Dir: dir, State: filepath.Join(dir, "state.json"), Logs: filepath.Join(dir, "logs")}
+	cfg := twoRuns()
+	cfg.Reviewer.Command = ""
+	// The repos run comes first in the config.
+	cfg.Reviewer.Runs = []ReviewRun{cfg.Reviewer.Runs[1], cfg.Reviewer.Runs[0]}
+	oldStart, oldDetached := startRun, detached
+	t.Cleanup(func() { startRun, detached = oldStart, oldDetached })
+	detached = map[string]*detachedRun{}
+	var prsFirst bool
+	startRun = func(_ Paths, job string) (func() error, error) {
+		// runDue makes the PRs run's lock file when it starts.
+		_, err := os.Stat(jobLockPath(paths, reviewDaily))
+		prsFirst = err == nil
+		unlock, err := lockFile(filepath.Join(dir, "reviewer.lock"))
+		if err != nil {
+			return nil, err
+		}
+		return func() error { unlock(); return nil }, nil
+	}
+	now := monday(9, 40)
+	due := dueRuns(cfg, readyState(cfg), now)
+	var runs []DueRun
+	for _, r := range due {
+		if strings.HasPrefix(r.Job, "review:") {
+			runs = append(runs, r)
+		}
+	}
+	if len(runs) != 2 || runs[0].Job != "review:weekly" {
+		t.Fatalf("due %v, want the repos run first", runs)
+	}
+	runDueJobs(context.Background(), cfg, paths, runs, now)
+	if !prsFirst {
+		t.Error("the repos run started before the PRs run due in the same tick")
+	}
+	<-detached["review:weekly"].done
 }
