@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GetConfig, SaveConfig, Status } from "../../../wailsjs/go/main/WorkerService";
+import { GetConfig, SaveConfig, SetEnabled, Status } from "../../../wailsjs/go/main/WorkerService";
 import {
   canonicalZone,
   DEFAULTS,
@@ -23,10 +23,13 @@ export function useWorkerConfig() {
     end: DEFAULTS.lunch.end,
   });
   const [lunchError, setLunchError] = useState<string | null>(null);
-  // loaded turns true once worker.json is read, or failed to read.
+  // loaded turns true once reading worker.json ends, whether the read worked or failed.
   const [loaded, setLoaded] = useState(false);
   // savedZone is the time zone last read or saved, for a typo to fall back to.
   const savedZone = useRef(DEFAULTS.timeZone);
+  // switching is true while the master switch runs. The sections block their
+  // edits then, because SetEnabled writes worker.json itself.
+  const [switching, setSwitching] = useState(false);
 
   const refreshStatus = useCallback(() => {
     Status()
@@ -97,15 +100,33 @@ export function useWorkerConfig() {
     return save({ ...cfg, lunch: { ...cfg.lunch, enabled: !cfg.lunch.enabled } });
   };
 
-  // setReviewer changes a text box as you type, and onBlur saves it.
-  // saveReviewer saves at once, for switches and numbers.
+  // setReviewer changes reviewer fields as you type, without saving. ReviewCard
+  // saves each text box on blur. saveReviewer saves at once, for switches and numbers.
   const setReviewer = (patch: Partial<ReviewerConfig>) =>
     setCfg({ ...cfg, reviewer: { ...cfg.reviewer, ...patch } });
   const saveReviewer = (patch: Partial<ReviewerConfig>) =>
     save({ ...cfg, reviewer: { ...cfg.reviewer, ...patch } });
 
+  // setEnabled turns the worker on or off. It sets enabled on the newest
+  // config, so it never writes back a copy from before the switch.
+  const setEnabled = async (next: boolean) => {
+    setSwitching(true);
+    setError(null);
+    try {
+      await SetEnabled(next);
+      setCfg((c) => ({ ...c, enabled: next }));
+      refreshStatus();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSwitching(false);
+    }
+  };
+
   return {
     cfg,
+    switching,
+    setEnabled,
     loaded,
     setCfg,
     status,

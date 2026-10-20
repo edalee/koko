@@ -184,7 +184,12 @@ export function lunchProblem(start: string, end: string): string | null {
   return null;
 }
 
-const dayName = (day: string) => day[0].toUpperCase() + day.slice(1);
+// dayName is a day as a button or summary shows it, such as "Mon".
+export const dayName = (day: string) => day[0].toUpperCase() + day.slice(1);
+
+// jobTimes is a job's times in order, without empty ones. The worker drops
+// an empty time when it reads worker.json.
+export const jobTimes = (job: JobConfig) => job.times.filter(Boolean).sort();
 
 // daysLabel names a job's days in a few words, such as "Mon to Fri".
 export function daysLabel(days: string[]): string {
@@ -195,11 +200,11 @@ export function daysLabel(days: string[]): string {
   return set.map(dayName).join(", ");
 }
 
-// nextSlot is a job's next run as a wall clock time in zone, such as
-// "tomorrow 07:00", or null if the job is off. The worker runs jobs in its
-// own time zone, so this reads now there too.
+// nextSlot is a job's next run in zone, such as "tomorrow 07:00", or null if the
+// job is off or has no times. The worker runs jobs in its own time zone, so
+// nextSlot reads the current time in that zone.
 export function nextSlot(job: JobConfig, zone: string, now = new Date()): string | null {
-  const times = job.times.filter(Boolean).sort();
+  const times = jobTimes(job);
   if (!job.enabled || times.length === 0) return null;
   let parts: Record<string, string>;
   try {
@@ -227,6 +232,23 @@ export function nextSlot(job: JobConfig, zone: string, now = new Date()): string
     return `${i === 0 ? "today" : i === 1 ? "tomorrow" : dayName(day)} ${time}`;
   }
   return null;
+}
+
+// reviewerSetUp is true if the review job can run with these settings. It
+// follows problem() in cmd/koko-worker/config.go.
+export function reviewerSetUp(r: ReviewerConfig): boolean {
+  const command = r.command.trim();
+  if (!command || !/^[a-z0-9-]+$/.test(r.markerPrefix.trim())) return false;
+  // A command without {reviewer} names its own program, so the source is not used.
+  if (!command.includes("{reviewer}")) return true;
+  if (r.source === "local") return r.path.trim() !== "";
+  const script = r.script.trim();
+  return (
+    /^[^/\s]+\/[^/\s]+$/.test(r.repo.trim()) &&
+    script !== "" &&
+    !script.startsWith("/") &&
+    !script.includes("..")
+  );
 }
 
 export function formatWhen(iso?: string): string {

@@ -1,8 +1,8 @@
 import JobCard, { type CardProps } from "./JobCard";
 import { Block, Field } from "./ui";
 
-// StandupCard is the stand-up job. Its Team PRs list and its review queue
-// use the review worker's team, so it names that team here.
+// StandupCard is the stand-up job. Its Team PRs list and its list of PRs waiting
+// for your review both use the review worker's team, so the card names that team.
 export default function StandupCard(props: CardProps) {
   const { team } = props.api.cfg.reviewer;
   const { jiraSite } = props.api.cfg;

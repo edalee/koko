@@ -2,7 +2,7 @@ import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 
-// Group is one titled part of a section, such as Slack or Which PRs.
+// Group is one titled part of a section, such as Slack or Lunch.
 export function Group({
   title,
   aside,
@@ -59,8 +59,8 @@ export function Block({ title, children }: { title: string; children: ReactNode 
   );
 }
 
-// Disclosure is a button that opens and closes a part of the page. When
-// closed, it shows a one-line summary.
+// Disclosure is a button that opens and closes a part of the page. It shows a
+// one-line summary under its title.
 export function Disclosure({
   open,
   onToggle,

@@ -1,6 +1,6 @@
 import { Plus, X } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { DAYS, inputClass, type JobConfig, toggleDay } from "./config";
+import { DAYS, dayName, inputClass, type JobConfig, toggleDay } from "./config";
 import { Field } from "./ui";
 
 // JobSchedule is a job's days and times. With multi set, the job can run at
@@ -33,7 +33,7 @@ export default function JobSchedule({
                   : "border-white/[0.06] text-tertiary hover:text-muted-foreground",
               )}
             >
-              {day[0].toUpperCase() + day.slice(1)}
+              {dayName(day)}
             </button>
           ))}
         </div>

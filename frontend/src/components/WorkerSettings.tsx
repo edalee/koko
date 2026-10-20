@@ -19,12 +19,16 @@ export default function WorkerSettings() {
     <div className="space-y-6">
       <GeneralSection api={api} />
 
-      <div className="space-y-3 pt-5 border-t border-white/[0.06]">
+      {/* Job edits wait while the master switch runs, because it writes worker.json too. */}
+      <fieldset
+        disabled={api.switching}
+        className="min-w-0 space-y-3 pt-5 border-t border-white/[0.06] disabled:opacity-60"
+      >
         <h4 className="text-sm text-white font-medium">Jobs</h4>
         <StandupCard {...card} />
         <FocusCard {...card} />
         <ReviewCard {...card} />
-      </div>
+      </fieldset>
 
       <div className="space-y-1">
         <button

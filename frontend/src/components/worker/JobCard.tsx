@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import Toggle from "../Toggle";
-import { DEFAULTS, daysLabel, type JobConfig, nextSlot } from "./config";
+import { DEFAULTS, daysLabel, type JobConfig, jobTimes, nextSlot } from "./config";
 import JobSchedule from "./JobSchedule";
 import RunControls, { LastRun } from "./RunControls";
 import { Block, Disclosure } from "./ui";
@@ -38,8 +38,11 @@ export default function JobCard({
   const [open, setOpen] = useState(false);
   const job = cfg.jobs[jobKey] ?? DEFAULTS.jobs[jobKey];
   const last = status?.jobs?.[jobKey]?.lastRun;
-  // With the worker off, no job runs next.
-  const next = cfg.enabled ? nextSlot(job, cfg.timeZone) : null;
+  // No job runs next if the worker is off, its agent is stopped, or its config
+  // has an error. The General header says which.
+  const runs = cfg.enabled && !status?.configError && status?.agentLoaded !== false;
+  const next = runs ? nextSlot(job, cfg.timeZone) : null;
+  const times = jobTimes(job);
   const titleId = `job-${jobKey}-title`;
   const bodyId = `job-${jobKey}-body`;
 
@@ -67,7 +70,7 @@ export default function JobCard({
             <>
               {job.enabled ? (
                 <>
-                  {daysLabel(job.days)} at {job.times.join(", ")}
+                  {daysLabel(job.days)} {times.length ? `at ${times.join(", ")}` : "with no times"}
                   {next && <> · next {next}</>}
                 </>
               ) : (

@@ -1,8 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GetConfig, RunNow, SaveConfig, Status } from "../../wailsjs/go/main/WorkerService";
+import {
+  GetConfig,
+  RunNow,
+  SaveConfig,
+  SetEnabled,
+  Status,
+} from "../../wailsjs/go/main/WorkerService";
 import WorkerSettings from "../components/WorkerSettings";
-import { daysLabel, merge, nextSlot } from "../components/worker/config";
+import { DEFAULTS, daysLabel, merge, nextSlot, reviewerSetUp } from "../components/worker/config";
 
 vi.mock("../../wailsjs/go/main/WorkerService", () => ({
   Check: vi.fn().mockResolvedValue("[]"),
@@ -18,6 +24,7 @@ const mockGetConfig = GetConfig as ReturnType<typeof vi.fn>;
 const mockRunNow = RunNow as ReturnType<typeof vi.fn>;
 const mockSave = SaveConfig as ReturnType<typeof vi.fn>;
 const mockStatus = Status as ReturnType<typeof vi.fn>;
+const mockSetEnabled = SetEnabled as ReturnType<typeof vi.fn>;
 
 // A full config, as merge gives it, so a save writes every key.
 const full = () =>
@@ -29,6 +36,7 @@ const full = () =>
       slack: { botToken: "xoxb-test", userId: "U123" },
       reviewer: {
         repo: "acme/reviewer",
+        script: "review",
         command: "{reviewer} {pr}",
         markerPrefix: "acme",
         orgs: ["acme"],
@@ -39,8 +47,8 @@ const full = () =>
 
 const lastSaved = () => JSON.parse(mockSave.mock.calls[mockSave.mock.calls.length - 1][0]);
 
-async function renderLoaded() {
-  mockGetConfig.mockResolvedValue(JSON.stringify(full()));
+async function renderLoaded(cfg = full()) {
+  mockGetConfig.mockResolvedValue(JSON.stringify(cfg));
   render(<WorkerSettings />);
   await waitFor(() => expect(screen.getByLabelText("Member ID")).toHaveValue("U123"));
 }
@@ -108,12 +116,45 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     render(<WorkerSettings />);
     const review = openCard("Review worker");
     expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+  });
 
-    // Typing a repo sets the reviewer up, but the group stays open.
-    const repo = within(review).getByRole("textbox", { name: "Repo" });
-    fireEvent.focus(repo);
-    fireEvent.change(repo, { target: { value: "a" } });
+  // The open group is decided once, at load. A click that sets the reviewer up
+  // gives no focus event, so only that load step keeps the group open.
+  it("keeps the Reviewer group open after a click sets the reviewer up", async () => {
+    const cfg = full();
+    cfg.reviewer.repo = "";
+    cfg.reviewer.path = "~/bin/review";
+    await renderLoaded(cfg);
+    const review = openCard("Review worker");
     expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+
+    fireEvent.click(within(review).getByRole("button", { name: "Local path" }));
+    expect(lastSaved().reviewer.source).toBe("local");
+    expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+  });
+
+  it("shows the team box with Team PRs off, for the stand-up", async () => {
+    const cfg = full();
+    cfg.reviewer.team.enabled = false;
+    await renderLoaded(cfg);
+    const review = openCard("Review worker");
+    expect(within(review).getByRole("textbox", { name: "Team" })).toHaveValue("acme/platform");
+  });
+
+  it("lists a closed card's times in order, without empty ones", async () => {
+    const cfg = full();
+    cfg.jobs.review = { enabled: true, times: ["14:00", "", "09:30"], days: ["mon"] };
+    await renderLoaded(cfg);
+    const review = screen.getByRole("region", { name: "Review worker" });
+    expect(within(review).getByText(/^Mon at 09:30, 14:00 · next/)).toBeInTheDocument();
+  });
+
+  it("shows no next run while the agent is stopped", async () => {
+    mockStatus.mockResolvedValue(JSON.stringify({ enabled: true, agentLoaded: false, jobs: {} }));
+    await renderLoaded();
+    await waitFor(() => expect(screen.getByText("stopped")).toBeInTheDocument());
+    const standup = screen.getByRole("region", { name: "Stand-up" });
+    expect(within(standup).getByText(/^Mon to Fri at 07:00 · Not run yet/)).toBeInTheDocument();
   });
 
   it("names the review worker's team on the stand-up card", async () => {
@@ -187,6 +228,64 @@ describe("WorkerSettings saves", () => {
 
     expect(screen.getByText(/Lunch must end after it starts/)).toBeInTheDocument();
     expect(mockSave).not.toHaveBeenCalled();
+  });
+});
+
+describe("the master switch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatus.mockResolvedValue(JSON.stringify({ enabled: true, agentLoaded: true, jobs: {} }));
+  });
+
+  it("blocks job edits while it runs, then saves with the new state", async () => {
+    let finish = () => {};
+    mockSetEnabled.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await renderLoaded();
+    const review = openCard("Review worker");
+
+    fireEvent.click(screen.getByRole("button", { name: "Worker on" }));
+    expect(within(review).getByRole("button", { name: "Sat" })).toBeDisabled();
+    expect(screen.getByLabelText("Member ID")).toBeDisabled();
+
+    finish();
+    await waitFor(() => expect(within(review).getByRole("button", { name: "Sat" })).toBeEnabled());
+    expect(mockSetEnabled).toHaveBeenCalledWith(false);
+    fireEvent.click(within(review).getByRole("button", { name: "Sat" }));
+    const want = full();
+    want.enabled = false;
+    want.jobs.review.days = ["mon", "tue", "wed", "thu", "fri", "sat"];
+    expect(lastSaved()).toEqual(want);
+  });
+});
+
+describe("reviewerSetUp", () => {
+  const ready = {
+    ...DEFAULTS.reviewer,
+    command: "{reviewer} {pr}",
+    markerPrefix: "acme",
+    repo: "acme/reviewer",
+    script: "review",
+  };
+
+  it("follows the worker's reviewer rules", () => {
+    expect(reviewerSetUp(ready)).toBe(true);
+    expect(reviewerSetUp({ ...ready, command: "" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, markerPrefix: "" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, markerPrefix: "Acme!" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, repo: "reviewer" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, script: "" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, script: "../bin/sh" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, source: "local", path: "" })).toBe(false);
+    expect(reviewerSetUp({ ...ready, source: "local", path: "~/bin/review" })).toBe(true);
+    // A command without {reviewer} needs no source.
+    expect(reviewerSetUp({ ...ready, command: "acme-review {pr}", repo: "", script: "" })).toBe(
+      true,
+    );
   });
 });
 

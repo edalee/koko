@@ -1,36 +1,20 @@
 import { Check, CircleAlert, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { Check as CheckConnections, SetEnabled } from "../../../wailsjs/go/main/WorkerService";
+import { Check as CheckConnections } from "../../../wailsjs/go/main/WorkerService";
 import { cn } from "../../lib/utils";
 import Toggle from "../Toggle";
 import { type CheckResult, CONNECTION_NAMES, formatWhen, inputClass } from "./config";
 import { Field, Group } from "./ui";
 import type { WorkerConfigApi } from "./useWorkerConfig";
 
-// GeneralSection is what every job shares: the master switch, Slack, the
-// time zone, calendar and Jira site, lunch, and the connection checks.
+// GeneralSection holds the settings that no one job card owns: the master switch,
+// Slack, the time zone, calendar and Jira site, lunch, and the connection checks.
 export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
-  const { cfg, setCfg, status, refreshStatus, error, setError, save, saveField } = api;
+  const { cfg, setCfg, status, error, setError, save, saveField, switching, setEnabled } = api;
   const { lunchDraft, setLunchDraft, lunchError, saveLunchTimes, toggleLunch } = api;
-  const [switching, setSwitching] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [checks, setChecks] = useState<CheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
-
-  const handleSwitch = async () => {
-    const next = !cfg.enabled;
-    setSwitching(true);
-    setError(null);
-    try {
-      await SetEnabled(next);
-      setCfg({ ...cfg, enabled: next });
-      refreshStatus();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSwitching(false);
-    }
-  };
 
   const handleCheck = async () => {
     setChecking(true);
@@ -67,7 +51,12 @@ export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
           {switching ? (
             <Loader2 className="size-4 animate-spin text-muted-foreground shrink-0" />
           ) : (
-            <Toggle id="worker-toggle" label="Worker on" on={cfg.enabled} onClick={handleSwitch} />
+            <Toggle
+              id="worker-toggle"
+              label="Worker on"
+              on={cfg.enabled}
+              onClick={() => setEnabled(!cfg.enabled)}
+            />
           )}
         </div>
         <p className="text-[10px] text-tertiary">
@@ -82,110 +71,118 @@ export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
         {error && <p className="text-[10px] text-error">{error}</p>}
       </div>
 
-      <Group title="Slack">
-        <Field label="Bot token" htmlFor="slack-token" help="The bot needs the chat:write scope.">
-          <div className="relative">
+      {/* Edits wait while the master switch runs, because it writes worker.json too. */}
+      <fieldset disabled={switching} className="min-w-0 space-y-5 disabled:opacity-60">
+        <Group title="Slack">
+          <Field label="Bot token" htmlFor="slack-token" help="The bot needs the chat:write scope.">
+            <div className="relative">
+              <input
+                id="slack-token"
+                type={showToken ? "text" : "password"}
+                value={cfg.slack.botToken}
+                onChange={(e) =>
+                  setCfg({ ...cfg, slack: { ...cfg.slack, botToken: e.target.value } })
+                }
+                onBlur={() => save(cfg)}
+                placeholder="xoxb-..."
+                className={cn(inputClass, "w-full pr-9 font-mono placeholder:text-tertiary")}
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                aria-label={showToken ? "Hide the token" : "Show the token"}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-white transition-colors"
+              >
+                {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+              </button>
+            </div>
+          </Field>
+          <Field label="Member ID" htmlFor="slack-user" help="Your Slack member ID. DMs go to you.">
             <input
-              id="slack-token"
-              type={showToken ? "text" : "password"}
-              value={cfg.slack.botToken}
-              onChange={(e) =>
-                setCfg({ ...cfg, slack: { ...cfg.slack, botToken: e.target.value } })
-              }
-              onBlur={() => save(cfg)}
-              placeholder="xoxb-..."
-              className={cn(inputClass, "w-full pr-9 font-mono placeholder:text-tertiary")}
-            />
-            <button
-              type="button"
-              onClick={() => setShowToken(!showToken)}
-              aria-label={showToken ? "Hide the token" : "Show the token"}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-white transition-colors"
-            >
-              {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            </button>
-          </div>
-        </Field>
-        <Field label="Member ID" htmlFor="slack-user" help="Your Slack member ID. DMs go to you.">
-          <input
-            id="slack-user"
-            type="text"
-            value={cfg.slack.userId}
-            onChange={(e) => setCfg({ ...cfg, slack: { ...cfg.slack, userId: e.target.value } })}
-            onBlur={() => save(cfg)}
-            placeholder="U0123456789"
-            className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
-          />
-        </Field>
-      </Group>
-
-      <Group title="Calendar and Jira">
-        {(
-          [
-            ["timeZone", "Time zone", "Europe/London", "An IANA name. Job times are in this zone."],
-            ["calendarId", "Calendar", "primary", "A Google Calendar ID."],
-            [
-              "jiraSite",
-              "Jira site",
-              "acme.atlassian.net",
-              "Leave it empty and the stand-up reads no tickets.",
-            ],
-          ] as const
-        ).map(([key, label, placeholder, help]) => (
-          <Field key={key} label={label} htmlFor={`worker-${key}`} help={help}>
-            <input
-              id={`worker-${key}`}
+              id="slack-user"
               type="text"
-              value={cfg[key]}
-              onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
-              onBlur={() => saveField(key)}
-              placeholder={placeholder}
+              value={cfg.slack.userId}
+              onChange={(e) => setCfg({ ...cfg, slack: { ...cfg.slack, userId: e.target.value } })}
+              onBlur={() => save(cfg)}
+              placeholder="U0123456789"
               className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
             />
           </Field>
-        ))}
-      </Group>
+        </Group>
 
-      <Group title="Lunch">
-        <Field
-          label="Block lunch"
-          htmlFor="lunch-toggle"
-          help="Focus time books around lunch. Lunch is not added to your calendar."
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Toggle id="lunch-toggle" on={cfg.lunch.enabled} onClick={toggleLunch} />
-            {cfg.lunch.enabled && (
-              <fieldset
-                aria-label="Lunch times"
-                className="flex items-center gap-2 min-w-0 text-[10px] text-tertiary"
-                onBlur={(e) => {
-                  // Moving from one time box to the other is not leaving the pair.
-                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) saveLunchTimes();
-                }}
-              >
-                <input
-                  type="time"
-                  aria-label="Lunch start"
-                  value={lunchDraft.start}
-                  onChange={(e) => setLunchDraft({ ...lunchDraft, start: e.target.value })}
-                  className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
-                />
-                <span>to</span>
-                <input
-                  type="time"
-                  aria-label="Lunch end"
-                  value={lunchDraft.end}
-                  onChange={(e) => setLunchDraft({ ...lunchDraft, end: e.target.value })}
-                  className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
-                />
-              </fieldset>
+        <Group title="Calendar and Jira">
+          {(
+            [
+              [
+                "timeZone",
+                "Time zone",
+                "Europe/London",
+                "An IANA name. Job times are in this zone.",
+              ],
+              ["calendarId", "Calendar", "primary", "A Google Calendar ID."],
+              [
+                "jiraSite",
+                "Jira site",
+                "acme.atlassian.net",
+                "Leave it empty and the stand-up reads no tickets.",
+              ],
+            ] as const
+          ).map(([key, label, placeholder, help]) => (
+            <Field key={key} label={label} htmlFor={`worker-${key}`} help={help}>
+              <input
+                id={`worker-${key}`}
+                type="text"
+                value={cfg[key]}
+                onChange={(e) => setCfg({ ...cfg, [key]: e.target.value })}
+                onBlur={() => saveField(key)}
+                placeholder={placeholder}
+                className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
+              />
+            </Field>
+          ))}
+        </Group>
+
+        <Group title="Lunch">
+          <Field
+            label="Block lunch"
+            htmlFor="lunch-toggle"
+            help="Focus time books around lunch. Lunch is not added to your calendar."
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Toggle id="lunch-toggle" on={cfg.lunch.enabled} onClick={toggleLunch} />
+              {cfg.lunch.enabled && (
+                <fieldset
+                  aria-label="Lunch times"
+                  className="flex items-center gap-2 min-w-0 text-[10px] text-tertiary"
+                  onBlur={(e) => {
+                    // Moving from one time box to the other is not leaving the pair.
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) saveLunchTimes();
+                  }}
+                >
+                  <input
+                    type="time"
+                    aria-label="Lunch start"
+                    value={lunchDraft.start}
+                    onChange={(e) => setLunchDraft({ ...lunchDraft, start: e.target.value })}
+                    className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
+                  />
+                  <span>to</span>
+                  <input
+                    type="time"
+                    aria-label="Lunch end"
+                    value={lunchDraft.end}
+                    onChange={(e) => setLunchDraft({ ...lunchDraft, end: e.target.value })}
+                    className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
+                  />
+                </fieldset>
+              )}
+            </div>
+            {cfg.lunch.enabled && lunchError && (
+              <p className="text-[10px] text-error">{lunchError} It is not saved yet.</p>
             )}
-          </div>
-          {cfg.lunch.enabled && lunchError && (
-            <p className="text-[10px] text-error">{lunchError} It is not saved yet.</p>
-          )}
-        </Field>
-      </Group>
+          </Field>
+        </Group>
+      </fieldset>
 
       <Group
         title="Connections"
