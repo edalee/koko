@@ -9,6 +9,7 @@ import {
   type WorkerConfig,
   type WorkerStatus,
 } from "./config";
+import { runsProblem } from "./runs";
 
 // useWorkerConfig loads worker.json and the worker's status, and holds the
 // helpers every section uses to change and save the config.
@@ -55,8 +56,15 @@ export function useWorkerConfig() {
     setLunchDraft({ start: cfg.lunch.start, end: cfg.lunch.end });
   }, [cfg.lunch.start, cfg.lunch.end]);
 
+  // save writes worker.json. It writes nothing while a run name is bad,
+  // because the worker would stop every job. The runs stay on screen to fix.
   const save = useCallback(async (next: WorkerConfig) => {
     setCfg(next);
+    const problem = runsProblem(next.reviewer.runs);
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setError(null);
     savedZone.current = next.timeZone;
     try {

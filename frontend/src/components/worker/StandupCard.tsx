@@ -1,10 +1,12 @@
 import JobCard, { type CardProps } from "./JobCard";
+import { standupRun } from "./runs";
 import { Block, Field } from "./ui";
 
-// StandupCard is the stand-up job. Its Team PRs list and its list of PRs waiting
-// for your review both use the review worker's team, so the card names that team.
+// StandupCard is the stand-up job. Its Team PRs list and its review queue
+// use the team of the first PRs run that is on, so it names that team here.
 export default function StandupCard(props: CardProps) {
-  const { team } = props.api.cfg.reviewer;
+  const run = standupRun(props.api.cfg.reviewer.runs);
+  const team = run?.team ?? { enabled: false, maxAgeDays: 4, team: "", repos: [] };
   const { jiraSite } = props.api.cfg;
   const listsTeam = team.enabled && team.repos.length > 0;
   return (
@@ -18,7 +20,7 @@ export default function StandupCard(props: CardProps) {
       <Block title="Settings">
         <Field
           label="Team"
-          help="The stand-up uses the review worker's team. Change it under Which PRs on the review card."
+          help={`The stand-up uses the team of the first PRs run that is on${run ? `, now the ${run.name} run` : ""}. Change it in that run on the review card.`}
         >
           <p className="pt-1 text-[11px] text-white/85">
             {team.team ? (
