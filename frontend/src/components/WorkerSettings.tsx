@@ -34,7 +34,7 @@ export default function WorkerSettings() {
           {...card}
           jobKey="summary"
           name="Team summary"
-          about="A Slack DM with what each member of a team merged, opened and reviewed since the last summary. A missed day is never lost."
+          about="A Slack DM with what each member of a team merged, opened and reviewed since the last summary. After a missed run, it covers the missed days, up to 7 days back."
           done="Done. Check your Slack DMs."
         >
           <SummaryCard

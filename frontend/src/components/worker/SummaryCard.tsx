@@ -7,7 +7,7 @@ import { Block, Field } from "./ui";
 
 // SummaryCard is the team summary's own settings: whose work it reports,
 // in which repos, and whether it adds Jira tickets and Claude's paragraphs.
-// The JobCard around it has the switch, days, times and Run.
+// The JobCard around it has the switch, days, times, Test and Run now.
 export default function SummaryCard({
   summary,
   jiraSite,

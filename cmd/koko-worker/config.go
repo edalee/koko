@@ -108,7 +108,8 @@ func (j JobConfig) runsOn(t time.Time) bool {
 type SummaryConfig struct {
 	Team  string   `json:"team"`  // "org/team-slug"
 	Repos []string `json:"repos"` // "owner/repo" names. Empty means every repo in the team's org
-	// Jira lists the tickets the team moved. It needs a Jira site.
+	// Jira adds the tickets the members' PRs name, with each one's status and
+	// whether it moved. It needs a Jira site.
 	Jira bool `json:"jira"`
 	// Prose has Claude write a paragraph per person. Off, or if Claude fails,
 	// the DM lists the facts.
@@ -143,8 +144,8 @@ type Config struct {
 	Enabled    bool   `json:"enabled"`
 	TimeZone   string `json:"timeZone"`
 	CalendarID string `json:"calendarId"`
-	// JiraSite is the Atlassian site the stand-up reads tickets from, such as
-	// example.atlassian.net. Empty means the stand-up reads no tickets.
+	// JiraSite is the Atlassian site the stand-up and the team summary read
+	// tickets from, such as example.atlassian.net. Empty means neither reads tickets.
 	JiraSite string         `json:"jiraSite"`
 	Reviewer ReviewerConfig `json:"reviewer"`
 	Slack    SlackConfig    `json:"slack"`

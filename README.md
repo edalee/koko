@@ -82,7 +82,7 @@ Each session runs Claude Code in a directory you choose. The left sidebar lists 
 - **Stand-up (07:00)**: one Slack DM with today's meetings, your PRs ready to merge and PRs waiting for your review. If you set a Jira site, it also checks each PR against its ticket.
 - **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more. It books around lunch, 12:00 to 13:00 by default.
 - **Review worker (09:30, 12:00, 14:00)**: runs a reviewer you choose on each new PR, yours and your team's, and posts its comments on the PR as you. It is off until you set a reviewer.
-- **Team summary (08:30)**: one Slack DM with what each member of a team merged, opened and reviewed since the last summary. With a Jira site, it adds the status of the tickets their PRs name. It is off until you set a team.
+- **Team summary (08:30)**: one Slack DM with what each member of a team merged, opened and reviewed since the last summary. With a Jira site, it adds the status of the tickets their PRs name. Off by default. It needs a team.
 - **Settings > Worker**: one switch for the worker, a switch, times and days for each job, Test and Run now buttons, connection checks and the log. It also sets the time zone, the calendar, the Jira site, lunch, Slack and the reviewer.
 - **Catch-up and retries**: a job missed while the Mac slept runs on wake. A job waits for the internet, and gets 3 tries for other failures.
 
