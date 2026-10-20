@@ -27,6 +27,14 @@ export interface ReviewerConfig {
   excludeRepos: string[];
 }
 
+// SummaryConfig is the team summary: whose work it reports, and where.
+export interface SummaryConfig {
+  team: string;
+  repos: string[];
+  jira: boolean;
+  prose: boolean;
+}
+
 export interface WorkerConfig {
   enabled: boolean;
   timeZone: string;
@@ -36,6 +44,7 @@ export interface WorkerConfig {
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
   lunch: { enabled: boolean; start: string; end: string };
+  summary: SummaryConfig;
   jobs: Record<string, JobConfig>;
 }
 
@@ -95,6 +104,7 @@ export const DEFAULTS: WorkerConfig = {
   slack: { botToken: "", userId: "" },
   focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
   lunch: { enabled: true, start: "12:00", end: "13:00" },
+  summary: { team: "", repos: [], jira: true, prose: true },
   jobs: {
     standup: { enabled: true, times: ["07:00"], days: ["mon", "tue", "wed", "thu", "fri"] },
     focus: { enabled: true, times: ["09:15"], days: ["mon", "tue", "wed", "thu", "fri"] },
@@ -103,6 +113,8 @@ export const DEFAULTS: WorkerConfig = {
       times: ["09:30", "12:00", "14:00"],
       days: ["mon", "tue", "wed", "thu", "fri"],
     },
+    // No team is set, so the summary starts off.
+    summary: { enabled: false, times: ["08:30"], days: ["mon", "tue", "wed", "thu", "fri"] },
   },
 };
 
@@ -123,6 +135,7 @@ export const CONNECTION_NAMES: Record<string, string> = {
   jira: "Jira",
   calendar: "Google Calendar",
   reviewer: "Reviewer",
+  summary: "Team summary",
   wake: "Mac wake",
 };
 
@@ -154,6 +167,12 @@ export function merge(raw: string): WorkerConfig {
     slack: { ...DEFAULTS.slack, ...parsed.slack },
     focus: { ...DEFAULTS.focus, ...parsed.focus },
     lunch: { ...DEFAULTS.lunch, ...parsed.lunch },
+    summary: {
+      ...DEFAULTS.summary,
+      ...parsed.summary,
+      // Go writes an empty list as null.
+      repos: parsed.summary?.repos ?? [],
+    },
     jobs: Object.fromEntries(
       Object.entries({ ...DEFAULTS.jobs, ...parsed.jobs }).map(([key, job]) => [
         key,

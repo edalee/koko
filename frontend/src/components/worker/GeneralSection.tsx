@@ -44,8 +44,8 @@ export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
               Worker
             </h4>
             <p className="text-xs text-muted-foreground mt-1">
-              Stand-up, focus time and PR reviews on the days you choose. Runs in the background,
-              even with Koko closed.
+              Stand-up, focus time, PR reviews and a team summary on the days you choose. Runs in
+              the background, even with Koko closed.
             </p>
           </div>
           {switching ? (
@@ -218,7 +218,8 @@ export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
         ))}
         {!checks && !checking && (
           <p className="text-[10px] text-tertiary">
-            Checks Slack, GitHub, Jira, Google Calendar, the reviewer and Mac wake.
+            Checks Slack, GitHub, Jira, Google Calendar, the reviewer, the summary team and Mac
+            wake.
           </p>
         )}
       </Group>

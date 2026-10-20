@@ -112,11 +112,18 @@ func ticketKey(d PRDetail) string {
 
 // fetchTickets reads each key with getJiraIssue, through Claude, and parses
 // the tool's raw results. A key with no successful call is missing from the
-// map, and the stand-up says it could not be read.
+// map. The stand-up says it could not be read, and the team summary leaves it out.
 func fetchTickets(ctx context.Context, cr claudeRunner, site string, keys []string) (map[string]jiraTicket, error) {
+	out, _, err := readTickets(ctx, cr, site, keys)
+	return out, err
+}
+
+// readTickets is fetchTickets, and also counts the getJiraIssue calls that
+// returned an error.
+func readTickets(ctx context.Context, cr claudeRunner, site string, keys []string) (map[string]jiraTicket, int, error) {
 	out := map[string]jiraTicket{}
 	if len(keys) == 0 {
-		return out, nil
+		return out, 0, nil
 	}
 	sort.Strings(keys)
 	prompt := fmt.Sprintf(`Call %s once for each of these Jira keys: %s.
@@ -125,8 +132,10 @@ If the tool is not loaded yet, load it with ToolSearch first. Call no other Atla
 Then reply with the single word DONE. Do not summarise the tickets.`,
 		toolGetJiraIssue, strings.Join(keys, ", "), site)
 	res, err := cr.run(ctx, prompt, []string{toolGetJiraIssue}, 5*time.Minute)
+	failed := 0
 	for _, c := range res.callsTo(toolGetJiraIssue) {
 		if c.IsError {
+			failed++
 			continue
 		}
 		t, ok := parseJiraIssue(c.Result)
@@ -149,9 +158,9 @@ Then reply with the single word DONE. Do not summarise the tickets.`,
 		if err == nil {
 			err = fmt.Errorf("no ticket could be read: %s", truncate(res.Text, 200))
 		}
-		return out, err
+		return out, failed, err
 	}
-	return out, nil
+	return out, failed, nil
 }
 
 // ticketVerdict is the judgement on one PR's ticket, checked by Go.

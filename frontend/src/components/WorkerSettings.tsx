@@ -2,8 +2,10 @@ import { useState } from "react";
 import { ReadLog } from "../../wailsjs/go/main/WorkerService";
 import FocusCard from "./worker/FocusCard";
 import GeneralSection from "./worker/GeneralSection";
+import JobCard from "./worker/JobCard";
 import ReviewCard from "./worker/ReviewCard";
 import StandupCard from "./worker/StandupCard";
+import SummaryCard from "./worker/SummaryCard";
 import { useWorkerConfig } from "./worker/useWorkerConfig";
 
 // WorkerSettings is the Worker tab: General, then one card per job, then the
@@ -28,6 +30,19 @@ export default function WorkerSettings() {
         <StandupCard {...card} />
         <FocusCard {...card} />
         <ReviewCard {...card} />
+        <JobCard
+          {...card}
+          jobKey="summary"
+          name="Team summary"
+          about="A Slack DM with what each member of a team merged, opened and reviewed since the last summary. After a missed run, it covers the missed days, up to 7 days back."
+          done="Done. Check your Slack DMs."
+        >
+          <SummaryCard
+            summary={api.cfg.summary}
+            jiraSite={api.cfg.jiraSite}
+            onSave={(summary) => api.save({ ...api.cfg, summary })}
+          />
+        </JobCard>
       </fieldset>
 
       <div className="space-y-1">
