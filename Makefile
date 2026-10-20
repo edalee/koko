@@ -5,9 +5,10 @@ APP := build/bin/Koko.app
 # koko-worker reports this with `koko-worker version`: the tag, plus commits
 # since it and "-dirty" for a local build.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-# The keychain certificate `sign` uses. An ad-hoc signature changes with every
-# build, so macOS forgets the privacy permissions you gave Koko. A certificate
-# keeps one signature. Create it once with `make signing-cert`.
+# The keychain certificate `sign` uses. macOS recognises an ad-hoc signed app by
+# its hash, which changes with every build, so it forgets the privacy permissions
+# you gave Koko. With a certificate, macOS recognises each build as the same app.
+# Create it once with `make signing-cert`.
 SIGN_ID ?= Koko Local
 
 # Koko finds koko-worker in build/bin during `make dev`, and next to its own
@@ -21,16 +22,19 @@ build:
 	cp build/bin/koko-worker $(APP)/Contents/MacOS/koko-worker
 	$(MAKE) sign
 
-# sign signs koko-worker, then the app around it. Without the certificate, or
-# off macOS, the app keeps the ad-hoc signature Wails gives it.
+# sign signs koko-worker, then the app around it. Copying koko-worker in breaks
+# the signature Wails gives the app, so the app is always signed again. Without
+# a trusted certificate, it gets a new ad-hoc signature.
 sign:
-	@if command -v security >/dev/null && security find-certificate -c "$(SIGN_ID)" >/dev/null 2>&1; then \
-		codesign --force --sign "$(SIGN_ID)" $(APP)/Contents/MacOS/koko-worker && \
-		codesign --force --sign "$(SIGN_ID)" $(APP) && \
-		echo "Signed Koko.app with $(SIGN_ID)"; \
+	@if security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"$(SIGN_ID)\""; then \
+		id="$(SIGN_ID)"; \
 	else \
-		echo "No \"$(SIGN_ID)\" certificate, so Koko.app keeps its ad-hoc signature. Run make signing-cert once."; \
-	fi
+		id=-; \
+		echo "No trusted \"$(SIGN_ID)\" certificate, so Koko.app gets an ad-hoc signature. Run make signing-cert once."; \
+	fi; \
+	codesign --force --sign "$$id" $(APP)/Contents/MacOS/koko-worker && \
+	codesign --force --sign "$$id" $(APP) && \
+	echo "Signed Koko.app"
 
 signing-cert:
 	./scripts/make-signing-cert.sh "$(SIGN_ID)"

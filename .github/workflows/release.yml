@@ -228,7 +228,7 @@ jobs:
 
                 For a persistent install, build from source instead:
                   git clone https://github.com/edalee/koko.git && cd koko
-                  make install-fe && make build
+                  make install-fe && make signing-cert && make build
                   cp -R build/bin/Koko.app /Applications/
               EOS
             end
