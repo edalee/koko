@@ -196,7 +196,7 @@
 | General | Remote API: on/off, port, API key with copy button. Housekeeping: clear session history, remove Koko's worktrees |
 | Safe working | Quiet hours, break cycle and presets (90/15, 60/10, 45/5) |
 | GitHub | Tracked repos, hidden PRs |
-| Worker | `WorkerSettings.tsx`: on/off, job times and day switches, lunch, Test and Run now, connection checks, log |
+| Worker | `WorkerSettings.tsx` is a shell for `components/worker/`. A General section holds on/off, Slack, time zone, calendar, Jira site, lunch and connection checks. One card per job holds its days and times, its settings, and Test and Run now with its own output. The review card has Reviewer and Which PRs groups. The log sits at the bottom |
 
 - The Slack tab is hidden until the Slack DM bot is dropped or rebuilt (plan 029)
 

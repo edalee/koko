@@ -289,6 +289,11 @@ Done on 20 Oct: job days and lunch (plan 035, part 1).
 - A day added after its slot waits a week, as a changed time waits a day.
 - Lunch, 12:00 to 13:00 by default, blocks focus time like a meeting. It is not written to the calendar. It can be moved or switched off.
 
+Done on 20 Oct: a clearer Worker tab (plan 035, part 2).
+- Settings > Worker starts with General: the master switch, Slack, time zone, calendar, Jira site, lunch and connection checks.
+- Each job has its own card: schedule, settings, then Test and Run now with the card's own output. A closed card shows whether the job is on and when it runs next.
+- The review card splits Reviewer, how reviews run, from Which PRs. The stand-up card names the review worker's team it uses.
+
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
 2. Turn off the old assistant's launchd agent.
