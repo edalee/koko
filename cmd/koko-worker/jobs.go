@@ -442,6 +442,10 @@ func teamSection(ctx context.Context, env Env, tally *reviewTally, prs []SearchP
 
 func runFocus(ctx context.Context, env Env) error {
 	now := env.now.In(env.cfg.location())
+	// Only Test and Run now get here on such a day: the scheduler skips it.
+	if !env.cfg.Jobs[JobFocus].runsOn(now) {
+		return env.notify(ctx, fmt.Sprintf("Focus: the focus job does not run on %s, so it books nothing today.", now.Weekday()))
+	}
 	events, err := listEvents(ctx, env.claude, env.cfg, now)
 	if err != nil {
 		return err

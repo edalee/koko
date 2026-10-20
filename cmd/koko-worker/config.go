@@ -90,13 +90,17 @@ type JobConfig struct {
 	Days []string `json:"days"`
 }
 
+// days are the days the job runs: Days, or Monday to Friday if it has none.
+func (j JobConfig) days() []string {
+	if len(j.Days) == 0 {
+		return weekdays
+	}
+	return j.Days
+}
+
 // runsOn is true if the job runs on t's day of the week.
 func (j JobConfig) runsOn(t time.Time) bool {
-	days := j.Days
-	if len(days) == 0 {
-		days = weekdays
-	}
-	return slices.Contains(days, dayNames[t.Weekday()])
+	return slices.Contains(j.days(), dayNames[t.Weekday()])
 }
 
 // SlackConfig is the bot that sends the DMs. Koko's own Slack settings are not used.

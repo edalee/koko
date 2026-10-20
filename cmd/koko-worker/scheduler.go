@@ -41,6 +41,10 @@ type State struct {
 	// TimesAdded is when each active run time first appeared, keyed "job@HH:MM".
 	// A slot counts only on days when its time was active before the slot came.
 	TimesAdded map[string]time.Time `json:"timesAdded"`
+	// DaysAdded is when each active day first appeared, keyed "job@mon". It
+	// works like TimesAdded: a day added after its slot waits a week. A state
+	// file from before days has none, and its days count as always active.
+	DaysAdded  map[string]time.Time `json:"daysAdded"`
 	WakeBooked time.Time            `json:"wakeBooked,omitempty"` // only set when pmset succeeded
 	WakeTried  time.Time            `json:"wakeTried,omitempty"`  // last wake attempted, booked or not
 	// The managed reviewer's commit at its last run, its branch, and when
@@ -102,12 +106,19 @@ type ReviewResult struct {
 
 func timeKey(job, clock string) string { return job + "@" + clock }
 
-// syncTimes records when each active run time appeared, and forgets times
-// that are no longer active. A time is active if the worker and its job are
-// switched on. So a time moved to earlier than now, or a job switched on
-// after its time, waits for the next day instead of running at once.
+func dayKey(job string, day time.Time) string { return job + "@" + dayNames[day.Weekday()] }
+
+// syncTimes records when each active run time and day appeared, and forgets
+// those no longer active. A time or day is active if the worker and its job
+// are switched on. So a time moved to earlier than now, a day added after its
+// slot, or a job switched on after its time, waits instead of running at once.
 func syncTimes(cfg Config, st *State, now time.Time) {
-	active := map[string]bool{}
+	// A state from before days: its days were active all along.
+	since := now
+	if st.DaysAdded == nil {
+		st.DaysAdded, since = map[string]time.Time{}, time.Time{}
+	}
+	times, days := map[string]bool{}, map[string]bool{}
 	if cfg.Enabled {
 		for _, job := range allJobs {
 			jc := cfg.Jobs[job]
@@ -115,18 +126,27 @@ func syncTimes(cfg Config, st *State, now time.Time) {
 				continue
 			}
 			for _, clock := range jc.Times {
-				active[timeKey(job, clock)] = true
+				times[timeKey(job, clock)] = true
+			}
+			for _, day := range jc.days() {
+				days[job+"@"+day] = true
 			}
 		}
 	}
+	syncAdded(st.TimesAdded, times, now)
+	syncAdded(st.DaysAdded, days, since)
+}
+
+// syncAdded records when each active key appeared, and forgets the others.
+func syncAdded(added map[string]time.Time, active map[string]bool, now time.Time) {
 	for k := range active {
-		if _, ok := st.TimesAdded[k]; !ok {
-			st.TimesAdded[k] = now
+		if _, ok := added[k]; !ok {
+			added[k] = now
 		}
 	}
-	for k := range st.TimesAdded {
+	for k := range added {
 		if !active[k] {
-			delete(st.TimesAdded, k)
+			delete(added, k)
 		}
 	}
 }
@@ -246,6 +266,9 @@ func dueRuns(cfg Config, st State, now time.Time) []DueRun {
 			}
 			if added, ok := st.TimesAdded[timeKey(job, clock)]; !ok || !added.Before(slot) {
 				continue // the time was set after this slot came round
+			}
+			if added, ok := st.DaysAdded[dayKey(job, now)]; !ok || !added.Before(slot) {
+				continue // the day was added after this slot came round
 			}
 			rec, seen := st.Runs[slotKey(job, slot)]
 			retry := rec.Status == StatusRetry || rec.Status == StatusOffline

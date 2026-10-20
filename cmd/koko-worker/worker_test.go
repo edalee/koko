@@ -285,6 +285,56 @@ func TestJobDays(t *testing.T) {
 	})
 }
 
+func TestAddedDayWaitsAWeek(t *testing.T) {
+	saturday := time.Date(2026, 10, 3, 13, 0, 0, 0, cet)
+	cfg := testConfig()
+	st := loadState("/nonexistent")
+	st.DaysAdded = map[string]time.Time{} // a state that already records days
+	weeksAgo := monday(0, 0).AddDate(0, 0, -21)
+	syncTimes(cfg, &st, weeksAgo)
+
+	cfg.Jobs[JobStandup] = JobConfig{Enabled: true, Times: []string{"07:00"}, Days: []string{"mon", "sat"}}
+	syncTimes(cfg, &st, saturday)
+	if got := dueString(dueRuns(cfg, st, saturday)); got != "" {
+		t.Errorf("Saturday added at 13:00: got %q, want nothing today", got)
+	}
+	if got := dueString(dueRuns(cfg, st, saturday.AddDate(0, 0, 7))); got != "standup[07:00]" {
+		t.Errorf("next Saturday: got %q", got)
+	}
+	if got := dueString(dueRuns(cfg, st, monday(13, 0).AddDate(0, 0, 7))); got != "standup[07:00] focus[09:15] review[09:30,12:00]" {
+		t.Errorf("Monday, active all along: got %q", got)
+	}
+}
+
+func TestStateFromBeforeDaysKeepsToday(t *testing.T) {
+	cfg := testConfig()
+	st := loadState("/nonexistent")
+	syncTimes(cfg, &st, monday(0, 0).AddDate(0, 0, -7)) // times only, as an older worker recorded
+	st.DaysAdded = nil
+	syncTimes(cfg, &st, monday(10, 0))
+	if got := dueString(dueRuns(cfg, st, monday(10, 0))); got != "standup[07:00] focus[09:15] review[09:30]" {
+		t.Errorf("after the update: got %q", got)
+	}
+}
+
+func TestFocusOnAnotherDaySaysSo(t *testing.T) {
+	var sent []string
+	env := Env{
+		cfg: defaultConfig(), test: true, now: time.Date(2026, 10, 3, 9, 0, 0, 0, cet),
+		send: func(_ context.Context, msg Message) error {
+			sent = append(sent, msg.Sections...)
+			return nil
+		},
+	}
+	env.cfg.TimeZone = "Europe/Paris"
+	if err := runFocus(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "does not run on Saturday") {
+		t.Errorf("got %q", sent)
+	}
+}
+
 func TestNextSlotSkipsToAnAllowedDay(t *testing.T) {
 	cfg := testConfig()
 	for _, job := range allJobs {
