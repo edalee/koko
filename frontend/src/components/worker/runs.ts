@@ -1,5 +1,5 @@
-// Mirrors ReviewRun in cmd/koko-worker/config.go: one run of the reviewer
-// command, on its own days and times.
+// Mirrors ReviewRun and its scopes in cmd/koko-worker/config.go: one run of
+// the reviewer command, on its own days and times.
 export interface ScopeConfig {
   enabled: boolean;
   maxAgeDays: number;
@@ -27,7 +27,7 @@ export interface ReviewRun {
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"];
 
-// LEGACY_TIMES are the review job's default times before runs.
+// LEGACY_TIMES are a run's default times, the same as the old review job's.
 const LEGACY_TIMES = ["09:30", "12:00", "14:00"];
 
 const DEFAULT_MINE: ScopeConfig = { enabled: true, maxAgeDays: 14 };
@@ -115,8 +115,9 @@ export function prOnlyIn(command: string, run: ReviewRun): string[] {
 }
 
 // standupRun is the run the stand-up takes its team from, as in the worker:
-// the first PRs run that is on, or else the first PRs run.
+// the first PRs run that is on, else the first PRs run. With no PRs run it is
+// undefined, and the stand-up lists no team. It never gives a repos run.
 export function standupRun(runs: ReviewRun[]): ReviewRun | undefined {
   const prs = runs.filter((r) => r.target === "prs");
-  return prs.find((r) => r.enabled) ?? prs[0] ?? runs[0];
+  return prs.find((r) => r.enabled) ?? prs[0];
 }

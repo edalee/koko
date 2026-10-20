@@ -26,6 +26,34 @@ describe("fromWorker", () => {
     });
   });
 
+  it("copies the scopes of the first PRs run that is on, from runs", () => {
+    const raw = JSON.stringify({
+      reviewer: {
+        runs: [
+          { name: "weekly", enabled: true, target: "repos", repos: ["acme/api"] },
+          { name: "off", enabled: false, team: { enabled: true, team: "acme/old" } },
+          {
+            name: "daily",
+            enabled: true,
+            mine: { enabled: false, maxAgeDays: 7 },
+            team: { enabled: true, maxAgeDays: 2, team: "acme/platform", repos: ["acme/web"] },
+          },
+        ],
+      },
+    });
+    expect(fromWorker(raw)).toEqual({
+      mine: { enabled: false, maxAgeDays: 7 },
+      team: { enabled: true, maxAgeDays: 2, team: "acme/platform", repos: ["acme/web"] },
+    });
+  });
+
+  it("is null when no run reviews PRs", () => {
+    const raw = JSON.stringify({
+      reviewer: { runs: [{ name: "weekly", target: "repos", repos: ["acme/api"] }] },
+    });
+    expect(fromWorker(raw)).toBeNull();
+  });
+
   it("is null when the worker has no scopes", () => {
     expect(fromWorker("{}")).toBeNull();
     expect(fromWorker("")).toBeNull();

@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { cn } from "../../lib/utils";
 import RepoList from "../RepoList";
 import Toggle from "../Toggle";
@@ -12,8 +13,8 @@ const days = (value: string) => Number.parseInt(value, 10) || 0;
 
 // ReviewRuns edits the runs of the reviewer command. Each run is the job
 // "review:<name>", with its own arguments, days and times, its PR scopes or
-// its repos, and its own Test and Run now. onEdit changes a text box as you
-// type, and onSave saves.
+// its repos, and its own Test and Run now. onEdit keeps a change without
+// saving it, for text as you type. onSave saves the runs.
 export default function ReviewRuns({
   runs,
   command,
@@ -62,21 +63,13 @@ export default function ReviewRuns({
         const blocked = prOnlyIn(command, run);
         return (
           <section
-            // biome-ignore lint/suspicious/noArrayIndexKey: a run is edited in place by its position, and its name can change
-            key={i}
+            // The name alone can repeat while a second run is renamed.
+            key={`${run.name}-${i}`}
             aria-label={`Run ${run.name}`}
             className="space-y-2.5 p-2.5 rounded-md bg-white/[0.02] border border-white/[0.05]"
           >
             <div className="flex items-center gap-2">
-              <input
-                type="text"
-                aria-label="Run name"
-                value={run.name}
-                onChange={(e) => edit(i, { name: e.target.value })}
-                onBlur={() => onSave(runs)}
-                placeholder="daily"
-                className={cn(inputClass, "w-28 font-mono placeholder:text-tertiary")}
-              />
+              <NameInput name={run.name} onSave={(name) => save(i, { name })} />
               <input
                 type="text"
                 aria-label="Extra arguments"
@@ -245,6 +238,8 @@ export default function ReviewRuns({
             )}
 
             <RunControls
+              // A new key clears the output when a removed run's place goes to another run.
+              key={job}
               jobKey={job}
               last={jobs?.[job]?.lastRun}
               done={
@@ -260,5 +255,22 @@ export default function ReviewRuns({
         );
       })}
     </div>
+  );
+}
+
+// NameInput edits a run's name as a draft and saves it when you leave the box,
+// so the run's card keeps its place, and focus, while you type.
+function NameInput({ name, onSave }: { name: string; onSave: (name: string) => void }) {
+  const [draft, setDraft] = useState(name);
+  return (
+    <input
+      type="text"
+      aria-label="Run name"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => draft !== name && onSave(draft)}
+      placeholder="daily"
+      className={cn(inputClass, "w-28 font-mono placeholder:text-tertiary")}
+    />
   );
 }

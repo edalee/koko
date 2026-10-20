@@ -68,8 +68,10 @@ export default function ReviewCard(props: CardProps) {
               help={
                 <>
                   {"{reviewer}"} is the CLI set below. {"{pr}"}, {"{repo}"}, {"{url}"} and {"{sha}"}{" "}
-                  are filled in for each PR, and {"{claude}"} is a claude that cannot post. A repos
-                  run fills in only {"{repo}"}. NAME=value words at the start set environment
+                  are filled in for each PR. {"{claude}"} is a claude that is denied some commands,
+                  such as posting, but that is no guard: a PRs run gets read-only gh and git as
+                  well. A repos run fills in only {"{repo}"}, and gets the real gh and git, so its
+                  tool can push and open PRs. NAME=value words at the start set environment
                   variables. Each run adds its own arguments.
                 </>
               }

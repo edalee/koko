@@ -16,7 +16,7 @@ export interface CardProps {
 // JobCard is one job: its title, switch and summary, then its schedule, its
 // own settings, and Test and Run now. Closed, it still shows whether the job
 // is on and when it runs next. A card with no job of its own, such as the
-// review card, whose runs are each a job, gives its own summary instead.
+// review card, shows its summary prop. It has no switch, Schedule or Run block.
 export default function JobCard({
   jobKey,
   name,

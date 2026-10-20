@@ -88,6 +88,27 @@ describe("ReviewRuns", () => {
     expect(mockRunNow).toHaveBeenCalledWith("review:weekly", true);
   });
 
+  it("shows no output from a removed run on the run that takes its place", async () => {
+    mockRunNow.mockImplementation(async (job: string) => `${job} output`);
+    const weekly = newRun([daily]);
+    const props = {
+      command: "acme {pr}",
+      running: null,
+      setRunning: vi.fn(),
+      onRan: vi.fn(),
+      onEdit: vi.fn(),
+      onSave: vi.fn(),
+    };
+    const { rerender } = render(<ReviewRuns runs={[daily, weekly]} {...props} />);
+    const first = screen.getByRole("region", { name: "Run daily" });
+    fireEvent.click(within(first).getByRole("button", { name: "Test" }));
+    expect(await within(first).findByText("review:daily output")).toBeInTheDocument();
+
+    rerender(<ReviewRuns runs={[weekly]} {...props} />);
+    expect(screen.getByRole("region", { name: "Run weekly" })).toBeInTheDocument();
+    expect(screen.queryByText("review:daily output")).toBeNull();
+  });
+
   it("switches a run to repos, with its repos and time limit", () => {
     const onSave = renderRuns([daily]);
     expect(screen.getByText("My PRs")).toBeInTheDocument();
@@ -123,11 +144,12 @@ describe("run helpers", () => {
     expect(newRun([daily, weekly]).name).toBe("run-2");
   });
 
-  it("takes the stand-up team from the first PRs run that is on", () => {
+  it("takes the stand-up team from the first PRs run that is on, never a repos run", () => {
     const repos: ReviewRun = { ...newRun([daily]), target: "repos", enabled: true };
     const off: ReviewRun = { ...daily, name: "off", enabled: false };
     expect(standupRun([repos, off, daily])?.name).toBe("daily");
     expect(standupRun([repos, off])?.name).toBe("off");
+    expect(standupRun([repos])).toBeUndefined();
   });
 });
 
@@ -151,12 +173,32 @@ describe("WorkerSettings with runs", () => {
     expect(screen.getByText(/not a run name/)).toBeInTheDocument();
     expect(mockSave).not.toHaveBeenCalled();
 
-    fireEvent.change(name, { target: { value: "weekly" } });
-    fireEvent.blur(name);
+    // The card shows the bad name, kept but not saved, for you to fix.
+    const shown = within(card).getByLabelText("Run name");
+    expect(shown).toHaveValue("Daily Run");
+    fireEvent.change(shown, { target: { value: "weekly" } });
+    fireEvent.blur(shown);
     await waitFor(() => expect(mockSave).toHaveBeenCalledTimes(1));
     const saved = JSON.parse(mockSave.mock.calls[0][0]);
     expect(saved.reviewer.runs[0]).toMatchObject({ name: "weekly", target: "repos" });
     expect(saved.reviewer.team).toBeUndefined();
     expect(saved.jobs.review).toBeUndefined();
+  });
+});
+
+describe("StandupCard with no PRs run", () => {
+  it("says there is no team", async () => {
+    (GetConfig as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify({
+        reviewer: { runs: [{ name: "weekly", target: "repos", repos: ["acme/api"] }] },
+      }),
+    );
+    render(<WorkerSettings />);
+    const card = screen.getByRole("region", { name: "Stand-up" });
+    fireEvent.click(within(card).getAllByRole("button", { expanded: false })[0]);
+    expect(
+      await within(card).findByText(/There is no PRs run, so it has no team/),
+    ).toBeInTheDocument();
+    expect(within(card).getByText("No team set")).toBeInTheDocument();
   });
 });

@@ -2,8 +2,9 @@ import JobCard, { type CardProps } from "./JobCard";
 import { standupRun } from "./runs";
 import { Block, Field } from "./ui";
 
-// StandupCard is the stand-up job. Its Team PRs list and its review queue
-// use the team of the first PRs run that is on, so it names that team here.
+// StandupCard is the stand-up job. Its Team PRs list and its review queue use
+// the team of the first PRs run that is on, else the first PRs run, so it
+// names that team here. With no PRs run, there is no team.
 export default function StandupCard(props: CardProps) {
   const run = standupRun(props.api.cfg.reviewer.runs);
   const team = run?.team ?? { enabled: false, maxAgeDays: 4, team: "", repos: [] };
@@ -20,7 +21,11 @@ export default function StandupCard(props: CardProps) {
       <Block title="Settings">
         <Field
           label="Team"
-          help={`The stand-up uses the team of the first PRs run that is on${run ? `, now the ${run.name} run` : ""}. Change it in that run on the review card.`}
+          help={
+            run
+              ? `The stand-up uses the team of the first PRs run that is on, now the ${run.name} run. Change it in that run on the review card.`
+              : "The stand-up uses the team of the first PRs run that is on. There is no PRs run, so it has no team."
+          }
         >
           <p className="pt-1 text-[11px] text-white/85">
             {team.team ? (
