@@ -225,6 +225,13 @@ function minutes(clock: string): number {
   return h * 60 + m;
 }
 
+// lunchProblem is what is wrong with a lunch from start to end, or null.
+export function lunchProblem(start: string, end: string): string | null {
+  if (!start || !end) return "Set a start and an end for lunch.";
+  if (minutes(end) <= minutes(start)) return "Lunch must end after it starts.";
+  return null;
+}
+
 function formatWhen(iso?: string): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -249,6 +256,13 @@ export default function WorkerSettings() {
   const [running, setRunning] = useState<string | null>(null);
   const [output, setOutput] = useState<{ job: string; text: string } | null>(null);
   const [log, setLog] = useState<string | null>(null);
+  // lunchDraft is the lunch times as typed. cfg.lunch keeps the last valid
+  // times, so another save never writes a lunch the worker would reject.
+  const [lunchDraft, setLunchDraft] = useState({
+    start: DEFAULTS.lunch.start,
+    end: DEFAULTS.lunch.end,
+  });
+  const [lunchError, setLunchError] = useState<string | null>(null);
   // savedZone is the time zone last read or saved, for a typo to fall back to.
   const savedZone = useRef(DEFAULTS.timeZone);
 
@@ -270,6 +284,10 @@ export default function WorkerSettings() {
     const timer = setInterval(refreshStatus, 30_000);
     return () => clearInterval(timer);
   }, [refreshStatus]);
+
+  useEffect(() => {
+    setLunchDraft({ start: cfg.lunch.start, end: cfg.lunch.end });
+  }, [cfg.lunch.start, cfg.lunch.end]);
 
   const save = useCallback(async (next: WorkerConfig) => {
     setCfg(next);
@@ -300,15 +318,23 @@ export default function WorkerSettings() {
   const setJob = (key: string, job: JobConfig) =>
     save({ ...cfg, jobs: { ...cfg.jobs, [key]: job } });
 
-  // saveLunch saves lunch only if it ends after it starts, because the worker
-  // stops every job on a config error.
-  const saveLunch = (patch: Partial<WorkerConfig["lunch"]>) => {
-    const lunch = { ...cfg.lunch, ...patch };
-    if (!lunch.start || !lunch.end || minutes(lunch.end) <= minutes(lunch.start)) {
-      setError("Lunch must end after it starts.");
+  // saveLunchTimes saves the typed lunch once focus leaves both time boxes,
+  // and only if lunch ends after it starts. The worker stops every job on a
+  // config error.
+  const saveLunchTimes = () => {
+    const problem = lunchProblem(lunchDraft.start, lunchDraft.end);
+    setLunchError(problem);
+    if (problem || (lunchDraft.start === cfg.lunch.start && lunchDraft.end === cfg.lunch.end)) {
       return;
     }
-    return save({ ...cfg, lunch });
+    return save({ ...cfg, lunch: { ...cfg.lunch, ...lunchDraft } });
+  };
+
+  // toggleLunch switches lunch on or off, and drops times not yet saved.
+  const toggleLunch = () => {
+    setLunchDraft({ start: cfg.lunch.start, end: cfg.lunch.end });
+    setLunchError(null);
+    return save({ ...cfg, lunch: { ...cfg.lunch, enabled: !cfg.lunch.enabled } });
   };
 
   // setReviewer changes a text box as you type, and onBlur saves it.
@@ -468,29 +494,37 @@ export default function WorkerSettings() {
           <label htmlFor="lunch-toggle" className="text-xs text-white/80">
             Lunch
           </label>
-          <Toggle
-            id="lunch-toggle"
-            on={cfg.lunch.enabled}
-            onClick={() => saveLunch({ enabled: !cfg.lunch.enabled })}
-          />
+          <Toggle id="lunch-toggle" on={cfg.lunch.enabled} onClick={toggleLunch} />
         </div>
         {cfg.lunch.enabled && (
-          <div className="flex items-center gap-2 text-[10px] text-tertiary">
+          <fieldset
+            aria-label="Lunch times"
+            className="flex items-center gap-2 min-w-0 text-[10px] text-tertiary"
+            onBlur={(e) => {
+              // Moving from one time box to the other is not leaving the pair.
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) saveLunchTimes();
+            }}
+          >
             <span>From</span>
             <input
               type="time"
-              value={cfg.lunch.start}
-              onChange={(e) => saveLunch({ start: e.target.value })}
+              aria-label="Lunch start"
+              value={lunchDraft.start}
+              onChange={(e) => setLunchDraft({ ...lunchDraft, start: e.target.value })}
               className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
             />
             <span>to</span>
             <input
               type="time"
-              value={cfg.lunch.end}
-              onChange={(e) => saveLunch({ end: e.target.value })}
+              aria-label="Lunch end"
+              value={lunchDraft.end}
+              onChange={(e) => setLunchDraft({ ...lunchDraft, end: e.target.value })}
               className={cn(inputClass, "[color-scheme:dark] tabular-nums")}
             />
-          </div>
+          </fieldset>
+        )}
+        {cfg.lunch.enabled && lunchError && (
+          <p className="text-[10px] text-error">{lunchError} It is not saved yet.</p>
         )}
         <p className="text-[10px] text-tertiary">
           Focus time books around lunch. Lunch is not added to your calendar.
