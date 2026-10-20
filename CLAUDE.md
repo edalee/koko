@@ -51,6 +51,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `process_monitor.go`: child process tree scan for the subagent monitor
 - `config_service.go` — Atomic writes, API key, hidden PRs
 - `claude_service.go` — Last message extraction, listing a directory's stored conversations, and the file helpers for deleting them
+- `session_summary.go`: `ClaudeService.GetSessionSummary`, one conversation's title, recap, prompts, branch, PR and ticket, read from its transcript and cached (plan 036). `jira_key.go` holds the Jira key rule
 - `conversation_delete.go`: `App.DeleteConversation` and `DeleteConversations`, with the ownership checks (plan 028 step 7a)
 - `slack_commands.go` — Slack bot DM command handler
 - `types.go` — Shared Go types with JSON tags
@@ -63,7 +64,7 @@ A desktop application that serves as a unified workspace. Primary use: running C
   - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx`. A shell for `components/worker/`: `GeneralSection`, one card per job (`StandupCard`, `FocusCard`, `ReviewCard` on `JobCard`, and `SummaryCard`, the summary's settings inside a `JobCard`), `JobSchedule`, `RunControls`, `ReviewRuns` (the review card's runs), the `useWorkerConfig` hook, `config.ts` (types, `merge`) and `runs.ts` (run types and rules)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
-- `docs/plans/` — Implementation plans (001-035)
+- `docs/plans/` — Implementation plans (001-036)
 
 ## Go Backend Pattern
 - Structs bound to Wails via `Bind: []interface{}{...}` in main.go
@@ -90,6 +91,6 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - **`/design` command**: screenshots running app + analyzes against design system
 
 ## Design Docs
-- Implementation plans in `docs/plans/` (001-035)
+- Implementation plans in `docs/plans/` (001-036)
 - Session memory in Claude memory files
 - When a plan is approved, always save it to `docs/plans/` as the first step before any implementation
