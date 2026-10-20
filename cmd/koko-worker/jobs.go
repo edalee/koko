@@ -446,7 +446,7 @@ func runFocus(ctx context.Context, env Env) error {
 	if err != nil {
 		return err
 	}
-	gaps := findFocusGaps(events, env.cfg.Focus, now)
+	gaps := findFocusGaps(events, env.cfg, now)
 	if len(gaps) == 0 {
 		if env.test {
 			return env.notify(ctx, "Focus: no gaps to book today.")

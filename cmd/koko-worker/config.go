@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -74,10 +75,28 @@ type TeamScopeConfig struct {
 	Repos      []string `json:"repos"` // "owner/repo" names
 }
 
-// JobConfig is one job's switch and its run times ("HH:MM", Monday to Friday).
+// dayNames are the names Days uses, indexed by time.Weekday.
+var dayNames = []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+
+// weekdays is the days of a job without Days.
+var weekdays = []string{"mon", "tue", "wed", "thu", "fri"}
+
+// JobConfig is one job's switch, its run times ("HH:MM") and its days.
 type JobConfig struct {
 	Enabled bool     `json:"enabled"`
 	Times   []string `json:"times"`
+	// Days are the days it runs, "mon" to "sun". Empty means Monday to Friday,
+	// so an older worker.json keeps its schedule.
+	Days []string `json:"days"`
+}
+
+// runsOn is true if the job runs on t's day of the week.
+func (j JobConfig) runsOn(t time.Time) bool {
+	days := j.Days
+	if len(days) == 0 {
+		days = weekdays
+	}
+	return slices.Contains(days, dayNames[t.Weekday()])
 }
 
 // SlackConfig is the bot that sends the DMs. Koko's own Slack settings are not used.
@@ -93,6 +112,14 @@ type FocusConfig struct {
 	MinMinutes  int    `json:"minMinutes"`
 }
 
+// LunchConfig is a daily break that focus time books around. It is not
+// written to the calendar.
+type LunchConfig struct {
+	Enabled bool   `json:"enabled"`
+	Start   string `json:"start"` // "HH:MM"
+	End     string `json:"end"`   // "HH:MM", after Start
+}
+
 // Config is worker.json. Koko's UI writes it, the worker only reads it.
 // It is a separate file because Koko's SaveConfig rewrites config.json from
 // its own struct and would drop any key it does not know.
@@ -102,11 +129,13 @@ type Config struct {
 	CalendarID string `json:"calendarId"`
 	// JiraSite is the Atlassian site the stand-up reads tickets from, such as
 	// example.atlassian.net. Empty means the stand-up reads no tickets.
-	JiraSite string               `json:"jiraSite"`
-	Reviewer ReviewerConfig       `json:"reviewer"`
-	Slack    SlackConfig          `json:"slack"`
-	Focus    FocusConfig          `json:"focus"`
-	Jobs     map[string]JobConfig `json:"jobs"`
+	JiraSite string         `json:"jiraSite"`
+	Reviewer ReviewerConfig `json:"reviewer"`
+	Slack    SlackConfig    `json:"slack"`
+	Focus    FocusConfig    `json:"focus"`
+	// Lunch decodes over its default, so a file without it keeps lunch on.
+	Lunch LunchConfig          `json:"lunch"`
+	Jobs  map[string]JobConfig `json:"jobs"`
 }
 
 func defaultConfig() Config {
@@ -121,6 +150,7 @@ func defaultConfig() Config {
 			Team: TeamScopeConfig{MaxAgeDays: 4},
 		},
 		Focus: FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
+		Lunch: LunchConfig{Enabled: true, Start: "12:00", End: "13:00"},
 		Jobs: map[string]JobConfig{
 			JobStandup: {Enabled: true, Times: []string{"07:00"}},
 			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
@@ -236,6 +266,12 @@ func (c *Config) fillDefaults() {
 	if c.Focus.MinMinutes <= 0 {
 		c.Focus.MinMinutes = def.Focus.MinMinutes
 	}
+	if c.Lunch.Start == "" {
+		c.Lunch.Start = def.Lunch.Start
+	}
+	if c.Lunch.End == "" {
+		c.Lunch.End = def.Lunch.End
+	}
 	if c.Jobs == nil {
 		c.Jobs = map[string]JobConfig{}
 	}
@@ -255,6 +291,9 @@ func (c *Config) fillDefaults() {
 			times = d.Times
 		}
 		j.Times = times
+		for i, day := range j.Days {
+			j.Days[i] = strings.ToLower(strings.TrimSpace(day))
+		}
 		c.Jobs[name] = j
 	}
 }
@@ -269,6 +308,11 @@ func (c Config) validate() error {
 				return fmt.Errorf("job %s: %w", name, err)
 			}
 		}
+		for _, day := range job.Days {
+			if !slices.Contains(dayNames, day) {
+				return fmt.Errorf("job %s: unknown day %q, want mon to sun", name, day)
+			}
+		}
 	}
 	// The reviewer settings are checked by the review job (problem), not here:
 	// a typo in them must not stop the stand-up and focus time.
@@ -276,6 +320,16 @@ func (c Config) validate() error {
 		if _, _, err := parseClock(t); err != nil {
 			return fmt.Errorf("focus window: %w", err)
 		}
+	}
+	for _, t := range []string{c.Lunch.Start, c.Lunch.End} {
+		if _, _, err := parseClock(t); err != nil {
+			return fmt.Errorf("lunch: %w", err)
+		}
+	}
+	sh, sm, _ := parseClock(c.Lunch.Start)
+	eh, em, _ := parseClock(c.Lunch.End)
+	if eh*60+em <= sh*60+sm {
+		return fmt.Errorf("lunch ends at %s, want a time after %s", c.Lunch.End, c.Lunch.Start)
 	}
 	return nil
 }
@@ -429,8 +483,4 @@ func parseClock(s string) (hour, minute int, err error) {
 func atClock(day time.Time, clock string) time.Time {
 	h, m, _ := parseClock(clock)
 	return time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, day.Location())
-}
-
-func isWeekday(t time.Time) bool {
-	return t.Weekday() != time.Saturday && t.Weekday() != time.Sunday
 }

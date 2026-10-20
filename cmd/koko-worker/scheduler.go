@@ -224,18 +224,18 @@ type DueRun struct {
 	Slots []time.Time
 }
 
-// dueRuns lists the jobs to run at now. Only today's slots count: a slot
-// missed on an earlier day is dropped, not caught up. A slot whose time was
-// set after it came round waits for the next day (see syncTimes).
+// dueRuns lists the jobs to run at now, on each job's own days. Only today's
+// slots count: a slot missed on an earlier day is dropped, not caught up. A
+// slot whose time was set after it came round waits for the next day (see syncTimes).
 func dueRuns(cfg Config, st State, now time.Time) []DueRun {
 	now = now.In(cfg.location())
-	if !cfg.Enabled || !isWeekday(now) {
+	if !cfg.Enabled {
 		return nil
 	}
 	var out []DueRun
 	for _, job := range allJobs {
 		jc, ok := cfg.Jobs[job]
-		if !ok || !jc.Enabled {
+		if !ok || !jc.Enabled || !jc.runsOn(now) {
 			continue
 		}
 		var slots []time.Time
@@ -314,12 +314,9 @@ func nextSlot(cfg Config, now time.Time) (time.Time, bool) {
 	var best time.Time
 	for d := 0; d <= 8; d++ {
 		day := now.AddDate(0, 0, d)
-		if !isWeekday(day) {
-			continue
-		}
 		for _, job := range allJobs {
 			jc := cfg.Jobs[job]
-			if !jc.Enabled {
+			if !jc.Enabled || !jc.runsOn(day) {
 				continue
 			}
 			for _, clock := range jc.Times {

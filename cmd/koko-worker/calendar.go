@@ -69,19 +69,23 @@ func (e GCalEvent) times(loc *time.Location) (time.Time, time.Time, error) {
 type Gap struct{ Start, End time.Time }
 
 // findFocusGaps returns today's free gaps of at least MinMinutes inside the
-// focus window, from now on.
+// focus window, from now on. It finds none on a day the focus job does not run.
 //
 // Timed events block unless you declined them, they are marked free, they are
 // cancelled, or they are a working-location marker. Tentative and unanswered
 // invites block. Focus blocks already booked block too, so a second run on
 // the same day books nothing. An all-day event that is marked busy, or looks
-// like time off, blocks the whole day.
-func findFocusGaps(events []GCalEvent, fc FocusConfig, now time.Time) []Gap {
-	if !isWeekday(now) {
+// like time off, blocks the whole day. Lunch, if on, blocks like a meeting.
+func findFocusGaps(events []GCalEvent, cfg Config, now time.Time) []Gap {
+	if !cfg.Jobs[JobFocus].runsOn(now) {
 		return nil
 	}
+	fc := cfg.Focus
 	loc := now.Location()
 	var busy []Gap
+	if cfg.Lunch.Enabled {
+		busy = append(busy, Gap{atClock(now, cfg.Lunch.Start), atClock(now, cfg.Lunch.End)})
+	}
 	for _, e := range events {
 		if e.Status == "cancelled" || e.EventType == "WORKING_LOCATION" || e.myResponse() == "declined" {
 			continue
