@@ -283,6 +283,12 @@ Done on 7 Oct: log retention.
 - launchd sends the agent's own stdout and stderr to `agent-stderr.log`, so a rename never leaves launchd writing to the old file. The plist changes on the next install.
 - Once a day, `serveTick` deletes old review run logs older than 60 days, the same age at which `pruneState` forgets a review. The reviewer's own logs belong to the reviewer, and stay.
 
+Done on 20 Oct: job days and lunch (plan 035, part 1).
+- Each job has its own days, `"mon"` to `"sun"`. A job without days runs Monday to Friday, so an older `worker.json` keeps its schedule.
+- Focus time books only on the focus job's days. On any other day, Test and Run now say the job does not run that day.
+- A day added after its slot waits a week, as a changed time waits a day.
+- Lunch, 12:00 to 13:00 by default, blocks focus time like a meeting. It is not written to the calendar. It can be moved or switched off.
+
 Still to do:
 1. You add the sudoers rule. Then a wake test: Mac asleep, wake, slot, DM.
 2. Turn off the old assistant's launchd agent.

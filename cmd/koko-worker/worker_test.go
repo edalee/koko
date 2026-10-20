@@ -18,7 +18,12 @@ func monday(hour, minute int) time.Time {
 	return time.Date(2026, 9, 28, hour, minute, 0, 0, cet)
 }
 
-var focusCfg = FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30}
+// focusCfg is the default config with lunch off, so a day without meetings is one block.
+var focusCfg = func() Config {
+	cfg := defaultConfig()
+	cfg.Lunch.Enabled = false
+	return cfg
+}()
 
 type evOpt func(*GCalEvent)
 
@@ -98,6 +103,42 @@ func TestFindFocusGaps(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFocusGapsLunch(t *testing.T) {
+	lunch := defaultConfig()
+	tests := []struct {
+		name   string
+		cfg    Config
+		events []GCalEvent
+		now    time.Time
+		want   string
+	}{
+		{"lunch splits the day", lunch, nil, monday(7, 0), "09:00-12:00 13:00-17:00"},
+		{"meetings either side of lunch", lunch, []GCalEvent{ev("11:45", "12:30"), ev("13:00", "13:20")}, monday(7, 0),
+			"09:00-11:45 13:20-17:00"},
+		{"a run during lunch starts after it", lunch, nil, monday(12, 30), "13:00-17:00"},
+		{"lunch off", focusCfg, nil, monday(7, 0), "09:00-17:00"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := gapStrings(findFocusGaps(tt.events, tt.cfg, tt.now)); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFocusGapsOnFocusDays(t *testing.T) {
+	cfg := focusCfg
+	cfg.Jobs = map[string]JobConfig{JobFocus: {Enabled: true, Times: []string{"09:15"}, Days: []string{"sat"}}}
+	saturday := time.Date(2026, 10, 3, 7, 0, 0, 0, cet)
+	if got := gapStrings(findFocusGaps(nil, cfg, saturday)); got != "09:00-17:00" {
+		t.Errorf("Saturday: got %q", got)
+	}
+	if got := gapStrings(findFocusGaps(nil, cfg, monday(7, 0))); got != "" {
+		t.Errorf("Monday: got %q, want nothing", got)
 	}
 }
 
@@ -204,6 +245,116 @@ func TestDueRuns(t *testing.T) {
 			t.Errorf("got %q", got)
 		}
 	})
+}
+
+func TestJobDays(t *testing.T) {
+	saturday := time.Date(2026, 10, 3, 13, 0, 0, 0, cet)
+	t.Run("a job on Saturday only", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.Jobs[JobStandup] = JobConfig{Enabled: true, Times: []string{"07:00"}, Days: []string{"sat"}}
+		st := readyState(cfg)
+		if got := dueString(dueRuns(cfg, st, saturday)); got != "standup[07:00]" {
+			t.Errorf("Saturday: got %q", got)
+		}
+		if got := dueString(dueRuns(cfg, st, monday(13, 0))); got != "focus[09:15] review[09:30,12:00]" {
+			t.Errorf("Monday: got %q", got)
+		}
+	})
+	t.Run("a job once a week", func(t *testing.T) {
+		cfg := testConfig()
+		cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}, Days: []string{"wed"}}
+		st := readyState(cfg)
+		wednesday := monday(10, 0).AddDate(0, 0, 2)
+		if got := dueString(dueRuns(cfg, st, wednesday)); got != "standup[07:00] focus[09:15] review[09:30]" {
+			t.Errorf("Wednesday: got %q", got)
+		}
+		if got := dueString(dueRuns(cfg, st, wednesday.AddDate(0, 0, -1))); got != "standup[07:00] focus[09:15]" {
+			t.Errorf("Tuesday: got %q", got)
+		}
+	})
+	t.Run("a job without days runs Monday to Friday", func(t *testing.T) {
+		var got []string
+		for d := 0; d < 7; d++ {
+			if day := monday(9, 0).AddDate(0, 0, d); (JobConfig{}).runsOn(day) {
+				got = append(got, day.Format("Mon"))
+			}
+		}
+		if strings.Join(got, ",") != "Mon,Tue,Wed,Thu,Fri" {
+			t.Errorf("got %v", got)
+		}
+	})
+}
+
+func TestAddedDayWaitsAWeek(t *testing.T) {
+	saturday := time.Date(2026, 10, 3, 13, 0, 0, 0, cet)
+	cfg := testConfig()
+	st := loadState("/nonexistent")
+	st.DaysAdded = map[string]time.Time{} // a state that already records days
+	weeksAgo := monday(0, 0).AddDate(0, 0, -21)
+	syncTimes(cfg, &st, weeksAgo)
+
+	cfg.Jobs[JobStandup] = JobConfig{Enabled: true, Times: []string{"07:00"}, Days: []string{"mon", "sat"}}
+	syncTimes(cfg, &st, saturday)
+	if got := dueString(dueRuns(cfg, st, saturday)); got != "" {
+		t.Errorf("Saturday added at 13:00: got %q, want nothing today", got)
+	}
+	if got := dueString(dueRuns(cfg, st, saturday.AddDate(0, 0, 7))); got != "standup[07:00]" {
+		t.Errorf("next Saturday: got %q", got)
+	}
+	if got := dueString(dueRuns(cfg, st, monday(13, 0).AddDate(0, 0, 7))); got != "standup[07:00] focus[09:15] review[09:30,12:00]" {
+		t.Errorf("Monday, active all along: got %q", got)
+	}
+}
+
+func TestStateFromBeforeDaysKeepsToday(t *testing.T) {
+	cfg := testConfig()
+	st := loadState("/nonexistent")
+	syncTimes(cfg, &st, monday(0, 0).AddDate(0, 0, -7)) // times only, as an older worker recorded
+	st.DaysAdded = nil
+	syncTimes(cfg, &st, monday(10, 0))
+	if got := dueString(dueRuns(cfg, st, monday(10, 0))); got != "standup[07:00] focus[09:15] review[09:30]" {
+		t.Errorf("after the update: got %q", got)
+	}
+}
+
+func TestFocusOnAnotherDaySaysSo(t *testing.T) {
+	var sent []string
+	env := Env{
+		cfg: defaultConfig(), test: true, now: time.Date(2026, 10, 3, 9, 0, 0, 0, cet),
+		send: func(_ context.Context, msg Message) error {
+			sent = append(sent, msg.Sections...)
+			return nil
+		},
+	}
+	env.cfg.TimeZone = "Europe/Paris"
+	if err := runFocus(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || !strings.Contains(sent[0], "does not run on Saturday") {
+		t.Errorf("got %q", sent)
+	}
+}
+
+func TestNextSlotSkipsToAnAllowedDay(t *testing.T) {
+	cfg := testConfig()
+	for _, job := range allJobs {
+		cfg.Jobs[job] = JobConfig{Enabled: false, Times: cfg.Jobs[job].Times}
+	}
+	cfg.Jobs[JobStandup] = JobConfig{Enabled: true, Times: []string{"07:00"}, Days: []string{"thu", "sat"}}
+	tests := []struct {
+		now  time.Time
+		want string
+	}{
+		{monday(8, 0), "Thu 07:00"},
+		{monday(8, 0).AddDate(0, 0, 3), "Sat 07:00"},           // Thursday after the slot
+		{time.Date(2026, 10, 3, 8, 0, 0, 0, cet), "Thu 07:00"}, // Saturday after the slot
+	}
+	for _, tt := range tests {
+		slot, ok := nextSlot(cfg, tt.now)
+		if got := slot.Format("Mon 15:04"); !ok || got != tt.want {
+			t.Errorf("at %s: got %s, want %s", tt.now.Format("Mon 15:04"), got, tt.want)
+		}
+	}
 }
 
 func TestNextWake(t *testing.T) {
@@ -345,6 +496,54 @@ func TestConfigValidate(t *testing.T) {
 	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"9.30"}}
 	if err := cfg.validate(); err == nil {
 		t.Error("want an error for a bad time")
+	}
+	cfg = defaultConfig()
+	cfg.Jobs[JobReview] = JobConfig{Enabled: true, Times: []string{"09:30"}, Days: []string{"mon", "funday"}}
+	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "funday") {
+		t.Errorf("bad day: got %v", err)
+	}
+	cfg = defaultConfig()
+	cfg.Lunch.Start, cfg.Lunch.End = "13:00", "12:00"
+	if err := cfg.validate(); err == nil {
+		t.Error("want an error for lunch ending before it starts")
+	}
+	cfg.Lunch.Start, cfg.Lunch.End = "9:30", "12:00"
+	if err := cfg.validate(); err != nil {
+		t.Errorf("lunch from 9:30: %v", err)
+	}
+	cfg.Lunch.End = "noon"
+	if err := cfg.validate(); err == nil {
+		t.Error("want an error for a bad lunch time")
+	}
+}
+
+func TestLoadConfigLunchAndDays(t *testing.T) {
+	load := func(body string) Config {
+		t.Helper()
+		path := t.TempDir() + "/worker.json"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := loadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	// An older worker.json has no lunch and no days.
+	cfg := load(`{"jobs": {"standup": {"enabled": true, "times": ["07:00"]}}}`)
+	if l := cfg.Lunch; !l.Enabled || l.Start != "12:00" || l.End != "13:00" {
+		t.Errorf("missing lunch = %+v, want the default", l)
+	}
+	if sat := time.Date(2026, 10, 3, 7, 0, 0, 0, cet); cfg.Jobs[JobStandup].runsOn(sat) || !cfg.Jobs[JobStandup].runsOn(monday(7, 0)) {
+		t.Errorf("job without days = %+v, want Monday to Friday", cfg.Jobs[JobStandup])
+	}
+	cfg = load(`{"lunch": {"enabled": false}, "jobs": {"focus": {"enabled": true, "days": [" Sat ", "SUN"]}}}`)
+	if l := cfg.Lunch; l.Enabled || l.Start != "12:00" || l.End != "13:00" {
+		t.Errorf("lunch off = %+v, want off with the default times", l)
+	}
+	if got := strings.Join(cfg.Jobs[JobFocus].Days, ","); got != "sat,sun" {
+		t.Errorf("days = %q, want sat,sun", got)
 	}
 }
 

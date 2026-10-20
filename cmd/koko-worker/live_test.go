@@ -38,7 +38,7 @@ func TestLiveFocusBooking(t *testing.T) {
 	for _, e := range events {
 		if e.Description == focusMarker {
 			t.Logf("found focus block %s (%s) — delete it by hand", e.ID, e.Summary)
-			if got := findFocusGaps(events, cfg.Focus, gap.Start.Add(-3*time.Hour)); len(got) > 0 {
+			if got := findFocusGaps(events, cfg, gap.Start.Add(-3*time.Hour)); len(got) > 0 {
 				for _, g := range got {
 					if g.Start.Before(gap.End) && g.End.After(gap.Start) {
 						t.Errorf("the booked block is still seen as free: %v", g)

@@ -78,11 +78,11 @@ Each session runs Claude Code in a directory you choose. The left sidebar lists 
 </p>
 
 ### Worker (macOS)
-- **koko-worker**: a background agent that runs jobs on weekdays, even with Koko closed.
+- **koko-worker**: a background agent that runs jobs on the days you choose, even with Koko closed. Each job runs Monday to Friday until you change its days.
 - **Stand-up (07:00)**: one Slack DM with today's meetings, your PRs ready to merge and PRs waiting for your review. If you set a Jira site, it also checks each PR against its ticket.
-- **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more.
+- **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more. It books around lunch, 12:00 to 13:00 by default.
 - **Review worker (09:30, 12:00, 14:00)**: runs a reviewer you choose on each new PR, yours and your team's, and posts its comments on the PR as you. It is off until you set a reviewer.
-- **Settings > Worker**: one switch for the worker, a switch and times for each job, Test and Run now buttons, connection checks and the log. It also sets the time zone, the calendar, the Jira site, Slack and the reviewer.
+- **Settings > Worker**: one switch for the worker, a switch, times and days for each job, Test and Run now buttons, connection checks and the log. It also sets the time zone, the calendar, the Jira site, lunch, Slack and the reviewer.
 - **Catch-up and retries**: a job missed while the Mac slept runs on wake. A job waits for the internet, and gets 3 tries for other failures.
 
 ### Workspace
@@ -266,7 +266,7 @@ frontend/src/
   test/                  Vitest tests
 
 docs/
-  plans/                 Implementation plans (001-034)
+  plans/                 Implementation plans (001-035)
   architecture/          ADRs and the design system
   references/            Setup guides
 ```

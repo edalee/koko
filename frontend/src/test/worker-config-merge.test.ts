@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalZone, merge } from "../components/WorkerSettings";
+import { canonicalZone, merge, toggleDay } from "../components/WorkerSettings";
 
 describe("merge", () => {
   it("keeps a reviewer section as it is", () => {
@@ -44,6 +44,34 @@ describe("merge", () => {
     expect(cfg.jiraSite).toBe("");
     // The time zone is this computer's own.
     expect(cfg.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it("gives a job without days Monday to Friday, and keeps set days", () => {
+    const cfg = merge(
+      JSON.stringify({
+        jobs: { standup: { enabled: true, times: ["07:00"] }, review: { days: ["wed"] } },
+      }),
+    );
+    expect(cfg.jobs.standup.days).toEqual(["mon", "tue", "wed", "thu", "fri"]);
+    expect(cfg.jobs.focus.days).toEqual(["mon", "tue", "wed", "thu", "fri"]);
+    expect(cfg.jobs.review.days).toEqual(["wed"]);
+  });
+
+  it("turns lunch on when it is missing, and keeps it off when it is off", () => {
+    expect(merge("{}").lunch).toEqual({ enabled: true, start: "12:00", end: "13:00" });
+    expect(merge(JSON.stringify({ lunch: { enabled: false } })).lunch).toEqual({
+      enabled: false,
+      start: "12:00",
+      end: "13:00",
+    });
+  });
+});
+
+describe("toggleDay", () => {
+  it("adds a day in week order and keeps the last day on", () => {
+    expect(toggleDay(["mon", "fri"], "wed")).toEqual(["mon", "wed", "fri"]);
+    expect(toggleDay(["mon", "wed"], "mon")).toEqual(["wed"]);
+    expect(toggleDay(["sat"], "sat")).toEqual(["sat"]);
   });
 });
 
