@@ -24,17 +24,17 @@ build:
 
 # sign signs koko-worker, then the app around it. Copying koko-worker in breaks
 # the signature Wails gives the app, so the app is always signed again. Without
-# a trusted certificate, it gets a new ad-hoc signature.
+# a trusted certificate, both get a new ad-hoc signature.
 sign:
 	@if security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"$(SIGN_ID)\""; then \
-		id="$(SIGN_ID)"; \
+		id="$(SIGN_ID)"; label="$(SIGN_ID)"; \
 	else \
-		id=-; \
+		id=-; label="an ad-hoc signature"; \
 		echo "No trusted \"$(SIGN_ID)\" certificate, so Koko.app gets an ad-hoc signature. Run make signing-cert once."; \
 	fi; \
 	codesign --force --sign "$$id" $(APP)/Contents/MacOS/koko-worker && \
 	codesign --force --sign "$$id" $(APP) && \
-	echo "Signed Koko.app"
+	echo "Signed Koko.app with $$label"
 
 signing-cert:
 	./scripts/make-signing-cert.sh "$(SIGN_ID)"
