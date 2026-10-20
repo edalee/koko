@@ -1,14 +1,11 @@
+import { mergeRuns, type ReviewRun } from "./runs";
+
 // Mirrors cmd/koko-worker/config.go. The worker fills in defaults for missing
 // or empty values, so an empty text box keeps the default.
 export interface JobConfig {
   enabled: boolean;
   times: string[];
   days: string[];
-}
-
-export interface ScopeConfig {
-  enabled: boolean;
-  maxAgeDays: number;
 }
 
 export interface ReviewerConfig {
@@ -21,8 +18,8 @@ export interface ReviewerConfig {
   command: string;
   logs: string;
   markerPrefix: string;
-  mine: ScopeConfig;
-  team: ScopeConfig & { team: string; repos: string[] };
+  // runs replace the old review job and its mine and team scopes.
+  runs: ReviewRun[];
   orgs: string[];
   excludeRepos: string[];
 }
@@ -85,7 +82,7 @@ export const DEFAULTS: WorkerConfig = {
   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   calendarId: "primary",
   jiraSite: "",
-  // No reviewer is set up, so the review job starts off.
+  // No reviewer is set up, so the review run starts off.
   reviewer: {
     source: "managed",
     repo: "",
@@ -96,8 +93,7 @@ export const DEFAULTS: WorkerConfig = {
     command: "",
     logs: "",
     markerPrefix: "",
-    mine: { enabled: true, maxAgeDays: 14 },
-    team: { enabled: false, maxAgeDays: 4, team: "", repos: [] },
+    runs: mergeRuns(undefined, undefined),
     orgs: [],
     excludeRepos: [],
   },
@@ -108,11 +104,6 @@ export const DEFAULTS: WorkerConfig = {
   jobs: {
     standup: { enabled: true, times: ["07:00"], days: ["mon", "tue", "wed", "thu", "fri"] },
     focus: { enabled: true, times: ["09:15"], days: ["mon", "tue", "wed", "thu", "fri"] },
-    review: {
-      enabled: false,
-      times: ["09:30", "12:00", "14:00"],
-      days: ["mon", "tue", "wed", "thu", "fri"],
-    },
     // No team is set, so the summary starts off.
     summary: { enabled: false, times: ["08:30"], days: ["mon", "tue", "wed", "thu", "fri"] },
   },
@@ -150,16 +141,19 @@ export function canonicalZone(zone: string): string | null {
 }
 
 export function merge(raw: string): WorkerConfig {
-  const parsed = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
-  const reviewer: Partial<ReviewerConfig> = parsed.reviewer ?? {};
+  const parsed = JSON.parse(raw || "{}") as Omit<Partial<WorkerConfig>, "reviewer"> & {
+    reviewer?: Partial<ReviewerConfig> & Parameters<typeof mergeRuns>[0];
+  };
+  // The old review job and scopes become the runs, and are not saved again.
+  const { mine: _mine, team: _team, ...reviewer } = parsed.reviewer ?? {};
+  const { review: _review, ...jobs } = parsed.jobs ?? {};
   return {
     ...DEFAULTS,
     ...parsed,
     reviewer: {
       ...DEFAULTS.reviewer,
       ...reviewer,
-      mine: { ...DEFAULTS.reviewer.mine, ...reviewer.mine },
-      team: { ...DEFAULTS.reviewer.team, ...reviewer.team, repos: reviewer.team?.repos ?? [] },
+      runs: mergeRuns(parsed.reviewer, parsed.jobs),
       // Go writes an empty list as null.
       orgs: reviewer.orgs ?? [],
       excludeRepos: reviewer.excludeRepos ?? [],
@@ -174,7 +168,7 @@ export function merge(raw: string): WorkerConfig {
       repos: parsed.summary?.repos ?? [],
     },
     jobs: Object.fromEntries(
-      Object.entries({ ...DEFAULTS.jobs, ...parsed.jobs }).map(([key, job]) => [
+      Object.entries({ ...DEFAULTS.jobs, ...jobs }).map(([key, job]) => [
         key,
         // A job without days runs Monday to Friday, as in the worker.
         { ...job, days: job.days?.length ? job.days : DEFAULTS.jobs.standup.days },
@@ -253,8 +247,8 @@ export function nextSlot(job: JobConfig, zone: string, now = new Date()): string
   return null;
 }
 
-// reviewerSetUp is true if the review job can run with these settings. It
-// follows problem() in cmd/koko-worker/config.go.
+// reviewerSetUp is true if a PRs run can run with these settings. It follows
+// problem() in cmd/koko-worker/config.go.
 export function reviewerSetUp(r: ReviewerConfig): boolean {
   const command = r.command.trim();
   if (!command || !/^[a-z0-9-]+$/.test(r.markerPrefix.trim())) return false;

@@ -81,7 +81,7 @@ Each session runs Claude Code in a directory you choose. The left sidebar lists 
 - **koko-worker**: a background agent that runs jobs on the days you choose, even with Koko closed. Each job runs Monday to Friday until you change its days.
 - **Stand-up (07:00)**: one Slack DM with today's meetings, your PRs ready to merge and PRs waiting for your review. If you set a Jira site, it also checks each PR against its ticket.
 - **Focus time (09:15)**: books "Focus" blocks in free calendar gaps of 30 minutes or more. It books around lunch, 12:00 to 13:00 by default.
-- **Review worker (09:30, 12:00, 14:00)**: runs a reviewer you choose on each new PR, yours and your team's, and posts its comments on the PR as you. It is off until you set a reviewer.
+- **Review worker**: runs a command you choose on a schedule, in runs. Each run has its own extra arguments, days and times, and targets PRs or repos. A PRs run, such as the "daily" one at 09:30, 12:00 and 14:00, runs a reviewer on each new PR, yours and your team's, and posts its comments on the PR as you. A repos run, such as a weekly one with `--update-deps`, runs a tool once per repo, which can push and open PRs, then sends one Slack DM. It is off until you set a reviewer.
 - **Team summary (08:30)**: one Slack DM with what each member of a team merged, opened and reviewed since the last summary. With a Jira site, it adds the status of the tickets their PRs name. Off by default. It needs a team.
 - **Settings > Worker**: one switch for the worker, a switch, times and days for each job, Test and Run now buttons, connection checks and the log. It also sets the time zone, the calendar, the Jira site, lunch, Slack and the reviewer.
 - **Catch-up and retries**: a job missed while the Mac slept runs on wake. A job waits for the internet, and gets 3 tries for other failures.
@@ -147,12 +147,12 @@ It needs these connections. Settings > Worker checks each one and says how to fi
   - **Orgs**, the orgs and accounts whose PRs are reviewed. Empty means every org.
   - **Excluded repos**, `owner/repo` names that are never reviewed.
 
-  The reviewer never posts. The worker posts its comments.
+  In a PRs run the reviewer never posts: its gh and git are read-only, and the worker posts its comments. A repos run gets the real gh and git, so its tool can push and open PRs.
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
 
 The switch in Settings > Worker installs and removes the launchd agent `com.koko.worker`. You can also run `koko-worker install` and `koko-worker uninstall`.
 
-The worker keeps its settings in `~/Library/Application Support/koko/worker.json`, and its state and logs in `~/Library/Application Support/koko/worker/`. `logs/worker.log` rolls over at 5 MB. Review run logs are deleted after 60 days. PR repos are cloned to `~/.cache/koko-worker/repos`, and a managed reviewer to `~/.cache/koko-worker/reviewer`.
+The worker keeps its settings in `~/Library/Application Support/koko/worker.json`, and its state and logs in `~/Library/Application Support/koko/worker/`. `logs/worker.log` rolls over at 5 MB. Review run logs are deleted after 60 days. PR repos are cloned to `~/.cache/koko-worker/repos`, the repos of repos runs to `~/.cache/koko-worker/repos-runs`, and a managed reviewer to `~/.cache/koko-worker/reviewer`.
 
 ## Build from source
 

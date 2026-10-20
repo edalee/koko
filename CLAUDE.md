@@ -56,11 +56,11 @@ A desktop application that serves as a unified workspace. Primary use: running C
 - `types.go` — Shared Go types with JSON tags
 - `worker_service.go`: Wails-bound bridge to koko-worker. It edits `worker.json` and calls the binary. Methods pass JSON strings, so `models.ts` stays unchanged.
 - `cmd/koko-cli/` — CLI companion
-- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `summary.go` (the team summary), `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `jira.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`, `reviewer.go` (the managed reviewer clone), `review_contract.go` (the reviewer contract and command, plans 030 and 031), `logs.go` (log cap and cleanup)
+- `cmd/koko-worker/`: koko-worker, a nested Go module. `main.go` (subcommands), `scheduler.go`, `jobs.go`, `summary.go` (the team summary), `claude.go` (`claude -p` runner), `calendar.go`, `github.go`, `jira.go`, `slack.go`, `launchd.go`, `check.go`, `config.go`, `reviewer.go` (the managed reviewer clone), `review_contract.go` (the reviewer contract and command, plans 030 and 031), `repos_run.go` (repos runs: clones, records and the DM, plan 035), `logs.go` (log cap and cleanup)
 - `frontend/src/` — React app
   - `components/` — Toolbar, SessionSidebar, RightSidebar, TerminalPane, PRDetailOverlay, CodeViewer, ClaudeModeSwitcher, QuickTerminal, SafeWorkingOverlay, SettingsPanel, SessionDialog, ConversationPicker, WorktreesModule, WorktreeRemovalDialog, etc.
   - `hooks/` — useSessionTabs, useGitHub, useCodeViewer, useNotifications, useSessionActivity, useCI, etc.
-  - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx`. A shell for `components/worker/`: `GeneralSection`, one card per job (`StandupCard`, `FocusCard`, `ReviewCard` on `JobCard`, and `SummaryCard`, the summary's settings inside a `JobCard`), `JobSchedule`, `RunControls`, the `useWorkerConfig` hook and `config.ts` (types, `merge`)
+  - `components/WorkerSettings.tsx`: the Worker tab in `SettingsPanel.tsx`. A shell for `components/worker/`: `GeneralSection`, one card per job (`StandupCard`, `FocusCard`, `ReviewCard` on `JobCard`, and `SummaryCard`, the summary's settings inside a `JobCard`), `JobSchedule`, `RunControls`, `ReviewRuns` (the review card's runs), the `useWorkerConfig` hook, `config.ts` (types, `merge`) and `runs.ts` (run types and rules)
   - `globals.css` — Glassmorphism dark theme + Tailwind v4
 - `build/` — Build assets (Info.plist, app icon)
 - `docs/plans/` — Implementation plans (001-035)

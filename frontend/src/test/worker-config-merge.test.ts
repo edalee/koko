@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canonicalZone, merge, toggleDay } from "../components/worker/config";
 
 describe("merge", () => {
-  it("keeps a reviewer section as it is", () => {
+  it("turns the old review job and scopes into one daily run", () => {
     const cfg = merge(
       JSON.stringify({
         reviewer: { source: "managed", repo: "o/r", branch: "dev", team: { maxAgeDays: 3 } },
@@ -10,10 +10,56 @@ describe("merge", () => {
       }),
     );
     expect(cfg.reviewer.branch).toBe("dev");
-    expect(cfg.reviewer.team.maxAgeDays).toBe(3);
-    expect(cfg.reviewer.team.team).toBe("");
-    expect(cfg.jobs.review.times).toEqual(["11:00"]);
+    expect(cfg.reviewer.runs).toEqual([
+      {
+        name: "daily",
+        args: "",
+        enabled: true,
+        times: ["11:00"],
+        days: ["mon", "tue", "wed", "thu", "fri"],
+        target: "prs",
+        mine: { enabled: true, maxAgeDays: 14 },
+        team: { enabled: false, maxAgeDays: 3, team: "", repos: [] },
+        repos: [],
+        timeoutMinutes: 0,
+      },
+    ]);
+    // The old shape is not saved again.
+    expect(cfg.jobs.review).toBeUndefined();
+    expect("team" in cfg.reviewer).toBe(false);
     expect(cfg.jobs.standup.times).toEqual(["07:00"]);
+  });
+
+  it("keeps runs as they are, and fills in what a run leaves out", () => {
+    const cfg = merge(
+      JSON.stringify({
+        reviewer: {
+          mine: { enabled: false },
+          runs: [
+            {
+              name: "weekly",
+              args: "--update-deps",
+              times: ["08:00"],
+              target: "repos",
+              repos: ["acme/api"],
+              team: { repos: null },
+            },
+          ],
+        },
+        jobs: { review: { enabled: true, times: ["11:00"] } },
+      }),
+    );
+    expect(cfg.reviewer.runs).toHaveLength(1);
+    const [run] = cfg.reviewer.runs;
+    expect(run.name).toBe("weekly");
+    expect(run.args).toBe("--update-deps");
+    expect(run.target).toBe("repos");
+    expect(run.repos).toEqual(["acme/api"]);
+    expect(run.enabled).toBe(false);
+    expect(run.times).toEqual(["08:00"]);
+    expect(run.days).toEqual(["mon", "tue", "wed", "thu", "fri"]);
+    expect(run.mine).toEqual({ enabled: true, maxAgeDays: 14 });
+    expect(run.team.repos).toEqual([]);
   });
 
   it("leaves an empty command empty", () => {
@@ -39,8 +85,14 @@ describe("merge", () => {
     const cfg = merge("{}");
     expect(cfg.reviewer.command).toBe("");
     expect(cfg.reviewer.repo).toBe("");
-    expect(cfg.reviewer.team).toEqual({ enabled: false, maxAgeDays: 4, team: "", repos: [] });
-    expect(cfg.jobs.review.enabled).toBe(false);
+    expect(cfg.reviewer.runs).toHaveLength(1);
+    expect(cfg.reviewer.runs[0].team).toEqual({
+      enabled: false,
+      maxAgeDays: 4,
+      team: "",
+      repos: [],
+    });
+    expect(cfg.reviewer.runs[0].enabled).toBe(false);
     expect(cfg.jiraSite).toBe("");
     // The time zone is this computer's own.
     expect(cfg.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -49,12 +101,11 @@ describe("merge", () => {
   it("gives a job without days Monday to Friday, and keeps set days", () => {
     const cfg = merge(
       JSON.stringify({
-        jobs: { standup: { enabled: true, times: ["07:00"] }, review: { days: ["wed"] } },
+        jobs: { standup: { enabled: true, times: ["07:00"] }, focus: { days: ["wed"] } },
       }),
     );
     expect(cfg.jobs.standup.days).toEqual(["mon", "tue", "wed", "thu", "fri"]);
-    expect(cfg.jobs.focus.days).toEqual(["mon", "tue", "wed", "thu", "fri"]);
-    expect(cfg.jobs.review.days).toEqual(["wed"]);
+    expect(cfg.jobs.focus.days).toEqual(["wed"]);
   });
 
   it("turns lunch on when it is missing, and keeps it off when it is off", () => {

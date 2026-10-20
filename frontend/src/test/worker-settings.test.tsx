@@ -87,12 +87,12 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
   it("shows on or off and the days on a closed card", async () => {
     await renderLoaded();
     const review = screen.getByRole("region", { name: "Review worker" });
-    expect(within(review).getByText(/^Off · Not run yet/)).toBeInTheDocument();
+    expect(within(review).getByText("1 run, all off")).toBeInTheDocument();
     const standup = screen.getByRole("region", { name: "Stand-up" });
     expect(within(standup).getByText(/Mon to Fri at 07:00 · next/)).toBeInTheDocument();
   });
 
-  it("splits the review card into Reviewer and Which PRs", async () => {
+  it("splits the review card into Reviewer, Which PRs and Runs", async () => {
     await renderLoaded();
     const review = openCard("Review worker");
 
@@ -106,9 +106,15 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     expect(within(review).getByRole("textbox", { name: "Marker" })).toHaveValue("acme");
 
     expect(within(review).getByText("Which PRs")).toBeInTheDocument();
-    for (const label of ["Orgs", "Excluded repos", "My PRs", "Team PRs"]) {
+    for (const label of ["Orgs", "Excluded repos"]) {
       expect(within(review).getByText(label)).toBeInTheDocument();
     }
+    // The scopes belong to each run. The old ones became the daily run's.
+    const daily = within(review).getByRole("region", { name: "Run daily" });
+    for (const label of ["My PRs", "Team PRs"]) {
+      expect(within(daily).getByText(label)).toBeInTheDocument();
+    }
+    expect(within(daily).getByRole("textbox", { name: "Team" })).toHaveValue("acme/platform");
   });
 
   it("opens the Reviewer group when no reviewer is set up", async () => {
@@ -135,7 +141,7 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
 
   it("shows the team box with Team PRs off, for the stand-up", async () => {
     const cfg = full();
-    cfg.reviewer.team.enabled = false;
+    cfg.reviewer.runs[0].team.enabled = false;
     await renderLoaded(cfg);
     const review = openCard("Review worker");
     expect(within(review).getByRole("textbox", { name: "Team" })).toHaveValue("acme/platform");
@@ -143,10 +149,10 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
 
   it("lists a closed card's times in order, without empty ones", async () => {
     const cfg = full();
-    cfg.jobs.review = { enabled: true, times: ["14:00", "", "09:30"], days: ["mon"] };
+    cfg.jobs.standup = { enabled: true, times: ["14:00", "", "09:30"], days: ["mon"] };
     await renderLoaded(cfg);
-    const review = screen.getByRole("region", { name: "Review worker" });
-    expect(within(review).getByText(/^Mon at 09:30, 14:00 · next/)).toBeInTheDocument();
+    const standup = screen.getByRole("region", { name: "Stand-up" });
+    expect(within(standup).getByText(/^Mon at 09:30, 14:00 · next/)).toBeInTheDocument();
   });
 
   it("shows no next run while the agent is stopped", async () => {
@@ -157,11 +163,13 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     expect(within(standup).getByText(/^Mon to Fri at 07:00 · Not run yet/)).toBeInTheDocument();
   });
 
-  it("names the review worker's team on the stand-up card", async () => {
+  it("names the first PRs run's team on the stand-up card", async () => {
     await renderLoaded();
     const standup = openCard("Stand-up");
     expect(within(standup).getByText("acme/platform")).toBeInTheDocument();
-    expect(within(standup).getByText(/uses the review worker's team/)).toBeInTheDocument();
+    expect(
+      within(standup).getByText(/first PRs run that is on, now the daily run/),
+    ).toBeInTheDocument();
     expect(within(standup).getByText(/open PRs in 1 repo\./)).toBeInTheDocument();
   });
 });
@@ -185,28 +193,32 @@ describe("WorkerSettings saves", () => {
     expect(lastSaved()).toEqual(want);
   });
 
-  it("saves a switch, a number and a day at once", async () => {
+  it("saves a run's switch, number and day at once", async () => {
     await renderLoaded();
     const review = openCard("Review worker");
+    const daily = within(review).getByRole("region", { name: "Run daily" });
 
-    fireEvent.click(within(review).getByRole("button", { name: "My PRs" }));
+    fireEvent.click(within(daily).getByRole("button", { name: "My PRs" }));
     const want = full();
-    want.reviewer.mine.enabled = false;
+    want.reviewer.runs[0].mine.enabled = false;
     expect(lastSaved()).toEqual(want);
 
-    fireEvent.change(within(review).getByLabelText("Team PRs age in days"), {
+    fireEvent.change(within(daily).getByLabelText("Team PRs age in days"), {
       target: { value: "7" },
     });
-    want.reviewer.team.maxAgeDays = 7;
+    want.reviewer.runs[0].team.maxAgeDays = 7;
     expect(lastSaved()).toEqual(want);
 
-    fireEvent.click(within(review).getByRole("button", { name: "Sat" }));
-    want.jobs.review.days = ["mon", "tue", "wed", "thu", "fri", "sat"];
+    fireEvent.click(within(daily).getByRole("button", { name: "Sat" }));
+    want.reviewer.runs[0].days = ["mon", "tue", "wed", "thu", "fri", "sat"];
     expect(lastSaved()).toEqual(want);
 
-    fireEvent.click(within(review).getByRole("button", { name: "Review worker on" }));
-    want.jobs.review.enabled = true;
+    fireEvent.click(within(daily).getByRole("button", { name: "Run daily on" }));
+    want.reviewer.runs[0].enabled = true;
     expect(lastSaved()).toEqual(want);
+    // Only the new shape is saved.
+    expect(lastSaved().jobs.review).toBeUndefined();
+    expect(lastSaved().reviewer.team).toBeUndefined();
   });
 
   it("puts back the saved zone after a typo, and saves nothing", async () => {
@@ -258,7 +270,7 @@ describe("the master switch", () => {
     fireEvent.click(within(review).getByRole("button", { name: "Sat" }));
     const want = full();
     want.enabled = false;
-    want.jobs.review.days = ["mon", "tue", "wed", "thu", "fri", "sat"];
+    want.reviewer.runs[0].days = ["mon", "tue", "wed", "thu", "fri", "sat"];
     expect(lastSaved()).toEqual(want);
   });
 });

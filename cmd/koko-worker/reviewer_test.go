@@ -24,12 +24,16 @@ func TestReviewerConfig(t *testing.T) {
 	    "mine": {"enabled": false, "maxAgeDays": 0}, "team": {"enabled": true, "maxAgeDays": 3, "team": "o/t", "repos": [" o/a ", ""]}},
 	  "jobs": {"review": {"enabled": true, "times": ["11:00"]}}}`)
 	r := cfg.Reviewer
-	if r.Source != SourceManaged || r.Repo != "o/reviewer" || r.Branch != "dev" || r.AutoUpdate || r.Script != "" ||
-		r.Mine.Enabled || r.Mine.MaxAgeDays != 14 || r.Team.MaxAgeDays != 3 || strings.Join(r.Team.Repos, ",") != "o/a" {
+	if r.Source != SourceManaged || r.Repo != "o/reviewer" || r.Branch != "dev" || r.AutoUpdate || r.Script != "" {
 		t.Errorf("got %+v", r)
 	}
-	if got := strings.Join(cfg.Jobs[JobReview].Times, ","); got != "11:00" {
-		t.Errorf("review times %q", got)
+	// The old scopes and job become the one run.
+	run := r.Runs[0]
+	if run.Mine.Enabled || run.Mine.MaxAgeDays != 14 || run.Team.MaxAgeDays != 3 || strings.Join(run.Team.Repos, ",") != "o/a" {
+		t.Errorf("run %+v", run)
+	}
+	if got := strings.Join(run.Times, ","); got != "11:00" || !run.Enabled {
+		t.Errorf("review times %q, on %v", got, run.Enabled)
 	}
 }
 

@@ -56,9 +56,12 @@ func launchDomain() string { return fmt.Sprintf("gui/%d", os.Getuid()) }
 // restarts the agent and would stop that job.
 func install(paths Paths, ifIdle bool) error {
 	if ifIdle {
-		for _, job := range allJobs {
-			if !lockFree(jobLockPath(paths, job)) {
-				fmt.Printf("koko-worker: %s is running, not reinstalling now\n", job)
+		// Every lock in the folder, not only the config's jobs: an older agent
+		// may hold a lock under a job name this build no longer has.
+		locks, _ := filepath.Glob(filepath.Join(paths.Dir, "*.lock"))
+		for _, lock := range locks {
+			if !lockFree(lock) {
+				fmt.Printf("koko-worker: %s is running, not reinstalling now\n", strings.TrimSuffix(filepath.Base(lock), ".lock"))
 				return nil
 			}
 		}
@@ -135,10 +138,12 @@ func startAgent() error {
 	return fmt.Errorf("launchctl bootstrap: %s", strings.TrimSpace(string(out)))
 }
 
-// uninstall stops the agent, removes its plist and cancels any booked wake.
-// Config, state, logs and the copied binary stay.
+// uninstall stops the agent and any repos run it started in its own process,
+// removes its plist and cancels any booked wake. Config, state, logs and the
+// copied binary stay.
 func uninstall(paths Paths) error {
 	stopAgent()
+	stopDetachedRuns(paths)
 	if err := os.Remove(agentPlistPath()); err != nil && !os.IsNotExist(err) {
 		return err
 	}

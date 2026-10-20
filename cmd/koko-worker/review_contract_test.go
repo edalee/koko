@@ -99,7 +99,7 @@ func TestReviewerDefaults(t *testing.T) {
 	if r.Command != "" || r.Logs != "" || r.MarkerPrefix != "" || r.Repo != "" || r.Script != "" || r.Team.Enabled || r.Team.Team != "" {
 		t.Errorf("a new install names no reviewer and no team: %+v", r)
 	}
-	if cfg.Jobs[JobReview].Enabled {
+	if review, _ := cfg.job(reviewDaily); review.Enabled {
 		t.Error("the review job starts off")
 	}
 	if err := r.problem(); err == nil || !strings.Contains(err.Error(), "no reviewer command") {

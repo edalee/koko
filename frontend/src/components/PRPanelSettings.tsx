@@ -6,6 +6,7 @@ import { main } from "../../wailsjs/go/models";
 import { cn } from "../lib/utils";
 import RepoList from "./RepoList";
 import Toggle from "./Toggle";
+import { mergeRuns, standupRun } from "./worker/runs";
 
 interface Scope {
   enabled: boolean;
@@ -26,13 +27,22 @@ const inputClass =
   "px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40";
 
 // fromWorker is the review worker's scopes in worker.json, or null if it has
-// none. The PR panel's settings have the same shape (plan 032).
+// none. They are the scopes of the run the stand-up uses: the first PRs run
+// that is on, else the first PRs run. An older worker.json has them on the
+// reviewer, and mergeRuns reads them from there. The PR panel's settings have
+// the same shape (plan 032).
 export function fromWorker(raw: string): PRPanel | null {
-  const r = (JSON.parse(raw || "{}") as { reviewer?: Partial<PRPanel> }).reviewer;
-  if (!r?.mine && !r?.team) return null;
+  const cfg = JSON.parse(raw || "{}") as {
+    reviewer?: Parameters<typeof mergeRuns>[0];
+    jobs?: Parameters<typeof mergeRuns>[1];
+  };
+  const r = cfg.reviewer;
+  if (!r?.runs?.length && !r?.mine && !r?.team) return null;
+  const run = standupRun(mergeRuns(r, cfg.jobs));
+  if (!run) return null;
   return {
-    mine: { ...DEFAULTS.mine, ...r.mine },
-    team: { ...DEFAULTS.team, ...r.team, repos: r.team?.repos ?? [] },
+    mine: { enabled: run.mine.enabled, maxAgeDays: run.mine.maxAgeDays },
+    team: { ...run.team, repos: [...run.team.repos] },
   };
 }
 

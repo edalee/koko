@@ -11,7 +11,8 @@ import (
 	"time"
 )
 
-// Job names, used as keys in the config, the run record and the CLI.
+// Job names, used as keys in the config, the run record and the CLI. Each
+// review run is a job of its own, "review:<name>" (see reviewJob).
 const (
 	JobStandup = "standup"
 	JobFocus   = "focus"
@@ -19,9 +20,29 @@ const (
 	JobSummary = "summary"
 )
 
-var allJobs = []string{JobStandup, JobFocus, JobReview, JobSummary}
+// fixedJobs are the jobs every config has. jobNames adds the review runs.
+var fixedJobs = []string{JobStandup, JobFocus, JobSummary}
 
 var markerPrefixRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+// runNameRe is the form of a run's name, which is part of its job name and
+// its lock file's name, so it is short too.
+var runNameRe = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+// Run targets.
+const (
+	TargetPRs   = "prs"   // once per PR, as a review with comments
+	TargetRepos = "repos" // once per repo, in a clean checkout of its default branch
+)
+
+// repoTimeoutMins is the default time limit for one repo of a repos run.
+const repoTimeoutMins = 60
+
+// legacyRun is the name of the run an older worker.json becomes.
+const legacyRun = "daily"
+
+// legacyReviewTimes are a run's default times, the same as the old review job's.
+var legacyReviewTimes = []string{"09:30", "12:00", "14:00"}
 
 // Reviewer sources.
 const (
@@ -50,16 +71,66 @@ type ReviewerConfig struct {
 	// MarkerPrefix starts the reviewer's comment markers, "<!-- acme:" for
 	// "acme". A PR with a comment behind the marker counts as reviewed.
 	MarkerPrefix string `json:"markerPrefix"`
-	// Mine is your own open PRs, whoever the team is.
-	Mine ScopeConfig `json:"mine"`
-	// Team is PRs opened by Team's members: the ones that ask for your review,
-	// and every open one in Repos.
+	// Runs are the runs of the command, each a job with its own arguments
+	// and schedule. A worker.json without runs gets one, named "daily" (see
+	// fillDefaults).
+	Runs []ReviewRun `json:"runs"`
+	// Mine and Team are the scopes of the run in progress, which forRun sets.
+	// In worker.json they are the old settings. fillDefaults turns them into
+	// the "daily" run if the file has no runs.
+	Mine ScopeConfig     `json:"mine"`
 	Team TeamScopeConfig `json:"team"`
 	// Orgs and ExcludeRepos narrow Mine and Team (plan 034). Orgs is the
 	// owners whose PRs are reviewed, empty for every owner. ExcludeRepos is
 	// "owner/repo" names never reviewed, even in one of Orgs.
 	Orgs         []string `json:"orgs"`
 	ExcludeRepos []string `json:"excludeRepos"`
+}
+
+// ReviewRun is one run of the shared command, with Args added, on its own
+// schedule. A PRs run reviews each PR in its scopes once. A repos run runs
+// once per repo in Repos, for a tool that changes repos, such as one that
+// updates dependencies.
+type ReviewRun struct {
+	Name string `json:"name"` // "daily" or "weekly", for example
+	Args string `json:"args"` // words added after the shared command
+	JobConfig
+	Target string `json:"target"` // TargetPRs or TargetRepos, empty for PRs
+	// Mine is your own open PRs, whoever the team is. PRs runs only.
+	Mine ScopeConfig `json:"mine"`
+	// Team is PRs opened by Team's members: the ones that ask for your review,
+	// and every open one in Repos. PRs runs only.
+	Team TeamScopeConfig `json:"team"`
+	// Repos are the "owner/repo" names a repos run works on, one after another.
+	Repos []string `json:"repos"`
+	// TimeoutMinutes caps one PR or one repo. Zero means 45 for a PRs run and
+	// 60 for a repos run.
+	TimeoutMinutes int `json:"timeoutMinutes"`
+}
+
+// timeout is the time limit for one PR or one repo.
+func (r ReviewRun) timeout() time.Duration {
+	if r.TimeoutMinutes > 0 {
+		return time.Duration(r.TimeoutMinutes) * time.Minute
+	}
+	if r.Target == TargetRepos {
+		return repoTimeoutMins * time.Minute
+	}
+	return reviewTimeout
+}
+
+// reviewJob is the job name of the review run called name.
+func reviewJob(name string) string { return JobReview + ":" + name }
+
+// forRun is the reviewer settings for run: the shared ones, with the run's
+// arguments and scopes.
+func (r ReviewerConfig) forRun(run ReviewRun) ReviewerConfig {
+	out := r
+	if r.Command != "" && run.Args != "" {
+		out.Command = r.Command + " " + run.Args
+	}
+	out.Mine, out.Team = run.Mine, run.Team
+	return out
 }
 
 // ScopeConfig switches a set of PRs on, for those opened in the last MaxAgeDays.
@@ -162,11 +233,18 @@ func defaultConfig() Config {
 		Enabled:    false,
 		TimeZone:   localZone(),
 		CalendarID: "primary",
-		// No reviewer is set up, so the review job starts off.
+		// No reviewer is set up, so the review run starts off.
 		Reviewer: ReviewerConfig{
 			Source: SourceManaged, Branch: "main", AutoUpdate: true,
 			Mine: ScopeConfig{Enabled: true, MaxAgeDays: 14},
 			Team: TeamScopeConfig{MaxAgeDays: 4},
+			Runs: []ReviewRun{{
+				Name:      legacyRun,
+				Target:    TargetPRs,
+				JobConfig: JobConfig{Times: legacyReviewTimes},
+				Mine:      ScopeConfig{Enabled: true, MaxAgeDays: 14},
+				Team:      TeamScopeConfig{MaxAgeDays: 4},
+			}},
 		},
 		Focus: FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
 		Lunch:   LunchConfig{Enabled: true, Start: "12:00", End: "13:00"},
@@ -174,15 +252,14 @@ func defaultConfig() Config {
 		Jobs: map[string]JobConfig{
 			JobStandup: {Enabled: true, Times: []string{"07:00"}},
 			JobFocus:   {Enabled: true, Times: []string{"09:15"}},
-			JobReview:  {Enabled: false, Times: []string{"09:30", "12:00", "14:00"}},
 			// No team is set, so the summary starts off.
 			JobSummary: {Enabled: false, Times: []string{"08:30"}},
 		},
 	}
 }
 
-// Paths the worker uses. All but Cache and Reviewer sit under ~/Library/Application
-// Support/koko, next to Koko's own files.
+// Paths the worker uses. All but Cache, Reviewer and RepoRuns sit under
+// ~/Library/Application Support/koko, next to Koko's own files.
 type Paths struct {
 	Config     string // worker.json
 	Dir        string // worker/
@@ -192,6 +269,7 @@ type Paths struct {
 	ClaudeWrap string // worker/reviewer-claude.sh
 	Cache      string // ~/.cache/koko-worker/repos, cache clones of the PRs' repos
 	Reviewer   string // ~/.cache/koko-worker/reviewer, the managed reviewer clone
+	RepoRuns   string // ~/.cache/koko-worker/repos-runs, clones every repos run shares, and reviews never use
 }
 
 func workerPaths() Paths {
@@ -208,6 +286,7 @@ func workerPaths() Paths {
 		ClaudeWrap: filepath.Join(dir, "reviewer-claude.sh"),
 		Cache:      filepath.Join(home, ".cache", "koko-worker", "repos"),
 		Reviewer:   filepath.Join(home, ".cache", "koko-worker", "reviewer"),
+		RepoRuns:   filepath.Join(home, ".cache", "koko-worker", "repos-runs"),
 	}
 }
 
@@ -231,6 +310,9 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
+	// Clear the default run, so a file without runs gets one from its old
+	// review settings in fillDefaults.
+	cfg.Reviewer.Runs = nil
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("invalid %s: %w", path, err)
 	}
@@ -267,16 +349,6 @@ func (c *Config) fillDefaults() {
 	if r.Script == "" {
 		r.Script = d.Script
 	}
-	if r.Mine.MaxAgeDays <= 0 {
-		r.Mine.MaxAgeDays = d.Mine.MaxAgeDays
-	}
-	if r.Team.MaxAgeDays <= 0 {
-		r.Team.MaxAgeDays = d.Team.MaxAgeDays
-	}
-	if r.Team.Team == "" {
-		r.Team.Team = d.Team.Team
-	}
-	r.Team.Repos = trimList(r.Team.Repos)
 	r.Orgs = trimList(r.Orgs)
 	r.ExcludeRepos = trimList(r.ExcludeRepos)
 	if c.Focus.WindowStart == "" {
@@ -305,28 +377,192 @@ func (c *Config) fillDefaults() {
 			c.Jobs[name] = d
 			continue
 		}
-		var times []string
-		for _, t := range j.Times {
-			if t != "" {
-				times = append(times, t)
-			}
-		}
-		if len(times) == 0 {
-			times = d.Times
-		}
-		j.Times = times
-		for i, day := range j.Days {
-			j.Days[i] = strings.ToLower(strings.TrimSpace(day))
-		}
-		c.Jobs[name] = j
+		c.Jobs[name] = j.withDefaults(d.Times)
 	}
+	// An older worker.json has one review job, and its scopes on the
+	// reviewer. It becomes one run, so nothing changes until you add a run.
+	if len(r.Runs) == 0 {
+		old, ok := c.Jobs[JobReview]
+		if !ok {
+			old = JobConfig{Times: legacyReviewTimes}
+		}
+		r.Runs = []ReviewRun{{Name: legacyRun, JobConfig: old, Mine: r.Mine, Team: r.Team}}
+	}
+	// Runs replace the review job. An older Koko may still write it.
+	delete(c.Jobs, JobReview)
+	for i := range r.Runs {
+		run := &r.Runs[i]
+		run.Name = strings.TrimSpace(run.Name)
+		run.Args = strings.TrimSpace(run.Args)
+		run.Target = strings.TrimSpace(run.Target)
+		if run.Target == "" {
+			run.Target = TargetPRs
+		}
+		run.Repos = trimList(run.Repos)
+		run.JobConfig = run.withDefaults(legacyReviewTimes)
+		if run.Mine.MaxAgeDays <= 0 {
+			run.Mine.MaxAgeDays = d.Mine.MaxAgeDays
+		}
+		if run.Team.MaxAgeDays <= 0 {
+			run.Team.MaxAgeDays = d.Team.MaxAgeDays
+		}
+		run.Team.Team = strings.TrimSpace(run.Team.Team)
+		run.Team.Repos = trimList(run.Team.Repos)
+	}
+}
+
+// withDefaults drops empty times, puts back times if none are left, and
+// tidies the day names.
+func (j JobConfig) withDefaults(times []string) JobConfig {
+	var kept []string
+	for _, t := range j.Times {
+		if t != "" {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) == 0 {
+		kept = times
+	}
+	j.Times = kept
+	days := make([]string, len(j.Days))
+	for i, day := range j.Days {
+		days[i] = strings.ToLower(strings.TrimSpace(day))
+	}
+	j.Days = days
+	return j
+}
+
+// jobNames are the fixed jobs, then one job per run. A run with a bad name is
+// left out, because the name would make a bad lock file name. So is a run
+// named like an earlier run, which would share its job. runProblem and check
+// reviewer report both.
+func (c Config) jobNames() []string {
+	names := slices.Clone(fixedJobs)
+	seen := map[string]bool{}
+	for _, run := range c.Reviewer.Runs {
+		if runNameRe.MatchString(run.Name) && !seen[run.Name] {
+			names = append(names, reviewJob(run.Name))
+		}
+		seen[run.Name] = true
+	}
+	return names
+}
+
+// job is the switch, times and days of the job called name.
+func (c Config) job(name string) (JobConfig, bool) {
+	if run, ok := c.reviewRun(name); ok {
+		return run.JobConfig, true
+	}
+	j, ok := c.Jobs[name]
+	return j, ok
+}
+
+// reviewRun is the run behind the job name "review:<name>".
+func (c Config) reviewRun(job string) (ReviewRun, bool) {
+	name, ok := strings.CutPrefix(job, JobReview+":")
+	if !ok {
+		return ReviewRun{}, false
+	}
+	for _, run := range c.Reviewer.Runs {
+		if run.Name == name {
+			return run, true
+		}
+	}
+	return ReviewRun{}, false
+}
+
+// resolveJob turns a job name from the CLI into a job in the config. A bare
+// "review" is the first PRs run that is on, else the first PRs run, never a
+// repos run.
+func (c Config) resolveJob(job string) (string, error) {
+	if job == JobReview {
+		run, ok := c.firstPRsRun()
+		if !ok {
+			return "", fmt.Errorf("review needs a PRs run, and every run works on repos. Name one with review:<run>")
+		}
+		job = reviewJob(run.Name)
+	}
+	if slices.Contains(c.jobNames(), job) {
+		return job, nil
+	}
+	return "", fmt.Errorf("unknown job %q, want standup, focus, review or review:<run>", job)
+}
+
+// prOnlyPlaceholders name a PR, so a repos run cannot use them.
+var prOnlyPlaceholders = []string{"{pr}", "{url}", "{sha}"}
+
+// runProblem is what is wrong with run's settings, or nil. A bad name or
+// target fails only this run, not every job. A repos run needs no marker or
+// scopes, but needs repos and a command without a PR in it.
+func (c Config) runProblem(run ReviewRun) error {
+	if !runNameRe.MatchString(run.Name) {
+		return fmt.Errorf("run %q, want a name of up to 32 lowercase letters, digits and dashes", run.Name)
+	}
+	same := 0
+	for _, other := range c.Reviewer.Runs {
+		if other.Name == run.Name {
+			same++
+		}
+	}
+	if same > 1 {
+		return fmt.Errorf("two runs are called %q, want each name once", run.Name)
+	}
+	if run.Target != TargetPRs && run.Target != TargetRepos {
+		return fmt.Errorf("run %s: target %q, want %s or %s", run.Name, run.Target, TargetPRs, TargetRepos)
+	}
+	rv := c.Reviewer.forRun(run)
+	if run.Target != TargetRepos {
+		return rv.problem()
+	}
+	if err := rv.commandProblem(); err != nil {
+		return err
+	}
+	for _, p := range prOnlyPlaceholders {
+		if strings.Contains(rv.Command, p) {
+			return fmt.Errorf("the %s run works on repos, so its command cannot use %s", run.Name, p)
+		}
+	}
+	if len(run.Repos) == 0 {
+		return fmt.Errorf("the %s run works on repos, but lists none", run.Name)
+	}
+	for _, repo := range run.Repos {
+		if !ownerRepo(repo) {
+			return fmt.Errorf("the %s run's repo %q, want owner/repo", run.Name, repo)
+		}
+	}
+	return nil
+}
+
+// firstPRsRun is the first PRs run that is on, else the first PRs run. ok is
+// false if every run works on repos. It never gives a repos run.
+func (c Config) firstPRsRun() (ReviewRun, bool) {
+	for _, run := range c.Reviewer.Runs {
+		if run.Target == TargetPRs && run.Enabled {
+			return run, true
+		}
+	}
+	for _, run := range c.Reviewer.Runs {
+		if run.Target == TargetPRs {
+			return run, true
+		}
+	}
+	return ReviewRun{}, false
+}
+
+// standupRun is the run whose team, repos and age limit the stand-up uses:
+// the first PRs run that is on, else the first PRs run. With no PRs run, it
+// has no scopes, so the stand-up lists no team.
+func (c Config) standupRun() ReviewRun {
+	run, _ := c.firstPRsRun()
+	return run
 }
 
 func (c Config) validate() error {
 	if _, err := time.LoadLocation(c.TimeZone); err != nil {
 		return fmt.Errorf("unknown time zone %q", c.TimeZone)
 	}
-	for name, job := range c.Jobs {
+	for _, name := range c.jobNames() {
+		job, _ := c.job(name)
 		for _, t := range job.Times {
 			if _, _, err := parseClock(t); err != nil {
 				return fmt.Errorf("job %s: %w", name, err)
@@ -338,8 +574,8 @@ func (c Config) validate() error {
 			}
 		}
 	}
-	// The reviewer settings are checked by the review job (problem), not here:
-	// a typo in them must not stop the stand-up and focus time.
+	// The reviewer settings, run names and targets are checked per run
+	// (runProblem), not here, so a typo there stops only that run.
 	for _, t := range []string{c.Focus.WindowStart, c.Focus.WindowEnd} {
 		if _, _, err := parseClock(t); err != nil {
 			return fmt.Errorf("focus window: %w", err)
@@ -358,13 +594,10 @@ func (c Config) validate() error {
 	return nil
 }
 
-// problem is what is wrong with the reviewer settings, or nil. Only the
-// review job and `check reviewer` fail on it.
+// problem is what is wrong with the reviewer settings of a PRs run, or nil.
+// runProblem calls it, so only that run and `check reviewer` fail on it.
 func (r ReviewerConfig) problem() error {
-	if r.Command == "" {
-		return fmt.Errorf("no reviewer command is set")
-	}
-	if _, _, err := splitEnv(r.Command); err != nil {
+	if err := r.commandProblem(); err != nil {
 		return err
 	}
 	if r.MarkerPrefix == "" {
@@ -372,23 +605,6 @@ func (r ReviewerConfig) problem() error {
 	}
 	if !markerPrefixRe.MatchString(r.MarkerPrefix) {
 		return fmt.Errorf("marker prefix %q, want letters, digits and dashes", r.MarkerPrefix)
-	}
-	switch {
-	case !r.usesReviewer():
-		// The command names its own program, so the source is not used.
-	case r.Source == SourceManaged:
-		if !ownerRepo(r.Repo) {
-			return fmt.Errorf("reviewer repo %q, want owner/repo", r.Repo)
-		}
-		if r.Script == "" || strings.HasPrefix(r.Script, "/") || strings.Contains(r.Script, "..") {
-			return fmt.Errorf("reviewer script %q, want a path inside the clone", r.Script)
-		}
-	case r.Source == SourceLocal:
-		if r.Path == "" {
-			return fmt.Errorf("the reviewer source is a local path, but no path is set")
-		}
-	default:
-		return fmt.Errorf("reviewer source %q, want %s or %s", r.Source, SourceManaged, SourceLocal)
 	}
 	if org, team, ok := strings.Cut(r.Team.Team, "/"); r.Team.Enabled && (!ok || org == "" || team == "") {
 		return fmt.Errorf("review team %q, want org/team-slug", r.Team.Team)
@@ -424,6 +640,35 @@ func (s SummaryConfig) problem() error {
 		if !ownerRepo(repo) {
 			return fmt.Errorf("summary repo %q, want owner/repo", repo)
 		}
+	}
+	return nil
+}
+
+// commandProblem is what is wrong with the command and its source, or nil.
+// Every run needs these. Only PRs runs need the rest of problem.
+func (r ReviewerConfig) commandProblem() error {
+	if r.Command == "" {
+		return fmt.Errorf("no reviewer command is set")
+	}
+	if _, _, err := splitEnv(r.Command); err != nil {
+		return err
+	}
+	switch {
+	case !r.usesReviewer():
+		// The command names its own program, so the source is not used.
+	case r.Source == SourceManaged:
+		if !ownerRepo(r.Repo) {
+			return fmt.Errorf("reviewer repo %q, want owner/repo", r.Repo)
+		}
+		if r.Script == "" || strings.HasPrefix(r.Script, "/") || strings.Contains(r.Script, "..") {
+			return fmt.Errorf("reviewer script %q, want a path inside the clone", r.Script)
+		}
+	case r.Source == SourceLocal:
+		if r.Path == "" {
+			return fmt.Errorf("the reviewer source is a local path, but no path is set")
+		}
+	default:
+		return fmt.Errorf("reviewer source %q, want %s or %s", r.Source, SourceManaged, SourceLocal)
 	}
 	return nil
 }

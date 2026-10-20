@@ -4,14 +4,14 @@ import RepoList from "../RepoList";
 import Toggle from "../Toggle";
 import { formatWhen, inputClass, reviewerSetUp } from "./config";
 import JobCard, { type CardProps } from "./JobCard";
+import ReviewRuns from "./ReviewRuns";
 import { Block, Choice, Disclosure, Field } from "./ui";
 
-const days = (value: string) => Number.parseInt(value, 10) || 0;
-
-// ReviewCard is the review worker. Its Reviewer group sets how reviews run, and
-// starts closed if a reviewer is set up. Its Which PRs group sets which PRs get a review.
+// ReviewCard is the review worker. "Reviewer" is how it runs, and it starts
+// closed once a reviewer is set up. "Which PRs" limits every PRs run. "Runs"
+// holds the runs, each a job with its own schedule and Test and Run now.
 export default function ReviewCard(props: CardProps) {
-  const { cfg, loaded, status, save, setReviewer, saveReviewer } = props.api;
+  const { cfg, loaded, status, save, setReviewer, saveReviewer, refreshStatus } = props.api;
   const r = cfg.reviewer;
   const setUp = reviewerSetUp(r);
   // The Reviewer group starts open if no reviewer is set up when worker.json loads.
@@ -30,14 +30,16 @@ export default function ReviewCard(props: CardProps) {
         ? `Managed clone of ${r.repo}, branch ${r.branch || "main"}`
         : `Local CLI at ${r.path}`;
 
+  const on = r.runs.filter((run) => run.enabled).length;
+  const runsSummary = `${r.runs.length === 1 ? "1 run" : `${r.runs.length} runs`}, ${on === 0 ? "all off" : `${on} on`}`;
+
   return (
     <JobCard
       {...props}
       jobKey="review"
       name="Review worker"
-      about="Reviews each PR once and posts the review as comments on the PR, as you. One Slack line says each review is posted. Test prints the comments instead."
-      multi
-      done="Done. The reviews are on the PRs."
+      about="Runs the reviewer command on a schedule. A PRs run reviews each PR once and posts the review as comments, as you. A repos run runs a tool that changes repos."
+      summary={runsSummary}
     >
       <Block title="Settings">
         <div className="space-y-3">
@@ -66,8 +68,11 @@ export default function ReviewCard(props: CardProps) {
               help={
                 <>
                   {"{reviewer}"} is the CLI set below. {"{pr}"}, {"{repo}"}, {"{url}"} and {"{sha}"}{" "}
-                  are filled in for each PR, and {"{claude}"} is a claude that cannot post.
-                  NAME=value words at the start set environment variables.
+                  are filled in for each PR. {"{claude}"} is a claude that is denied some commands,
+                  such as posting, but that is no guard: a PRs run gets read-only gh and git as
+                  well. A repos run fills in only {"{repo}"}, and gets the real gh and git, so its
+                  tool can push and open PRs. NAME=value words at the start set environment
+                  variables. Each run adds its own arguments.
                 </>
               }
             >
@@ -202,6 +207,9 @@ export default function ReviewCard(props: CardProps) {
 
         <div className="space-y-3 pt-3 border-t border-white/[0.05]">
           <h5 className="text-xs text-white/85 font-medium">Which PRs</h5>
+          <p className="text-[10px] text-tertiary leading-relaxed">
+            These limit every PRs run. Each run sets its own My PRs and Team PRs.
+          </p>
           <Field
             label="Orgs"
             help="Only PRs in these orgs and accounts are reviewed, yours and the team's. Add your own login to keep your personal repos."
@@ -225,84 +233,19 @@ export default function ReviewCard(props: CardProps) {
               onChange={(excludeRepos) => saveReviewer({ excludeRepos })}
             />
           </Field>
-          <Field label="My PRs" htmlFor="review-mine" help="Your open PRs, outside archived repos.">
-            <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
-              <Toggle
-                id="review-mine"
-                on={r.mine.enabled}
-                onClick={() => saveReviewer({ mine: { ...r.mine, enabled: !r.mine.enabled } })}
-              />
-              {r.mine.enabled && (
-                <>
-                  <span>opened in the last</span>
-                  <input
-                    type="number"
-                    min={1}
-                    aria-label="My PRs age in days"
-                    value={r.mine.maxAgeDays}
-                    onChange={(e) =>
-                      saveReviewer({ mine: { ...r.mine, maxAgeDays: days(e.target.value) } })
-                    }
-                    className={cn(inputClass, "w-12 tabular-nums")}
-                  />
-                  <span>days</span>
-                </>
-              )}
-            </div>
-          </Field>
-          <Field
-            label="Team PRs"
-            htmlFor="review-team"
-            help="PRs that ask for your review, and every open PR in these repos. The stand-up uses this team too."
-          >
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-[10px] text-tertiary">
-                <Toggle
-                  id="review-team"
-                  on={r.team.enabled}
-                  onClick={() => saveReviewer({ team: { ...r.team, enabled: !r.team.enabled } })}
-                />
-                {r.team.enabled && (
-                  <>
-                    <span>opened in the last</span>
-                    <input
-                      type="number"
-                      min={1}
-                      aria-label="Team PRs age in days"
-                      value={r.team.maxAgeDays}
-                      onChange={(e) =>
-                        saveReviewer({ team: { ...r.team, maxAgeDays: days(e.target.value) } })
-                      }
-                      className={cn(inputClass, "w-12 tabular-nums")}
-                    />
-                    <span>days</span>
-                  </>
-                )}
-              </div>
-              {/* The team box shows with Team PRs off too, because the stand-up uses the team. */}
-              <div className="flex items-center gap-2 text-[10px] text-tertiary">
-                <span className="shrink-0">Opened by</span>
-                <input
-                  type="text"
-                  aria-label="Team"
-                  value={r.team.team}
-                  onChange={(e) => setReviewer({ team: { ...r.team, team: e.target.value } })}
-                  onBlur={() => save(cfg)}
-                  placeholder="org/team-slug"
-                  className={cn(inputClass, "flex-1 min-w-0 font-mono placeholder:text-tertiary")}
-                />
-              </div>
-              {r.team.enabled && (
-                <RepoList
-                  repos={r.team.repos}
-                  org={r.team.team.split("/")[0].trim()}
-                  empty="No repos yet. Only PRs that ask for your review are reviewed."
-                  onChange={(repos) => saveReviewer({ team: { ...r.team, repos } })}
-                />
-              )}
-            </div>
-          </Field>
         </div>
+      </Block>
+      <Block title="Runs">
+        <ReviewRuns
+          runs={r.runs}
+          command={r.command}
+          jobs={status?.jobs}
+          running={props.running}
+          setRunning={props.setRunning}
+          onRan={refreshStatus}
+          onEdit={(runs) => setReviewer({ runs })}
+          onSave={(runs) => saveReviewer({ runs })}
+        />
       </Block>
     </JobCard>
   );
