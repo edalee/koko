@@ -272,7 +272,7 @@ frontend/src/
   test/                  Vitest tests
 
 docs/
-  plans/                 Implementation plans (001-035)
+  plans/                 Implementation plans (001-036)
   architecture/          ADRs and the design system
   references/            Setup guides
 ```
