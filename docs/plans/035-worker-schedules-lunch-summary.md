@@ -44,7 +44,7 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 
 - **General:** Slack, time zone, calendar, Jira site, lunch and Connections.
 - **One card per job,** always in this order: what it does, days and times, its settings, then Test and Run now with the card's own output.
-- **Review card:** two groups. "Reviewer" is how it runs: command, source, logs, marker. "Which PRs" is My PRs and Team PRs.
+- **Review card:** two groups. "Reviewer" is how it runs: command, source, logs, marker. "Which PRs" is Orgs, Excluded repos, My PRs and Team PRs.
 - The stand-up card says its Team PRs list uses the review worker's team.
 - `WorkerSettings.tsx` splits into a shell and one component per job. Behaviour does not change.
 
