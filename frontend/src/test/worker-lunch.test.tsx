@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SaveConfig } from "../../wailsjs/go/main/WorkerService";
-import WorkerSettings, { lunchProblem } from "../components/WorkerSettings";
+import WorkerSettings from "../components/WorkerSettings";
+import { lunchProblem } from "../components/worker/config";
 
 vi.mock("../../wailsjs/go/main/WorkerService", () => ({
   Check: vi.fn().mockResolvedValue("[]"),

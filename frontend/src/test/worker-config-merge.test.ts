@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalZone, merge, toggleDay } from "../components/WorkerSettings";
+import { canonicalZone, merge, toggleDay } from "../components/worker/config";
 
 describe("merge", () => {
   it("keeps a reviewer section as it is", () => {

@@ -9,246 +9,48 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   Check as CheckConnections,
-  GetConfig,
   ReadLog,
   RunNow,
-  SaveConfig,
   SetEnabled,
-  Status,
 } from "../../wailsjs/go/main/WorkerService";
 import { cn } from "../lib/utils";
 import RepoList from "./RepoList";
 import Toggle from "./Toggle";
-
-// Mirrors cmd/koko-worker/config.go. The worker fills in defaults for missing
-// or empty values, so an empty text box keeps the default.
-interface JobConfig {
-  enabled: boolean;
-  times: string[];
-  days: string[];
-}
-
-interface ScopeConfig {
-  enabled: boolean;
-  maxAgeDays: number;
-}
-
-interface ReviewerConfig {
-  source: "managed" | "local";
-  repo: string;
-  branch: string;
-  autoUpdate: boolean;
-  script: string;
-  path: string;
-  command: string;
-  logs: string;
-  markerPrefix: string;
-  mine: ScopeConfig;
-  team: ScopeConfig & { team: string; repos: string[] };
-  orgs: string[];
-  excludeRepos: string[];
-}
-
-interface WorkerConfig {
-  enabled: boolean;
-  timeZone: string;
-  calendarId: string;
-  jiraSite: string;
-  reviewer: ReviewerConfig;
-  slack: { botToken: string; userId: string };
-  focus: { windowStart: string; windowEnd: string; minMinutes: number };
-  lunch: { enabled: boolean; start: string; end: string };
-  jobs: Record<string, JobConfig>;
-}
-
-interface RunRecord {
-  status: "ok" | "failed" | "retry" | "offline";
-  at: string;
-  message?: string;
-}
-
-interface WorkerStatus {
-  enabled: boolean;
-  agentLoaded: boolean;
-  nextRun?: string;
-  wakeBooked?: string;
-  configError?: string;
-  version?: string;
-  reviewer?: {
-    source: string;
-    cli: string;
-    repo?: string;
-    branch?: string;
-    commit?: string;
-    commitBranch?: string;
-    updated?: string;
-  };
-  jobs: Record<string, { lastRun?: RunRecord }>;
-}
-
-interface CheckResult {
-  name: string;
-  ok: boolean;
-  detail: string;
-  fix?: string;
-}
-
-const DEFAULTS: WorkerConfig = {
-  enabled: false,
-  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-  calendarId: "primary",
-  jiraSite: "",
-  // No reviewer is set up, so the review job starts off.
-  reviewer: {
-    source: "managed",
-    repo: "",
-    branch: "main",
-    autoUpdate: true,
-    script: "",
-    path: "",
-    command: "",
-    logs: "",
-    markerPrefix: "",
-    mine: { enabled: true, maxAgeDays: 14 },
-    team: { enabled: false, maxAgeDays: 4, team: "", repos: [] },
-    orgs: [],
-    excludeRepos: [],
-  },
-  slack: { botToken: "", userId: "" },
-  focus: { windowStart: "09:00", windowEnd: "17:00", minMinutes: 30 },
-  lunch: { enabled: true, start: "12:00", end: "13:00" },
-  jobs: {
-    standup: { enabled: true, times: ["07:00"], days: ["mon", "tue", "wed", "thu", "fri"] },
-    focus: { enabled: true, times: ["09:15"], days: ["mon", "tue", "wed", "thu", "fri"] },
-    review: {
-      enabled: false,
-      times: ["09:30", "12:00", "14:00"],
-      days: ["mon", "tue", "wed", "thu", "fri"],
-    },
-  },
-};
-
-// DAYS are the names a job's days use, in week order.
-const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-
-const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
-  {
-    key: "standup",
-    name: "Stand-up",
-    about:
-      "Today's meetings, approved PRs ready to merge, your team's PRs waiting for your review, and team PRs.",
-    multi: false,
-  },
-  {
-    key: "focus",
-    name: "Focus time",
-    about: "Books focus blocks in free gaps of 30 minutes or more, around lunch.",
-    multi: false,
-  },
-  {
-    key: "review",
-    name: "Review worker",
-    about:
-      "Reviews each PR once and posts the review as comments on the PR, as you. If there is nothing to report, it posts LGTM 😃⭐😸. One Slack line says each review is posted. Test prints the comments instead.",
-    multi: true,
-  },
-];
-
-const STATUS_LABELS: Record<string, string> = {
-  ok: "ok",
-  failed: "failed",
-  retry: "failed, trying again",
-  offline: "waiting for internet",
-};
-
-const CONNECTION_NAMES: Record<string, string> = {
-  slack: "Slack",
-  github: "GitHub",
-  claude: "Claude Code",
-  jira: "Jira",
-  calendar: "Google Calendar",
-  reviewer: "Reviewer",
-  wake: "Mac wake",
-};
-
-// canonicalZone is the IANA name for zone, in its usual case, or null if
-// there is no such zone. "Local" is not a zone.
-export function canonicalZone(zone: string): string | null {
-  try {
-    return new Intl.DateTimeFormat("en", { timeZone: zone.trim() }).resolvedOptions().timeZone;
-  } catch {
-    return null;
-  }
-}
-
-export function merge(raw: string): WorkerConfig {
-  const parsed = JSON.parse(raw || "{}") as Partial<WorkerConfig>;
-  const reviewer: Partial<ReviewerConfig> = parsed.reviewer ?? {};
-  return {
-    ...DEFAULTS,
-    ...parsed,
-    reviewer: {
-      ...DEFAULTS.reviewer,
-      ...reviewer,
-      mine: { ...DEFAULTS.reviewer.mine, ...reviewer.mine },
-      team: { ...DEFAULTS.reviewer.team, ...reviewer.team, repos: reviewer.team?.repos ?? [] },
-      // Go writes an empty list as null.
-      orgs: reviewer.orgs ?? [],
-      excludeRepos: reviewer.excludeRepos ?? [],
-    },
-    slack: { ...DEFAULTS.slack, ...parsed.slack },
-    focus: { ...DEFAULTS.focus, ...parsed.focus },
-    lunch: { ...DEFAULTS.lunch, ...parsed.lunch },
-    jobs: Object.fromEntries(
-      Object.entries({ ...DEFAULTS.jobs, ...parsed.jobs }).map(([key, job]) => [
-        key,
-        // A job without days runs Monday to Friday, as in the worker.
-        { ...job, days: job.days?.length ? job.days : DEFAULTS.jobs.standup.days },
-      ]),
-    ),
-  };
-}
-
-// toggleDay switches day on or off and keeps the list in week order.
-// It never turns off the only day left, because an empty list means Monday to Friday.
-export function toggleDay(days: string[], day: string): string[] {
-  if (!days.includes(day)) return DAYS.filter((d) => d === day || days.includes(d));
-  return days.length > 1 ? days.filter((d) => d !== day) : days;
-}
-
-// minutes turns "HH:MM" into minutes after midnight.
-function minutes(clock: string): number {
-  const [h, m] = clock.split(":").map(Number);
-  return h * 60 + m;
-}
-
-// lunchProblem is what is wrong with a lunch from start to end, or null.
-export function lunchProblem(start: string, end: string): string | null {
-  if (!start || !end) return "Set a start and an end for lunch.";
-  if (minutes(end) <= minutes(start)) return "Lunch must end after it starts.";
-  return null;
-}
-
-function formatWhen(iso?: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-const inputClass =
-  "px-2 py-1 text-xs bg-white/[0.04] border border-white/[0.06] rounded-md text-white outline-none focus:border-accent/40";
+import {
+  type CheckResult,
+  CONNECTION_NAMES,
+  DAYS,
+  DEFAULTS,
+  formatWhen,
+  inputClass,
+  JOBS,
+  type JobConfig,
+  STATUS_LABELS,
+  toggleDay,
+} from "./worker/config";
+import { useWorkerConfig } from "./worker/useWorkerConfig";
 
 export default function WorkerSettings() {
-  const [cfg, setCfg] = useState<WorkerConfig>(DEFAULTS);
-  const [status, setStatus] = useState<WorkerStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    cfg,
+    setCfg,
+    status,
+    refreshStatus,
+    error,
+    setError,
+    save,
+    saveField,
+    lunchDraft,
+    setLunchDraft,
+    lunchError,
+    saveLunchTimes,
+    toggleLunch,
+    setReviewer,
+    saveReviewer,
+  } = useWorkerConfig();
   const [switching, setSwitching] = useState(false);
   const [showToken, setShowToken] = useState(false);
   const [checks, setChecks] = useState<CheckResult[] | null>(null);
@@ -256,93 +58,9 @@ export default function WorkerSettings() {
   const [running, setRunning] = useState<string | null>(null);
   const [output, setOutput] = useState<{ job: string; text: string } | null>(null);
   const [log, setLog] = useState<string | null>(null);
-  // lunchDraft is the lunch times as typed. cfg.lunch keeps the last valid
-  // times, so another save never writes a lunch the worker would reject.
-  const [lunchDraft, setLunchDraft] = useState({
-    start: DEFAULTS.lunch.start,
-    end: DEFAULTS.lunch.end,
-  });
-  const [lunchError, setLunchError] = useState<string | null>(null);
-  // savedZone is the time zone last read or saved, for a typo to fall back to.
-  const savedZone = useRef(DEFAULTS.timeZone);
-
-  const refreshStatus = useCallback(() => {
-    Status()
-      .then((s) => setStatus(JSON.parse(s)))
-      .catch(() => setStatus(null));
-  }, []);
-
-  useEffect(() => {
-    GetConfig()
-      .then((raw) => {
-        const loaded = merge(raw);
-        savedZone.current = loaded.timeZone;
-        setCfg(loaded);
-      })
-      .catch((e) => setError(String(e)));
-    refreshStatus();
-    const timer = setInterval(refreshStatus, 30_000);
-    return () => clearInterval(timer);
-  }, [refreshStatus]);
-
-  useEffect(() => {
-    setLunchDraft({ start: cfg.lunch.start, end: cfg.lunch.end });
-  }, [cfg.lunch.start, cfg.lunch.end]);
-
-  const save = useCallback(async (next: WorkerConfig) => {
-    setCfg(next);
-    setError(null);
-    savedZone.current = next.timeZone;
-    try {
-      await SaveConfig(JSON.stringify(next));
-    } catch (e) {
-      setError(String(e));
-    }
-  }, []);
-
-  // saveField saves one field of the Calendar and Jira section. An empty time
-  // zone becomes the Mac's zone. A name that is not a real zone goes back to
-  // the saved zone, because the worker would stop every job on it, and any
-  // later save would write it.
-  const saveField = (key: "timeZone" | "calendarId" | "jiraSite") => {
-    if (key !== "timeZone") return save(cfg);
-    const zone = canonicalZone(cfg.timeZone.trim() || DEFAULTS.timeZone);
-    if (!zone) {
-      setCfg({ ...cfg, timeZone: savedZone.current });
-      setError(`"${cfg.timeZone}" is not a time zone. Use a name such as Europe/London.`);
-      return;
-    }
-    return save({ ...cfg, timeZone: zone });
-  };
 
   const setJob = (key: string, job: JobConfig) =>
     save({ ...cfg, jobs: { ...cfg.jobs, [key]: job } });
-
-  // saveLunchTimes saves the typed lunch once focus leaves both time boxes,
-  // and only if lunch ends after it starts. The worker stops every job on a
-  // config error.
-  const saveLunchTimes = () => {
-    const problem = lunchProblem(lunchDraft.start, lunchDraft.end);
-    setLunchError(problem);
-    if (problem || (lunchDraft.start === cfg.lunch.start && lunchDraft.end === cfg.lunch.end)) {
-      return;
-    }
-    return save({ ...cfg, lunch: { ...cfg.lunch, ...lunchDraft } });
-  };
-
-  // toggleLunch switches lunch on or off, and drops times not yet saved.
-  const toggleLunch = () => {
-    setLunchDraft({ start: cfg.lunch.start, end: cfg.lunch.end });
-    setLunchError(null);
-    return save({ ...cfg, lunch: { ...cfg.lunch, enabled: !cfg.lunch.enabled } });
-  };
-
-  // setReviewer changes a text box as you type, and onBlur saves it.
-  // saveReviewer saves at once, for switches and numbers.
-  const setReviewer = (patch: Partial<ReviewerConfig>) =>
-    setCfg({ ...cfg, reviewer: { ...cfg.reviewer, ...patch } });
-  const saveReviewer = (patch: Partial<ReviewerConfig>) =>
-    save({ ...cfg, reviewer: { ...cfg.reviewer, ...patch } });
 
   const handleSwitch = async () => {
     const next = !cfg.enabled;
