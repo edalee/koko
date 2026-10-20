@@ -428,7 +428,7 @@
   - 2026-10-20 (plan 035, part 3): the reviewer command has several runs, each the job `review:<name>`. Each run has its own time limit, by default 45 minutes for a PR and 60 for a repo.
     - The read-only guards above apply to PRs runs only. A PRs run still reviews and never posts.
     - A repos run runs the command once per repo, for a tool that changes repos, such as one that updates dependencies. It gets the real gh and git, because its tool pushes and opens PRs on purpose. `{claude}` is still the wrapper, which denies some commands but is no guard.
-    - A repos run works in its own clones under `~/.cache/koko-worker/repos-runs`, never in the review cache, and the worker removes their hooks before each run. So nothing a tool leaves behind runs during a review.
+    - Repos runs work in clones under `~/.cache/koko-worker/repos-runs`, which every repos run shares and reviews never use, and the worker removes their hooks before each run. So nothing a tool leaves behind runs during a review.
 - **Files:** `cmd/koko-worker/jobs.go`, `cmd/koko-worker/reviewer.go`, `cmd/koko-worker/repos_run.go`
 - **Plan:** `docs/plans/029-koko-worker.md`
 

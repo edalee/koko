@@ -69,25 +69,28 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 - An older `worker.json` becomes one PRs run named "daily", with the old `jobs.review` times, days and switch, and the old scopes. Nothing changes until you add a run. The worker then ignores `jobs.review`, and the UI writes only `reviewer.runs`.
 - The stand-up uses the team, repos and age limit of the first PRs run that is on, else the first PRs run. It never uses a repos run. With no PRs run, it lists no team.
 
-**Decisions** (from the review of this part):
+**Decisions** (from the reviews of this part):
 
-1. **Own clones for repos runs.** A repos run works in its own clones under `~/.cache/koko-worker/repos-runs`, with their own locks. PR reviews never use them. Before each repo, the worker unsets `core.hooksPath` and deletes the clone's hooks, all but git's samples, so no hook a tool left runs on the next checkout.
-2. **No repo runs twice in a slot.** Each repo's outcome is saved for the slot as it ends. A retry, after a failed DM or a stop, takes the saved outcomes and runs only the repos not yet started. A repo the run was stopped in counts as failed and does not run again, because the tool may have pushed part of its work. The DM goes out once per slot. A Run now always runs every repo and sends its own DM, and saves its outcomes for the slot too.
-3. **`{claude}` in a repos run** is the review wrapper. It denies some commands, such as `git push`, but it is no guard. A repos run gets the real gh and git on purpose, because its tool opens PRs. ADR-034 says so.
-4. **A bare `run review`** starts only a PRs run, as above.
-5. **Long repos runs.** The scheduler starts a due repos run in its own process (`koko-worker run review:<name> --scheduled`), so the stand-up and focus time run on time. It still takes the run's lock. In a tick, the other due jobs run first. A PRs run that comes due while a run holds the shared lock waits for a later tick.
-6. **Run now on a held lock** fails at once with "another run is working, try again when it ends". Scheduled runs wait.
-7. **A bad or repeated run name, or a bad target,** fails only that run and `check reviewer`, as plan 030 says for bad reviewer values. A run with a bad name, or the second of two with one name, gets no job at all, because its name would make a bad lock file name. The UI does not save either.
+1. **Clones for repos runs.** Repos runs work in clones under `~/.cache/koko-worker/repos-runs`, one per repo, which every repos run shares, each with its own lock. PR reviews never use them. Before each repo, the worker unsets `core.hooksPath` and deletes the clone's hooks, all but git's samples, so no hook a tool left runs on the next checkout. If any git step of the checkout fails, the worker deletes that clone, so the next run clones it fresh.
+2. **No repo runs twice in a slot.** A scheduled run saves each repo once its tool starts, and saves how it ended. A retry of the slot runs only the repos whose tool never started. A repo the run was stopped in counts as failed and does not run again, because the tool may have pushed part of its work.
+3. **A failed clone or fetch is retried.** If the worker cannot get a repo, for example with the network down, it saves nothing for that repo, runs the others, and returns an error the slot retries. The retry runs that repo. The DM waits until every repo has run. Only a repo whose tool started can be final.
+4. **A failed DM is retried.** A DM that fails, online or not, makes the slot retry. The retry finds every repo saved, so it only sends the DM. The DM goes out once per slot.
+5. **Run now** never reads or writes the slot's repo records, and never marks the DM sent. It runs every repo and sends its own DM. A Run now on a held lock fails at once with "another run is working, try again when it ends". Scheduled runs wait. Its time limit in the app is the run's repos times its limit per repo, plus 10 minutes, and never less than 4 hours. On that limit, koko-worker gets SIGTERM and stops the tool's process group too.
+6. **`{claude}` in a repos run** is the review wrapper. It denies some commands, such as `git push`, but it is no guard. A repos run gets the real gh and git on purpose, because its tool opens PRs. ADR-034 says so.
+7. **A bare `run review`** starts only a PRs run, as above.
+8. **Long repos runs.** The scheduler starts a due repos run in its own process (`koko-worker run review:<name> --scheduled`), so the stand-up and focus time run on time. It still takes the run's lock. In a tick, the other due jobs run first. A PRs run that comes due while a run holds the shared lock waits for a later tick.
+9. **Stopping a repos run.** Before each repo, a scheduled run reads `worker.json` again. It stops if you switched the worker off, switched the run off or removed the run, sends a DM with the repos done so far, and the slot ends there. `koko-worker uninstall`, which switching the worker off in Koko calls, also stops the run's process. The run writes its pid and start time to a file next to its job lock, and uninstall sends SIGTERM to that process group. A restart of the agent lets the run go on.
+10. **A bad or repeated run name, or a bad target,** fails only that run and `check reviewer`, as plan 030 says for bad reviewer values. A run with a bad name gets no job at all, because the name would make a bad lock file name. A run named like an earlier one gets no job either, because it would share that job. The UI does not save either.
 
 **PRs runs** work as the single review job did: once per PR, with the shared marker, the record of reviewed PRs and the comments. Runs share that record, so a PR is reviewed once, whichever run reaches it first.
 
 **Repos runs** are for a tool that changes repos, such as one that updates dependencies:
 
-- The command runs once per repo, one after another. Its working folder is the run's own clone of the repo, reset to the newest commit of the default branch, with no stray files and no hooks.
+- The command runs once per repo, one after another. Its working folder is the repos runs' clone of the repo, reset to the newest commit of the default branch, with no stray files and no hooks.
 - `{reviewer}`, `{claude}` and `{repo}` are filled in. `{pr}`, `{url}` and `{sha}` name a PR, so the worker refuses a repos run whose command uses them.
 - The environment carries `REVIEW_REPO` and `RUN_KIND=repos`. gh and git are not read-only, so the tool can push and open PRs.
-- Exit 0 means done, 2 means nothing to do, anything else failed. The output goes to a log per repo as it comes. The worker keeps only its last 20 lines in memory.
-- After the run, one Slack DM lists each repo as done, nothing to do or failed, with any link in its output, and the log of a failure.
+- Exit 0 means done, 2 means nothing to do, anything else failed. The output goes to a log per repo as it comes. The worker keeps only its last line in memory, for the DM.
+- After the run, one Slack DM lists each repo as done, nothing to do or failed, with up to 5 links from its output, the last ones, and the log of a failure.
 - No markers, review records or comments.
 - A test run prints the command for each repo and runs nothing.
 
