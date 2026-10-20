@@ -109,29 +109,6 @@ export const DEFAULTS: WorkerConfig = {
 // DAYS are the names a job's days use, in week order.
 export const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
-export const JOBS: { key: string; name: string; about: string; multi: boolean }[] = [
-  {
-    key: "standup",
-    name: "Stand-up",
-    about:
-      "Today's meetings, approved PRs ready to merge, your team's PRs waiting for your review, and team PRs.",
-    multi: false,
-  },
-  {
-    key: "focus",
-    name: "Focus time",
-    about: "Books focus blocks in free gaps of 30 minutes or more, around lunch.",
-    multi: false,
-  },
-  {
-    key: "review",
-    name: "Review worker",
-    about:
-      "Reviews each PR once and posts the review as comments on the PR, as you. If there is nothing to report, it posts LGTM 😃⭐😸. One Slack line says each review is posted. Test prints the comments instead.",
-    multi: true,
-  },
-];
-
 export const STATUS_LABELS: Record<string, string> = {
   ok: "ok",
   failed: "failed",
@@ -204,6 +181,51 @@ export function minutes(clock: string): number {
 export function lunchProblem(start: string, end: string): string | null {
   if (!start || !end) return "Set a start and an end for lunch.";
   if (minutes(end) <= minutes(start)) return "Lunch must end after it starts.";
+  return null;
+}
+
+const dayName = (day: string) => day[0].toUpperCase() + day.slice(1);
+
+// daysLabel names a job's days in a few words, such as "Mon to Fri".
+export function daysLabel(days: string[]): string {
+  const set = DAYS.filter((d) => days.includes(d));
+  if (set.length === 7) return "Every day";
+  if (set.join() === "mon,tue,wed,thu,fri") return "Mon to Fri";
+  if (set.join() === "sat,sun") return "Sat and Sun";
+  return set.map(dayName).join(", ");
+}
+
+// nextSlot is a job's next run as a wall clock time in zone, such as
+// "tomorrow 07:00", or null if the job is off. The worker runs jobs in its
+// own time zone, so this reads now there too.
+export function nextSlot(job: JobConfig, zone: string, now = new Date()): string | null {
+  const times = job.times.filter(Boolean).sort();
+  if (!job.enabled || times.length === 0) return null;
+  let parts: Record<string, string>;
+  try {
+    parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: canonicalZone(zone) ?? undefined,
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(now)
+        .map((p) => [p.type, p.value]),
+    );
+  } catch {
+    return null;
+  }
+  const today = DAYS.indexOf(parts.weekday.toLowerCase());
+  const nowMinutes = Number(parts.hour) * 60 + Number(parts.minute);
+  for (let i = 0; i <= 7; i++) {
+    const day = DAYS[(today + i) % 7];
+    if (!job.days.includes(day)) continue;
+    const time = times.find((t) => i > 0 || minutes(t) > nowMinutes);
+    if (!time) continue;
+    return `${i === 0 ? "today" : i === 1 ? "tomorrow" : dayName(day)} ${time}`;
+  }
   return null;
 }
 
