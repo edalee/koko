@@ -62,7 +62,8 @@ Go fetches the PR lists with `gh`, so the links are exact. Claude only does the 
 
 ### Focus
 
-- Weekdays only. Gaps of 30 minutes or more, from 09:15 to 17:00.
+- On the focus job's days only, Monday to Friday by default (plan 035). Gaps of 30 minutes or more, from 09:15 to 17:00.
+- Lunch, 12:00 to 13:00 by default, blocks like a meeting. It is not written to the calendar (plan 035).
 - Declined events and events marked "free" do not block. Tentative and unanswered invites block.
 - An all-day event marked busy, or titled like time off (OOO, holiday, leave, sick, VAB), blocks the day.
 - A late run fills from now onwards, starting on the next 5 minutes.
