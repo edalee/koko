@@ -1,0 +1,18 @@
+{"type":"queue-operation","operation":"enqueue","sessionId":"mixed","timestamp":"2026-10-01T09:59:59.000Z"}
+{"type":"user","isMeta":true,"origin":{"kind":"human"},"message":{"role":"user","content":"Injected context that is not a prompt"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T09:59:59.500Z"}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"Add a retry to the upload client"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:00:00.000Z"}
+{"type":"ai-title","aiTitle":"Upload client retry","sessionId":"mixed"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I will add a retry."}]},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:00:10.000Z"}
+{"type":"user","origin":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:00:20.000Z"}
+{"type":"user","message":{"role":"user","content":"<bash-input>git status</bash-input>"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:01:00.000Z"}
+{"type":"user","message":{"role":"user","content":"<local-command-stdout>On branch main</local-command-stdout>"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:01:01.000Z"}
+{"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:02:00.000Z"}
+{"type":"user","origin":null,"message":{"role":"user","content":"Another Claude session sent a message: please rebase"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:03:00.000Z"}
+{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>The build finished</task-notification>"},"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:04:00.000Z"}
+{"type":"system","subtype":"away_summary","content":"Started on a retry for the upload client.","isMeta":false,"entrypoint":"cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T10:04:30.000Z"}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":[{"type":"text","text":"Now make the retry back off\nexponentially"}]},"entrypoint":"cli","cwd":"/work/app","gitBranch":"feat/retry-uploads","timestamp":"2026-10-01T10:05:00.000Z"}
+{"type":"ai-title","aiTitle":"Retry uploads with back-off","sessionId":"mixed"}
+{"type":"pr-link","prNumber":42,"prRepository":"acme/app","prUrl":"https://github.com/acme/app/pull/42","sessionId":"mixed","timestamp":"2026-10-01T10:06:00.000Z"}
+{"type":"system","subtype":"away_summary","content":"Added retries with back-off to the upload client and opened a PR.","isMeta":false,"entrypoint":"cli","cwd":"/work/app","gitBranch":"feat/retry-uploads","timestamp":"2026-10-01T10:07:00.000Z"}
+{"type":"last-prompt","lastPrompt":"Now make the retry back off exponentially","sessionId":"mixed"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done, the PR is open."}]},"entrypoint":"cli","cwd":"/work/app","gitBranch":"feat/retry-uploads","timestamp":"2026-10-01T10:07:30.000Z"}

@@ -17,8 +17,11 @@ import (
 	"time"
 )
 
-// ClaudeService provides session context data (MCP servers, agents, commands).
-type ClaudeService struct{}
+// ClaudeService provides session context data (MCP servers, agents, commands),
+// and reads the conversations Claude Code stores.
+type ClaudeService struct {
+	summaries summaryCache
+}
 
 // NewClaudeService creates a ClaudeService.
 func NewClaudeService() *ClaudeService {
@@ -231,37 +234,15 @@ func parseAgentsList(output string) []AgentInfo {
 	return agents
 }
 
-// GetLastMessage returns the last assistant text from the most recent Claude session for a directory.
-func (cs *ClaudeService) GetLastMessage(dir string) (string, error) {
-	// Claude stores sessions at ~/.claude/projects/-<path-with-dashes>/
-	sessionDir := claudeProjectDir(dir)
-
-	entries, err := os.ReadDir(sessionDir)
-	if err != nil {
-		return "", nil // no sessions for this dir
-	}
-
-	// Find most recent .jsonl by mod time
-	var newest string
-	var newestTime int64
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().UnixMilli() > newestTime {
-			newestTime = info.ModTime().UnixMilli()
-			newest = filepath.Join(sessionDir, e.Name())
-		}
-	}
-	if newest == "" {
+// GetLastMessage returns the last assistant text in one conversation, the
+// tab's own, named by its UUID. With no UUID it returns "". It stays for older
+// callers: the session list uses GetSessionSummary.
+func (cs *ClaudeService) GetLastMessage(dir, uuid string) (string, error) {
+	path := sessionFilePath(dir, uuid)
+	if path == "" {
 		return "", nil
 	}
-
-	return lastAssistantText(newest), nil
+	return lastAssistantText(path), nil
 }
 
 // maxConversations caps how many sessions the picker offers. A single
@@ -285,6 +266,10 @@ const headLineCap = 256 * 1024
 // cwdField finds a cwd key in raw JSON. Used only on records too long to parse.
 var cwdField = regexp.MustCompile(`"cwd":"((?:[^"\\]|\\.)*)"`)
 
+// entrypointField finds an entrypoint key in raw JSON, as cwdField does. Inside
+// a string value the quotes are escaped, so only a real key matches.
+var entrypointField = regexp.MustCompile(`"entrypoint":"([^"\\]*)"`)
+
 // tailChunk is how much is read from the end of a session file at a time.
 const tailChunk = 64 * 1024
 
@@ -301,7 +286,8 @@ const tailBudget = 2 * 1024 * 1024
 // separates them.
 //
 // Conversations Koko did not start are included on purpose. A plain `claude`
-// run in the directory is exactly the history a user wants back.
+// run in the directory is exactly the history a user wants back. Headless
+// `claude -p` runs, such as koko-worker's, are not: nobody resumes those.
 func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 	sessionDir := claudeProjectDir(dir)
 	if sessionDir == "" {
@@ -351,10 +337,14 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 		if !head.belongsTo(dir) {
 			continue // another directory sharing this project folder
 		}
+		if head.entrypoint == headlessEntrypoint {
+			continue
+		}
+		summary := cs.summaryOf(c.path, &head)
 		out = append(out, Conversation{
 			UUID:       c.uuid,
-			Title:      head.title,
-			Preview:    lastAssistantText(c.path),
+			Title:      summary.Title,
+			Recap:      summary.Recap,
 			ModifiedAt: c.modified.UnixMilli(),
 			SizeBytes:  c.size,
 		})
@@ -364,8 +354,9 @@ func (cs *ClaudeService) ListConversations(dir string) ([]Conversation, error) {
 
 // conversationHead is what a head read of a session file yields.
 type conversationHead struct {
-	title string
-	cwd   string
+	title      string
+	cwd        string
+	entrypoint string // "sdk-cli" for a headless run, "" in older files
 }
 
 // belongsTo reports whether the session file belongs to dir. A file with no
@@ -380,8 +371,14 @@ func (h conversationHead) belongsTo(dir string) bool {
 // readConversationHead reads the start of a session file for its title and
 // working directory.
 //
-// Claude writes its own "ai-title" record near the top. Files from older
-// versions may not have one, so the first real user prompt is the fallback.
+// Claude writes its own "ai-title" record near the top, and rewrites it later.
+// The listing takes the latest from the tail, so this first one is only a
+// fallback. Files from older versions may not have one, so the first real user
+// prompt is the fallback after that.
+//
+// The entrypoint comes from the first record that has one, which is also the
+// first with a cwd. It is not part of the stop rule, because older files have
+// none.
 // Meta and sidechain records are skipped: they are injected context and
 // subagent turns, not what the user typed.
 func readConversationHead(path string) conversationHead {
@@ -406,14 +403,21 @@ func readConversationHead(path string) conversationHead {
 			// ai-title written after it. Take the last cwd match, because in
 			// a user record cwd follows the message body.
 			salvaged := lastCWD(line)
+			entrypoint := firstEntrypoint(line)
 			for isPrefix && err == nil {
 				line, isPrefix, err = r.ReadLine()
 				if m := lastCWD(line); m != "" {
 					salvaged = m
 				}
+				if entrypoint == "" {
+					entrypoint = firstEntrypoint(line)
+				}
 			}
 			if head.cwd == "" {
 				head.cwd = salvaged
+			}
+			if head.entrypoint == "" {
+				head.entrypoint = entrypoint
 			}
 			if err != nil {
 				break
@@ -425,6 +429,7 @@ func readConversationHead(path string) conversationHead {
 			Type        string `json:"type"`
 			AiTitle     string `json:"aiTitle"`
 			CWD         string `json:"cwd"`
+			Entrypoint  string `json:"entrypoint"`
 			IsMeta      bool   `json:"isMeta"`
 			IsSidechain bool   `json:"isSidechain"`
 			Message     struct {
@@ -436,6 +441,9 @@ func readConversationHead(path string) conversationHead {
 		}
 		if head.cwd == "" && entry.CWD != "" {
 			head.cwd = entry.CWD
+		}
+		if head.entrypoint == "" {
+			head.entrypoint = entry.Entrypoint
 		}
 		if head.title == "" && entry.Type == "ai-title" && entry.AiTitle != "" {
 			head.title = shorten(entry.AiTitle, 120)
@@ -465,6 +473,15 @@ func lastCWD(fragment []byte) string {
 		return ""
 	}
 	return cwd
+}
+
+// firstEntrypoint returns the first entrypoint value in a fragment of raw
+// JSON, or "".
+func firstEntrypoint(fragment []byte) string {
+	if m := entrypointField.FindSubmatch(fragment); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 // userContentText pulls plain text out of a user message. The content is

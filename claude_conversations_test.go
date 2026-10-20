@@ -35,6 +35,10 @@ func assistantLine(text string) string {
 	return fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":%q}]}}`, text)
 }
 
+func recapLine(text string) string {
+	return fmt.Sprintf(`{"type":"system","subtype":"away_summary","content":%q}`, text)
+}
+
 func TestReadConversationHead_PrefersClaudesOwnTitle(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConv(t, dir, "a", time.Now(),
@@ -183,6 +187,7 @@ func TestListConversations_NewestFirstAndCapped(t *testing.T) {
 			titleLine(fmt.Sprintf("title %02d", i)),
 			userLine(workDir, "prompt"),
 			assistantLine("reply"),
+			recapLine("recap"),
 		)
 	}
 	// Not a session file, so it must be ignored.
@@ -205,7 +210,7 @@ func TestListConversations_NewestFirstAndCapped(t *testing.T) {
 			t.Fatalf("not sorted newest first at %d", i)
 		}
 	}
-	if got[0].Title != "title 00" || got[0].Preview != "reply" || got[0].SizeBytes == 0 {
+	if got[0].Title != "title 00" || got[0].Recap != "recap" || got[0].SizeBytes == 0 {
 		t.Errorf("unexpected fields: %+v", got[0])
 	}
 }

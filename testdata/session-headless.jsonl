@@ -1,0 +1,5 @@
+{"type":"queue-operation","operation":"enqueue","sessionId":"headless","timestamp":"2026-10-01T08:00:00.000Z"}
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"Write the morning stand-up"},"entrypoint":"sdk-cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T08:00:01.000Z"}
+{"type":"ai-title","aiTitle":"Morning stand-up","sessionId":"headless"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Here is the stand-up."}]},"entrypoint":"sdk-cli","cwd":"/work/app","gitBranch":"main","timestamp":"2026-10-01T08:00:30.000Z"}
+{"type":"last-prompt","lastPrompt":"Write the morning stand-up","sessionId":"headless"}
