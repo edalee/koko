@@ -11,7 +11,8 @@ import (
 )
 
 // The team summary: what each member of a team did on the previous working
-// day. GitHub gives the facts, Jira adds the tickets they moved, and Claude
+// day. GitHub gives the facts, Jira adds the status of the tickets their PRs
+// name and whether each one moved (changed status) in the period, and Claude
 // may turn the facts into a paragraph per person. Go builds every link.
 
 // summaryGH runs gh for the summary. Tests replace it.
@@ -32,12 +33,21 @@ const toolSearchJira = "mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql"
 
 var loginRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 
-// summaryPeriod is the time the summary on now's day covers: from the start
-// of the job's previous run day to the start of today, in loc. After days
-// off, such as a weekend, it covers every day since the last run day.
-func summaryPeriod(job JobConfig, now time.Time, loc *time.Location) (start, end time.Time) {
+// summaryPeriod is the time the summary on now's day covers, up to the
+// start of today in loc. covered is where the last real summary ended. It
+// starts there, at most 7 days back, so a missed run loses no day and counts
+// none twice. With nothing covered yet, or today already covered, it starts
+// on the job's previous run day. After days off, such as a weekend, that
+// covers every day since the last run day.
+func summaryPeriod(job JobConfig, now time.Time, loc *time.Location, covered time.Time) (start, end time.Time) {
 	now = now.In(loc)
 	end = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	if !covered.IsZero() && covered.Before(end) {
+		if limit := end.AddDate(0, 0, -7); covered.Before(limit) {
+			return limit, end
+		}
+		return covered.In(loc), end
+	}
 	for i := 1; i <= 7; i++ {
 		if day := end.AddDate(0, 0, -i); job.runsOn(day) {
 			return day, end
@@ -68,6 +78,7 @@ type summaryPR struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	MergedAt    time.Time `json:"mergedAt"` // zero if not merged
 	HeadRefName string    `json:"headRefName"`
+	Body        string    `json:"body"`
 	Repository  struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
@@ -103,12 +114,22 @@ type prFact struct {
 	key    string // the Jira key the PR names, "" if none
 }
 
-// ticketFact is one Jira ticket a person's PR names, moved in the period.
+// ticketFact is one Jira ticket a person's PR names, with its current
+// status. Moved is whether its status changed in the period, nil if unknown.
 type ticketFact struct {
 	Key     string `json:"key"`
 	Summary string `json:"summary"`
 	Status  string `json:"status"`
+	Moved   *bool  `json:"movedInPeriod,omitempty"`
 	URL     string `json:"-"`
+}
+
+// statusText is the ticket's status, and "moved" if it changed in the period.
+func (t ticketFact) statusText() string {
+	if t.Moved != nil && *t.Moved {
+		return t.Status + ", moved"
+	}
+	return t.Status
 }
 
 // personFacts is what one team member did in the period.
@@ -117,7 +138,7 @@ type personFacts struct {
 	Merged   []prFact     `json:"merged,omitempty"`
 	Opened   []prFact     `json:"opened,omitempty"`
 	Reviewed []prFact     `json:"reviewed,omitempty"`
-	Tickets  []ticketFact `json:"ticketsMoved,omitempty"`
+	Tickets  []ticketFact `json:"tickets,omitempty"`
 	// More is true if a search found more PRs than it read.
 	More bool `json:"-"`
 }
@@ -143,7 +164,7 @@ func summaryScope(s SummaryConfig) string {
 // summaryQuery is a GraphQL query with n searches, s0 to s(n-1), each taking
 // its search text from the variable $q0 to $q(n-1).
 func summaryQuery(n int) string {
-	const fields = `url number title createdAt mergedAt headRefName repository { nameWithOwner } author { login __typename } ` +
+	const fields = `url number title createdAt mergedAt headRefName body repository { nameWithOwner } author { login __typename } ` +
 		`reviews(last: 50) { nodes { author { login __typename } submittedAt state } }`
 	var vars, searches []string
 	for i := 0; i < n; i++ {
@@ -238,7 +259,7 @@ func buildFacts(s SummaryConfig, logins []string, prs map[string]summaryPR, more
 			continue
 		}
 		author := strings.ToLower(p.Author.Login)
-		fact := prFact{Ref: p.short(), Title: p.Title, URL: p.URL, key: ticketKey(PRDetail{Title: p.Title, HeadRefName: p.HeadRefName})}
+		fact := prFact{Ref: p.short(), Title: p.Title, URL: p.URL, key: ticketKey(PRDetail{Title: p.Title, HeadRefName: p.HeadRefName, Body: p.Body})}
 		if who, ok := people[author]; ok && !p.Author.bot() {
 			if in(p.MergedAt) {
 				who.Merged = append(who.Merged, fact)
@@ -268,19 +289,19 @@ func buildFacts(s SummaryConfig, logins []string, prs map[string]summaryPR, more
 	return out
 }
 
-// movedTickets returns the tickets, out of keys, whose status changed in
-// the period, by the key asked for. Two Claude runs read them: fetchTickets
-// checks the keys exist, because one unknown key fails a whole JQL search.
-// Then one JQL search finds those that moved. Jira reads the DURING dates in
-// the Jira account's own time zone.
-func movedTickets(ctx context.Context, cr claudeRunner, site string, keys []string, start, end time.Time) (map[string]jiraTicket, error) {
-	out := map[string]jiraTicket{}
+// periodTickets reads the tickets out of keys, by the key asked for, and
+// which of them moved: a status change inside the period, by ticket key. Two
+// Claude runs read them. fetchTickets reads each key and its current status.
+// Only keys that exist go into the JQL search, because one unknown key fails
+// it. Jira reads the DURING dates in the Jira account's own time zone. If the
+// search fails, the tickets come back with a nil moved map and the error.
+func periodTickets(ctx context.Context, cr claudeRunner, site string, keys []string, start, end time.Time) (map[string]jiraTicket, map[string]bool, error) {
 	if len(keys) == 0 {
-		return out, nil
+		return nil, nil, nil
 	}
 	tickets, err := fetchTickets(ctx, cr, site, keys)
 	if len(tickets) == 0 {
-		return out, err
+		return nil, nil, err
 	}
 	var found []string
 	seen := map[string]bool{}
@@ -301,25 +322,20 @@ Then reply with the single word DONE. Do not summarise the tickets.`, toolSearch
 		if c.IsError {
 			continue
 		}
-		found, ok := parseJiraSearch(c.Result)
+		hits, ok := parseJiraSearch(c.Result)
 		if !ok {
-			return out, fmt.Errorf("unreadable Jira search result: %s", truncate(c.Result, 200))
+			return tickets, nil, fmt.Errorf("unreadable Jira search result: %s", truncate(c.Result, 200))
 		}
 		moved := map[string]bool{}
-		for _, t := range found {
+		for _, t := range hits {
 			moved[t.Key] = true
 		}
-		for asked, t := range tickets {
-			if moved[t.Key] {
-				out[asked] = t
-			}
-		}
-		return out, nil
+		return tickets, moved, nil
 	}
 	if err == nil {
 		err = fmt.Errorf("the Jira search gave no result: %s", truncate(res.Text, 200))
 	}
-	return out, err
+	return tickets, nil, err
 }
 
 // parseJiraSearch reads a searchJiraIssuesUsingJql result. The issues are a
@@ -350,17 +366,23 @@ func parseJiraSearch(raw string) (tickets []jiraTicket, ok bool) {
 	return tickets, true
 }
 
-// addTickets puts each moved ticket under the person whose PR names it.
-func addTickets(people []personFacts, moved map[string]jiraTicket) {
+// addTickets puts each ticket under the person whose PR names it, with its
+// current status. With moved nil, nobody knows which tickets moved.
+func addTickets(people []personFacts, tickets map[string]jiraTicket, moved map[string]bool) {
 	for i := range people {
 		seen := map[string]bool{}
 		for _, f := range append(append([]prFact{}, people[i].Merged...), people[i].Opened...) {
-			t, ok := moved[f.key]
+			t, ok := tickets[f.key]
 			if !ok || seen[t.Key] {
 				continue
 			}
 			seen[t.Key] = true
-			people[i].Tickets = append(people[i].Tickets, ticketFact{Key: t.Key, Summary: t.Summary, Status: t.Status, URL: t.URL})
+			tf := ticketFact{Key: t.Key, Summary: t.Summary, Status: t.Status, URL: t.URL}
+			if moved != nil {
+				m := moved[t.Key]
+				tf.Moved = &m
+			}
+			people[i].Tickets = append(people[i].Tickets, tf)
 		}
 	}
 }
@@ -384,7 +406,8 @@ func ticketKeys(people []personFacts) []string {
 func prosePrompt(label string, people []personFacts) string {
 	data, _ := json.MarshalIndent(people, "", "  ")
 	return `Below is what each member of a software team did on ` + label + `, as JSON. You have no tools: use only these facts.
-For each person, write one short paragraph in plain English: what they merged, opened and reviewed, and the tickets they moved.
+For each person, write one short paragraph in plain English: what they merged, opened and reviewed.
+Mention a ticket's status, and say it moved only if movedInPeriod is true.
 
 Rules:
 - Use only the facts given. Do not add reasons, outcomes, opinions or anything else they do not say.
@@ -468,7 +491,7 @@ func personSection(p personFacts, para string) string {
 		if len(p.Tickets) > 0 {
 			var keys []string
 			for _, t := range p.Tickets {
-				keys = append(keys, ticketLink(t))
+				keys = append(keys, ticketLink(t)+" ("+t.statusText()+")")
 			}
 			b.WriteString("Tickets: " + strings.Join(keys, ", ") + "\n")
 		}
@@ -486,7 +509,7 @@ func personSection(p personFacts, para string) string {
 			}
 		}
 		for _, t := range p.Tickets {
-			fmt.Fprintf(&b, "• Moved %s %s (%s)\n", ticketLink(t), slackEscape(t.Summary), t.Status)
+			fmt.Fprintf(&b, "• Ticket %s %s (%s)\n", ticketLink(t), slackEscape(t.Summary), t.statusText())
 		}
 	}
 	if p.More {
@@ -542,7 +565,7 @@ func runSummary(ctx context.Context, env Env) error {
 	if err := s.problem(); err != nil {
 		return fmt.Errorf("summary: %w", err)
 	}
-	start, end := summaryPeriod(env.cfg.Jobs[JobSummary], env.now, env.cfg.location())
+	start, end := summaryPeriod(env.cfg.Jobs[JobSummary], env.now, env.cfg.location(), env.state.SummaryCovered)
 	label := periodLabel(start, end)
 	members, err := teamMembers(ctx, s.Team)
 	if err != nil {
@@ -565,17 +588,24 @@ func runSummary(ctx context.Context, env Env) error {
 
 	// With no Jira site set, the summary reads no tickets.
 	if keys := ticketKeys(people); s.Jira && env.cfg.JiraSite != "" && len(keys) > 0 {
-		moved, err := movedTickets(ctx, env.claude, env.cfg.JiraSite, keys, start, end)
+		tickets, moved, err := periodTickets(ctx, env.claude, env.cfg.JiraSite, keys, start, end)
 		if err != nil && !online(ctx) {
 			return err
 		}
-		if err != nil {
+		switch {
+		case err != nil && len(tickets) > 0:
+			notes = append(notes, "Could not check which tickets moved: "+truncate(err.Error(), 200))
+		case err != nil:
 			notes = append(notes, "Could not check Jira: "+truncate(err.Error(), 200))
 		}
-		addTickets(people, moved)
+		addTickets(people, tickets, moved)
 	}
 
-	return env.send(ctx, summaryProseMessage(ctx, env, label, people, notes))
+	if err := env.send(ctx, summaryProseMessage(ctx, env, label, people, notes)); err != nil {
+		return err
+	}
+	// The next summary starts where this one ended. Test mode keeps nothing.
+	return env.persist(func(st *State) { st.SummaryCovered = end })
 }
 
 // summaryProseMessage builds the DM, with Claude's paragraphs if Prose is

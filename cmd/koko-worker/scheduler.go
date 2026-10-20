@@ -52,6 +52,9 @@ type State struct {
 	ReviewerCommit  string    `json:"reviewerCommit,omitempty"`
 	ReviewerBranch  string    `json:"reviewerBranch,omitempty"`
 	ReviewerUpdated time.Time `json:"reviewerUpdated,omitempty"`
+	// SummaryCovered is where the last real team summary's period ended. The
+	// next summary starts there, so a missed run loses no day.
+	SummaryCovered time.Time `json:"summaryCovered,omitempty"`
 }
 
 func slotKey(job string, slot time.Time) string {

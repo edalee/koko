@@ -69,9 +69,13 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 
 A new `summary` job. Default: off, 08:30, Monday to Friday.
 
-- It covers the previous working day of the job's days. On a Monday it covers Friday to Sunday.
+- **Period:** it always ends at the start of today, in the worker's time zone.
+- The state keeps the end of the last period a real run covered. The next run starts there, at most 7 days back. `dueRuns` drops a missed slot, so this way a missed day is never lost and never counted twice.
+- With no stored end, or with today already covered, it covers the previous working day of the job's days. On a Monday that is Friday to Sunday.
 - For each member of its team, in its repos: PRs merged, PRs opened, and reviews given.
-- If a Jira site is set, it also lists tickets the team moved.
+- **Jira:** it does not map GitHub logins to Jira accounts. It takes the ticket keys from the period's PRs (title, branch, then body).
+- If a Jira site is set, it reports each ticket's current status, and whether it moved. Moved means a status change inside the period.
+- One JQL search, `key in (...) AND status CHANGED DURING (start, end)`, finds the moves. Only keys that exist go into it, because one unknown key fails the search.
 - `claude -p` writes a short paragraph per person from those facts. If that call fails, the DM falls back to plain lists.
 - It posts to your Slack DM, as the stand-up does.
 - Its card has its own team, repos, days and times.
