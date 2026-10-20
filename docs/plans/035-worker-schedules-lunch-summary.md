@@ -69,16 +69,42 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 
 A new `summary` job. Default: off, 08:30, Monday to Friday.
 
-- **Period:** it always ends at the start of today, in the worker's time zone.
-- The state keeps the end of the last period a real run covered. The next run starts there, at most 7 days back. `dueRuns` drops a missed slot, so this way a missed day is never lost and never counted twice.
-- With no stored end, or with today already covered, it covers the previous working day of the job's days. On a Monday that is Friday to Sunday.
-- For each member of its team, in its repos: PRs merged, PRs opened, and reviews given.
-- **Jira:** it does not map GitHub logins to Jira accounts. It takes the ticket keys from the period's PRs (title, branch, then body).
-- If a Jira site is set, it reports each ticket's current status, and whether it moved. Moved means a status change inside the period.
-- One JQL search, `key in (...) AND status CHANGED DURING (start, end)`, finds the moves. Only keys that exist go into it, because one unknown key fails the search.
-- `claude -p` writes a short paragraph per person from those facts. If that call fails, the DM falls back to plain lists.
-- It posts to your Slack DM, as the stand-up does.
-- Its card has its own team, repos, days and times.
+**Settings:** `summary` holds `team` ("org/team-slug"), `repos`, `jira` (default on) and `prose` (default on). An empty team stops only this job and `check summary`, not the other jobs.
+
+**Period:**
+
+- It always ends at the start of today, in the worker's time zone.
+- The state keeps `summaryCovered`, the end of the last period a real run covered. The next run starts there, at most 7 days back.
+- `dueRuns` drops a missed slot. Because the next run starts at the stored end, a missed day is never lost and never counted twice.
+- With no stored end, or with today already covered, it covers the job's previous run day. On a Monday that is Friday to Sunday.
+- A test run never moves the stored end.
+
+**GitHub:**
+
+- The members come from the team, without bots, at most 30.
+- One `gh api graphql` call covers 5 members. Each member gets two searches: `author:` and `reviewed-by:`, with `updated:>=` the period start, in the repos or the team's org.
+- Each search reads at most 50 PRs, with each PR's last 50 reviews. A search that finds more says so in the DM.
+- Go keeps PRs merged and PRs opened inside the period, by members.
+- A review counts once per PR per person, if it was submitted inside the period. Pending reviews, reviews of your own PR and bots do not count.
+- A failed batch adds a note, and the other batches go on.
+
+**Jira:**
+
+- It does not map GitHub logins to Jira accounts.
+- It takes one ticket key from each merged or opened PR: from the title, else the branch, else the body.
+- One Claude run reads each ticket and its current status. Only keys that exist go on, because one unknown key fails a JQL search.
+- A second run makes one search: `key in (...) AND status CHANGED DURING (start, end)`. Moved means a status change inside the period. Jira reads those dates in the account's time zone.
+- If the search fails, the DM still shows each status, claims no move, and says why.
+
+**Prose:**
+
+- `claude -p` gets the facts as JSON and no tools, with the same settings as the other runs.
+- It writes a short paragraph per person. A paragraph that names a PR or ticket outside that person's facts is dropped.
+- If the call fails or times out, the DM lists the facts instead. Go adds every PR link either way.
+
+**Message:** it goes to your Slack DM, as the stand-up does. A header names the days covered, then one section per active person, then one line naming everyone with no activity.
+
+**Card:** the summary's settings sit inside the shared job card, which gives it the switch, days, times, Test and Run now.
 
 ## Not in scope
 

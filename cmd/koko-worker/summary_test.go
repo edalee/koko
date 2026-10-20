@@ -400,3 +400,75 @@ func TestSummaryConfig(t *testing.T) {
 		t.Errorf("a summary run by hand before 08:30 covers %v", got)
 	}
 }
+
+// TestRunSummaryCoversMissedDays runs whole summaries against a fake gh and
+// a state file. A missed run's day goes into the next summary, no day is
+// counted twice, and a test run leaves the stored end alone.
+func TestRunSummaryCoversMissedDays(t *testing.T) {
+	// alice merged #1 on Monday 19 October.
+	f := &fakeSummaryGH{reply: func(q map[string]string) (string, error) {
+		data := map[string]any{}
+		for k := range q {
+			data["s"+strings.TrimPrefix(k, "q")] = map[string]any{"issueCount": 0, "nodes": []any{}}
+		}
+		data["s0"] = map[string]any{"issueCount": 1, "nodes": []any{summaryNode(1, "alice", "2026-10-15T09:00:00Z", "2026-10-19T10:00:00Z")}}
+		return jsonString(map[string]any{"data": data}), nil
+	}}
+	f.install(t)
+	saved := summaryMembers
+	summaryMembers = func(context.Context, string) (map[string]bool, error) {
+		return map[string]bool{"alice": true, "bob": true}, nil
+	}
+	t.Cleanup(func() { summaryMembers = saved })
+
+	cfg := defaultConfig()
+	cfg.TimeZone = "Europe/Paris"
+	cfg.Summary = SummaryConfig{Team: "acme/platform"} // no Jira, no prose
+	dir := t.TempDir()
+	paths := Paths{State: dir + "/state.json", Settings: dir + "/claude-settings.json"}
+	run := func(now time.Time, test bool) string {
+		t.Helper()
+		env := newEnv(cfg, paths, test)
+		env.now = now
+		var got string
+		env.send = func(_ context.Context, msg Message) error { got = printMessage(msg); return nil }
+		if err := runSummary(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	covered := func() string { return loadState(paths.State).SummaryCovered.In(cet).Format("Mon 2 15:04") }
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 8, 30, 0, 0, cet) }
+
+	// Friday's run has nothing stored, so it covers Thursday.
+	if got := run(day(16), false); !strings.Contains(got, "*Team summary, Thursday 15 October*") {
+		t.Errorf("Friday:\n%s", got)
+	}
+	if covered() != "Fri 16 00:00" {
+		t.Errorf("after Friday, covered to %s", covered())
+	}
+	// Monday's run is missed. A test run on Tuesday leaves the stored end.
+	if got := run(day(20), true); !strings.Contains(got, "Friday 16 to Monday 19 October") {
+		t.Errorf("Tuesday test:\n%s", got)
+	}
+	if covered() != "Fri 16 00:00" {
+		t.Errorf("a test run moved the end to %s", covered())
+	}
+	// Tuesday covers Friday to Monday, so Monday's merge is in it.
+	got := run(day(20), false)
+	if !strings.Contains(got, "Friday 16 to Monday 19 October") || !strings.Contains(got, "api#1") || !strings.Contains(got, "No activity: bob.") {
+		t.Errorf("Tuesday:\n%s", got)
+	}
+	if covered() != "Tue 20 00:00" {
+		t.Errorf("after Tuesday, covered to %s", covered())
+	}
+	// Wednesday covers Tuesday only, so Monday's merge is not counted again.
+	got = run(day(21), false)
+	if !strings.Contains(got, "*Team summary, Tuesday 20 October*") || strings.Contains(got, "api#1") {
+		t.Errorf("Wednesday:\n%s", got)
+	}
+	last := strings.Join(f.calls[len(f.calls)-1], " ")
+	if !strings.Contains(last, "updated:>=2026-10-19T22:00:00Z") {
+		t.Errorf("Wednesday searched from the wrong time: %s", last)
+	}
+}
