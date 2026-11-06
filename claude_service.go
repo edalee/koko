@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,11 +28,29 @@ func NewClaudeService() *ClaudeService {
 	return &ClaudeService{}
 }
 
-// cleanEnv returns os.Environ() with CLAUDECODE stripped to avoid nested session detection.
+// parentSessionVars are the variables a running Claude Code session sets for
+// the programs it starts. Koko started from a Claude session inherits them.
+// A claude that sees them counts as that session's child: it does not save
+// its transcript, so /resume and Koko's history cannot find it.
+var parentSessionVars = []string{
+	"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
+	"CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+	"CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT",
+}
+
+// fromParentSession is true for a NAME=value entry that a parent Claude
+// session set.
+func fromParentSession(kv string) bool {
+	name, _, _ := strings.Cut(kv, "=")
+	return slices.Contains(parentSessionVars, name)
+}
+
+// cleanEnv returns os.Environ() without a parent Claude session's variables,
+// so a claude Koko starts is a session of its own.
 func cleanEnv() []string {
 	var env []string
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
+		if !fromParentSession(e) {
 			env = append(env, e)
 		}
 	}
