@@ -17,6 +17,9 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ### Changed
 - **Worker tab**: Settings > Worker is easier to read. General holds the shared settings and the connection checks. Each job has its own card with its schedule, settings, Test and Run now, and output. The review card splits how the reviewer runs from which PRs it reviews (plan 035)
 
+### Fixed
+- **Tabs after a window reload**: if macOS reloads Koko's window while Koko runs, each tab reattaches to its session, which still runs, with its scrollback. Before, every tab showed as disconnected, and resuming one failed with "This conversation is already open in another tab". A running session with no saved tab gets a tab of its own
+
 ## [0.5.15] - 2026-10-14
 
 ### Added

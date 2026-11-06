@@ -1071,6 +1071,7 @@ func (tm *TerminalManager) GetSessions() []SessionInfo {
 			Name:            s.name,
 			Dir:             s.dir,
 			ClaudeSessionID: claudeSessionID,
+			Shell:           s.isShell,
 		})
 	}
 	return sessions
