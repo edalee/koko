@@ -4,6 +4,9 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Fixed
+- **Update notice**: Koko compares each part of a version as a number. Before, it compared versions as text, so 0.5.9 looked newer than 0.5.10, and an older copy missed new releases
+
 ## [0.5.16] - 2026-11-06
 
 ### Added

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -334,7 +335,7 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 	}
 
 	latestVer := strings.TrimPrefix(release.TagName, "v")
-	if latestVer != version && latestVer > version {
+	if newerVersion(latestVer, version) {
 		return &UpdateInfo{
 			Available:  true,
 			Version:    latestVer,
@@ -344,4 +345,26 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 	}
 
 	return &UpdateInfo{Available: false, CurrentVer: version}, nil
+}
+
+// newerVersion is true if latest is a later "X.Y.Z" than current. Each part
+// compares as a number, so 0.5.10 is later than 0.5.9. A part that is not a
+// number counts as 0.
+func newerVersion(latest, current string) bool {
+	a, b := strings.Split(latest, "."), strings.Split(current, ".")
+	for i := range max(len(a), len(b)) {
+		x, y := versionPart(a, i), versionPart(b, i)
+		if x != y {
+			return x > y
+		}
+	}
+	return false
+}
+
+func versionPart(parts []string, i int) int {
+	if i >= len(parts) {
+		return 0
+	}
+	n, _ := strconv.Atoi(parts[i])
+	return n
 }
