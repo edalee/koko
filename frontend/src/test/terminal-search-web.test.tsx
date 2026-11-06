@@ -4,6 +4,7 @@ import { BrowserOpenURL } from "../../wailsjs/runtime/runtime";
 
 let mockSelection = "";
 let mockHasSelection = false;
+let mockHTML = "";
 
 vi.mock("@xterm/xterm", () => {
   class MockTerminal {
@@ -39,7 +40,7 @@ vi.mock("@xterm/addon-fit", () => {
 
 vi.mock("@xterm/addon-serialize", () => {
   class MockSerializeAddon {
-    serializeAsHTML = vi.fn(() => "");
+    serializeAsHTML = vi.fn(() => mockHTML);
     dispose = vi.fn();
   }
   return { SerializeAddon: MockSerializeAddon };
@@ -163,5 +164,21 @@ describe("terminal context menu — Search Web", () => {
     });
 
     expect(BrowserOpenURL).not.toHaveBeenCalled();
+  });
+});
+
+describe("terminal context menu — Copy for Logseq", () => {
+  it("copies the selection as Logseq blocks", async () => {
+    mockHasSelection = true;
+    mockHTML = "<div>Plan</div><div>- one</div><div>  - one a</div>";
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    await openMenu();
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByText("Copy for Logseq"));
+    });
+
+    expect(writeText).toHaveBeenCalledWith("- Plan\n- one\n\t- one a");
   });
 });

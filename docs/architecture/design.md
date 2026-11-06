@@ -102,6 +102,7 @@
 |------|----------|-------|
 | Copy | `⌘C` | Trimmed plain text plus HTML |
 | Copy as Markdown | `⇧⌘C` | |
+| Copy for Logseq | | Markdown as Logseq blocks: one block per paragraph, nested lists, TODO and DONE (`lib/logseq.ts`) |
 | Paste | `⌘V` | |
 | Search Web | | Opens the selection in the default browser |
 | Select All | `⌘A` | |
