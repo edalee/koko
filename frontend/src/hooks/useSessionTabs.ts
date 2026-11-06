@@ -5,6 +5,7 @@ import {
   CloseSession,
   CreateSessionWithOpts,
   GetClaudeSessionID,
+  GetSessions as GetLiveSessions,
   GetSessionSlug,
 } from "../../wailsjs/go/main/TerminalManager";
 import type { main } from "../../wailsjs/go/models";
@@ -62,6 +63,44 @@ export interface ReconnectChoice {
   fresh?: boolean;
 }
 
+/**
+ * Reattaches saved tabs to the sessions the backend still runs. The window
+ * can reload while Koko runs, and the PTYs live on in the backend. A saved
+ * tab matches a live session by slug, else by conversation id, and takes its
+ * id, so the pane replays its scrollback. A live Claude session with no saved
+ * tab gets a tab of its own, or it would hold its conversation unseen.
+ */
+export function reattachTabs(saved: SessionTab[], live: main.SessionInfo[]): SessionTab[] {
+  const free = live.filter((s) => !s.shell);
+  const take = (match: (s: main.SessionInfo) => boolean) => {
+    const i = free.findIndex(match);
+    return i < 0 ? undefined : free.splice(i, 1)[0];
+  };
+  const tabs = saved.map((t) => {
+    const s =
+      (t.slug ? take((l) => l.slug === t.slug) : undefined) ??
+      (t.claudeSessionId ? take((l) => l.claudeSessionId === t.claudeSessionId) : undefined);
+    if (!s) return { ...t, connected: false };
+    return {
+      ...t,
+      id: s.id,
+      connected: true,
+      claudeSessionId: s.claudeSessionId || t.claudeSessionId,
+    };
+  });
+  const orphans = free.map((s) => ({
+    id: s.id,
+    slug: s.slug,
+    name: s.name,
+    directory: s.dir,
+    createdAt: Date.now(),
+    connected: true,
+    claudeSessionId: s.claudeSessionId || "",
+    lastMsg: "",
+  }));
+  return [...tabs, ...orphans];
+}
+
 /** Payload of the session:claude-id event emitted by TerminalManager. */
 interface SessionClaudeIDEvent {
   sessionId: string;
@@ -81,8 +120,8 @@ export function useSessionTabs() {
     if (loadedRef.current) return;
     loadedRef.current = true;
 
-    GetSessions()
-      .then((sessions) => {
+    Promise.all([GetSessions(), GetLiveSessions().catch(() => [])])
+      .then(([sessions, live]) => {
         // New format: sessions.sessions contains SessionRecord[]
         const records = sessions.sessions || [];
         let nextPlaceholder = 0;
@@ -102,7 +141,7 @@ export function useSessionTabs() {
               ticket?: string;
               worktreePath?: string;
               worktreeCreated?: boolean;
-            }) => ({
+            }): SessionTab => ({
               id: `saved-${++nextPlaceholder}`,
               slug: r.slug || "",
               name: r.name,
@@ -135,9 +174,10 @@ export function useSessionTabs() {
             worktreePath: r.worktreePath || undefined,
           }));
 
-        setTabs(savedTabs);
-        if (savedTabs.length > 0) {
-          setActiveTabId(savedTabs[0].id);
+        const loadedTabs = reattachTabs(savedTabs, live ?? []);
+        setTabs(loadedTabs);
+        if (loadedTabs.length > 0) {
+          setActiveTabId(loadedTabs[0].id);
         }
         setHistory(closedHistory);
         historyRef.current = closedHistory;

@@ -9,6 +9,8 @@ type SessionInfo struct {
 	// The Claude conversation this session holds, once captured. API and MCP
 	// callers need it to resume a conversation, since resuming takes an id.
 	ClaudeSessionID string `json:"claudeSessionId,omitempty"`
+	// Shell is true for a Quick Terminal shell, which is not a tab.
+	Shell bool `json:"shell,omitempty"`
 }
 
 // SessionRecord is the unified persisted session model.

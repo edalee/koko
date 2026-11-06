@@ -765,6 +765,7 @@ export namespace main {
 	    name: string;
 	    dir: string;
 	    claudeSessionId?: string;
+	    shell?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionInfo(source);
@@ -777,6 +778,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.dir = source["dir"];
 	        this.claudeSessionId = source["claudeSessionId"];
+	        this.shell = source["shell"];
 	    }
 	}
 	export class SessionPR {
