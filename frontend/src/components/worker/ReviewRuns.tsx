@@ -25,7 +25,7 @@ export default function ReviewRuns({
   onSave,
 }: {
   runs: ReviewRun[];
-  jobs?: Record<string, { lastRun?: RunRecord }>;
+  jobs?: Record<string, { lastRun?: RunRecord; running?: boolean }>;
   running: string | null;
   setRunning: (running: string | null) => void;
   onRan: () => void;
@@ -251,6 +251,7 @@ export default function ReviewRuns({
               key={job}
               jobKey={job}
               last={jobs?.[job]?.lastRun}
+              busy={jobs?.[job]?.running}
               done={
                 run.target === "prs"
                   ? "Done. The command ran for each PR that was due."

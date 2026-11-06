@@ -7,6 +7,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 ### Added
 - **Copy for Logseq**: the terminal's right-click menu copies the selection as Logseq blocks. Each paragraph, heading, code block and table is a block, nested lists become child blocks, numbered items keep their numbers, and task items become TODO or DONE
 - **PATH for commands**: Settings > Worker > General sets the PATH the review worker's commands get, so a tool finds programs such as node or uv. "Use my shell's PATH" fills it from your login shell (plan 037)
+- **Stop a run**: each job's card shows Stop while the job runs, scheduled or Run now. The tool gets SIGTERM, and the run is recorded as stopped, with no retry. `koko-worker stop <job>` does the same (plan 037)
 
 ### Changed
 - **Review worker runs**: each run has its own command, and the worker reads only its exit code: 0 is done, 2 is nothing to do, anything else failed. The tool does its own work, posting included. A PRs run runs once per PR and head commit, so a new commit runs again. Test on a PRs run shows the command and runs nothing (plan 037)

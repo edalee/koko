@@ -33,3 +33,7 @@ export function SetEnabled(arg1) {
 export function Status() {
   return window['go']['main']['WorkerService']['Status']();
 }
+
+export function Stop(arg1) {
+  return window['go']['main']['WorkerService']['Stop'](arg1);
+}

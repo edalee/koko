@@ -218,6 +218,13 @@ func (w *WorkerService) RunNow(job string, test bool) (string, error) {
 	return runWorker(limit, args...)
 }
 
+// Stop asks a running job to stop, whether the scheduler or a Run now started
+// it. The job stops its tool and records the run as stopped. A Run now of the
+// job then returns with that error.
+func (w *WorkerService) Stop(job string) (string, error) {
+	return runWorker(30*time.Second, "stop", job)
+}
+
 // runNowMinimum is the least time a Run now gets. A review run reviews each
 // new PR in turn, up to 45 minutes each by default.
 const runNowMinimum = 4 * time.Hour

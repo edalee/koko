@@ -16,3 +16,5 @@ export function SaveConfig(arg1:string):Promise<void>;
 export function SetEnabled(arg1:boolean):Promise<void>;
 
 export function Status():Promise<string>;
+
+export function Stop(arg1:string):Promise<string>;

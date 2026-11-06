@@ -268,6 +268,61 @@ func TestReposRunTimeout(t *testing.T) {
 	}
 }
 
+func TestStopEndsARunningJob(t *testing.T) {
+	old := stopWatchInterval
+	stopWatchInterval = 20 * time.Millisecond
+	t.Cleanup(func() { stopWatchInterval = old })
+	env, dms, _ := reposEnv(t, "sleep 30\n")
+	env.cfg.Reviewer.Runs = append(env.cfg.Reviewer.Runs, ReviewRun{
+		Name: "weekly", Command: env.cfg.Reviewer.Command, Target: TargetRepos, Repos: []string{"acme/api", "acme/web"},
+	})
+	env.paths.Config = filepath.Join(env.paths.Dir, "worker.json")
+	data, _ := json.Marshal(env.cfg)
+	if err := os.WriteFile(env.paths.Config, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing holds the job's lock, so there is nothing to stop.
+	if err := cmdStop(env.paths, []string{"review:weekly"}); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Errorf("stop with nothing running: %v", err)
+	}
+	// A stop file left from an earlier run does not stop this one.
+	if err := os.WriteFile(stopPath(env.paths, "review:weekly"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := lockFile(jobLockPath(env.paths, "review:weekly"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- runJob(context.Background(), env, "review:weekly", "") }()
+	time.Sleep(200 * time.Millisecond)
+	if err := cmdStop(env.paths, []string{"review:weekly"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		var stopped stopError
+		if !errors.As(err, &stopped) || !strings.Contains(err.Error(), "stopped from Koko") {
+			t.Errorf("err %v, want a stop", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the run did not stop")
+	}
+	if time.Since(start) > 8*time.Second {
+		t.Errorf("the stop took %s", time.Since(start))
+	}
+	if _, err := os.Stat(stopPath(env.paths, "review:weekly")); !os.IsNotExist(err) {
+		t.Errorf("the stop file is still there: %v", err)
+	}
+	// The run stops before the second repo, and sends no DM.
+	if len(*dms) != 0 {
+		t.Errorf("dms %q", *dms)
+	}
+}
+
 func TestReposRunTestRunsNothing(t *testing.T) {
 	env, dms, dirs := reposEnv(t, "touch ran.txt\n")
 	env.test = true

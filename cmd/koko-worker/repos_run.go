@@ -222,8 +222,9 @@ func removeHooks(dir string) error {
 	return nil
 }
 
-// stopError is a scheduled repos run that stopped because you switched the
-// worker or the run off, or removed the run. runDue records it as final.
+// stopError is a run you stopped from Koko (see runJob), or a scheduled
+// repos run that stopped because you switched the worker or the run off, or
+// removed the run. runDue records it as final.
 type stopError struct{ error }
 
 // stopReason says why a scheduled run of job should stop, or "". It reads

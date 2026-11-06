@@ -150,6 +150,8 @@ It needs these connections. Settings > Worker checks each one and says how to fi
   Commands get the real gh and git. If a tool needs programs such as node or uv, set Settings > Worker > General > Commands > PATH, or press "Use my shell's PATH".
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
 
+A job's card shows Stop while the job runs. `koko-worker stop <job>` does the same from a terminal.
+
 The switch in Settings > Worker installs and removes the launchd agent `com.koko.worker`. You can also run `koko-worker install` and `koko-worker uninstall`.
 
 The worker keeps its settings in `~/Library/Application Support/koko/worker.json`, and its state and logs in `~/Library/Application Support/koko/worker/`. `logs/worker.log` rolls over at 5 MB. Review run logs are deleted after 60 days. PR repos are cloned to `~/.cache/koko-worker/repos`, the repos of repos runs to `~/.cache/koko-worker/repos-runs`, and a managed reviewer to `~/.cache/koko-worker/reviewer`.

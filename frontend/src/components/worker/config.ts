@@ -67,7 +67,8 @@ export interface WorkerStatus {
     commitBranch?: string;
     updated?: string;
   };
-  jobs: Record<string, { lastRun?: RunRecord }>;
+  // running is true while a run of the job holds its lock, scheduled or not.
+  jobs: Record<string, { lastRun?: RunRecord; running?: boolean }>;
 }
 
 export interface CheckResult {

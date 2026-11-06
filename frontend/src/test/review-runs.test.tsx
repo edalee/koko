@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GetConfig, RunNow, SaveConfig, Status } from "../../wailsjs/go/main/WorkerService";
+import { GetConfig, RunNow, SaveConfig, Status, Stop } from "../../wailsjs/go/main/WorkerService";
 import WorkerSettings from "../components/WorkerSettings";
 import ReviewRuns from "../components/worker/ReviewRuns";
 import {
@@ -19,6 +19,7 @@ vi.mock("../../wailsjs/go/main/WorkerService", () => ({
   SaveConfig: vi.fn().mockResolvedValue(undefined),
   SetEnabled: vi.fn().mockResolvedValue(undefined),
   Status: vi.fn(),
+  Stop: vi.fn().mockResolvedValue("Asked review:daily to stop."),
 }));
 
 const mockRunNow = RunNow as ReturnType<typeof vi.fn>;
@@ -151,6 +152,30 @@ describe("ReviewRuns", () => {
     expect(saveRepos.mock.calls[0][0][0].timeoutMinutes).toBe(90);
     // The command names a PR, which a repos run does not have.
     expect(screen.getByText(/refuses a command with \{pr\}/)).toBeInTheDocument();
+  });
+});
+
+describe("Stop", () => {
+  it("shows Stop while the worker runs the job, and asks it to stop", async () => {
+    render(
+      <ReviewRuns
+        runs={[daily]}
+        jobs={{ "review:daily": { running: true } }}
+        running={null}
+        setRunning={vi.fn()}
+        onRan={vi.fn()}
+        onEdit={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(Stop).toHaveBeenCalledWith("review:daily");
+    expect(await screen.findByText("Asked review:daily to stop.")).toBeInTheDocument();
+  });
+
+  it("hides Stop when the job is not running", () => {
+    renderRuns([daily]);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 });
 

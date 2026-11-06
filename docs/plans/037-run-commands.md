@@ -68,6 +68,16 @@ A new General setting, `commandPath`. Empty means the worker's own PATH.
 - The check of the command's program looks it up on the same PATH.
 - A button fills it from your login shell's PATH. Koko runs `$SHELL -lic` with a clean environment (only `HOME`, `USER` and `SHELL`), so nothing from the shell that opened Koko leaks in. It drops repeated folders and folders that do not exist.
 
+## Stop
+
+Each job's card shows Stop while the job runs, whether the scheduler started it or Run now did.
+
+- `koko-worker stop <job>` writes a stop file next to the job's lock. It fails if nobody holds the lock, because then nothing runs.
+- Every run, in any process, checks for its stop file every 2 seconds. It removes a stale one when it starts.
+- On a stop, the run's context ends, as on a timeout, so the tool's process group gets SIGTERM.
+- A stopped run is a stopError: the scheduler records it as failed and does not try the slot again. A PR stopped halfway gets no record, so a later slot runs it.
+- `koko-worker status` says which jobs run, and the app reads it every 30 seconds.
+
 ## What goes
 
 - The result file (`$REVIEW_RESULT`) and the log format (`reviewer.logs`).

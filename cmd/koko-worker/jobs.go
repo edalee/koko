@@ -611,6 +611,10 @@ func runReview(ctx context.Context, env Env, onlyURL string) error {
 	var failures []string
 	ran := 0
 	for _, t := range targets {
+		if ctx.Err() != nil {
+			// Stopped, or timed out: the PRs left wait for a later run.
+			return ctx.Err()
+		}
 		p := t.pr
 		if onlyURL != "" && p.URL != onlyURL {
 			continue
