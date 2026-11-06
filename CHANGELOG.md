@@ -6,6 +6,7 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ### Fixed
 - **Update notice**: Koko compares each part of a version as a number. Before, it compared versions as text, so 0.5.9 looked newer than 0.5.10, and an older copy missed new releases
+- **Transcripts when Koko starts from Claude Code**: Koko drops the variables a running Claude Code session sets, such as `CLAUDE_CODE_CHILD_SESSION`, before it starts claude in a tab. Before, a Koko opened from a Claude Code session passed them on, so each tab's claude counted as a child session and saved no transcript
 
 ## [0.5.16] - 2026-11-06
 

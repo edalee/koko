@@ -233,12 +233,13 @@ func (tm *TerminalManager) setContext(ctx context.Context) {
 	tm.ctx = ctx
 }
 
-// buildEnv returns the process environment with login PATH injected and CLAUDECODE filtered.
+// buildEnv returns the process environment with login PATH injected, and
+// without a parent Claude session's variables (see parentSessionVars).
 func (tm *TerminalManager) buildEnv() []string {
 	var env []string
 	hasPath := false
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "CLAUDECODE=") {
+		if fromParentSession(e) {
 			continue
 		}
 		if strings.HasPrefix(e, "PATH=") && tm.loginPath != "" {
