@@ -4,16 +4,14 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
-## [0.5.16] - 2026-10-21
+## [0.5.16] - 2026-11-06
 
 ### Added
 - **Job days**: each worker job has its own days, such as Saturday only or once a week. Settings > Worker shows seven day switches on each job. A job without days runs Monday to Friday, so an older `worker.json` keeps its schedule. A day added after its run time waits until next week (plan 035)
 - **Lunch**: focus time no longer books over lunch, 12:00 to 13:00 by default. Settings > Worker can move lunch or switch it off. Lunch is not written to the calendar (plan 035)
 - **Team summary**: a new worker job sends a Slack DM at 08:30. It lists what each member of a team merged, opened and reviewed since the last summary, so a missed run's days come in the next one, up to 7 days back. It is off by default. With a Jira site, it adds the tickets their PRs name, with each one's status and whether it moved. Claude writes a paragraph per person, and the DM falls back to lists if that fails (plan 035)
 - **Worker runs**: the reviewer command has several runs, each with its own arguments, days and times. A PRs run reviews PRs as before. A repos run runs once per repo, in a clean checkout of its default branch, for a tool that changes repos, and sends one DM. An older `worker.json` becomes one PRs run named "daily" (plan 035)
-
 - **Session summaries**: each session row shows its ticket and Claude's title for the conversation, else your last prompt. A hover card shows the recap, branch, PR and your last ten prompts. The reconnect card, history and picker show the title and recap in place of Claude's last reply. Headless runs from other tools no longer appear in the picker or the history, and a tab never claims one as its conversation (plan 036)
-
 - **Stable signing**: `make build` signs Koko.app with a "Koko Local" certificate from your keychain. macOS recognises each build as the same app, so it stops asking again for the file and folder access you already gave Koko and the worker. `make signing-cert` creates the certificate once. Without it, the app gets a new ad-hoc signature, which also fixes the signature that copying koko-worker into the app broke
 
 ### Changed
