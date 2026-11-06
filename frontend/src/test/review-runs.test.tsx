@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GetConfig, RunNow, SaveConfig, Status } from "../../wailsjs/go/main/WorkerService";
+import { GetConfig, RunNow, SaveConfig, Status, Stop } from "../../wailsjs/go/main/WorkerService";
 import WorkerSettings from "../components/WorkerSettings";
 import ReviewRuns from "../components/worker/ReviewRuns";
 import {
@@ -19,6 +19,7 @@ vi.mock("../../wailsjs/go/main/WorkerService", () => ({
   SaveConfig: vi.fn().mockResolvedValue(undefined),
   SetEnabled: vi.fn().mockResolvedValue(undefined),
   Status: vi.fn(),
+  Stop: vi.fn().mockResolvedValue("Asked review:daily to stop."),
 }));
 
 const mockRunNow = RunNow as ReturnType<typeof vi.fn>;
@@ -26,12 +27,11 @@ const mockSave = SaveConfig as ReturnType<typeof vi.fn>;
 
 const daily = mergeRuns({ runs: [{ name: "daily", enabled: true }] }, undefined)[0];
 
-function renderRuns(runs: ReviewRun[], command = "acme {pr}") {
+function renderRuns(runs: ReviewRun[]) {
   const onSave = vi.fn();
   render(
     <ReviewRuns
       runs={runs}
-      command={command}
       running={null}
       setRunning={vi.fn()}
       onRan={vi.fn()}
@@ -57,7 +57,7 @@ describe("ReviewRuns", () => {
     expect(saved.map((r) => r.name)).toEqual(["daily", "weekly"]);
     expect(saved[1]).toEqual({
       name: "weekly",
-      args: "",
+      command: "",
       enabled: false,
       times: ["09:00"],
       days: ["mon"],
@@ -67,6 +67,29 @@ describe("ReviewRuns", () => {
       repos: [],
       timeoutMinutes: 0,
     });
+  });
+
+  it("edits each run's command, and says when it is missing", () => {
+    const onEdit = vi.fn();
+    render(
+      <ReviewRuns
+        runs={[daily]}
+        running={null}
+        setRunning={vi.fn()}
+        onRan={vi.fn()}
+        onEdit={onEdit}
+        onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Set a command/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Command"), {
+      target: { value: "{reviewer} {url} -c" },
+    });
+    expect(onEdit.mock.calls[0][0][0].command).toBe("{reviewer} {url} -c");
+
+    cleanup();
+    renderRuns([{ ...daily, command: "A={claude} acme {pr}" }]);
+    expect(screen.getByText(/\{claude\} is gone/)).toBeInTheDocument();
   });
 
   it("removes a run, and keeps the last one", () => {
@@ -92,7 +115,6 @@ describe("ReviewRuns", () => {
     mockRunNow.mockImplementation(async (job: string) => `${job} output`);
     const weekly = newRun([daily]);
     const props = {
-      command: "acme {pr}",
       running: null,
       setRunning: vi.fn(),
       onRan: vi.fn(),
@@ -116,15 +138,44 @@ describe("ReviewRuns", () => {
     expect(onSave.mock.calls[0][0][0].target).toBe("repos");
 
     cleanup();
-    const weekly: ReviewRun = { ...newRun([daily]), target: "repos", repos: ["acme/api"] };
+    const weekly: ReviewRun = {
+      ...newRun([daily]),
+      command: "acme {pr}",
+      target: "repos",
+      repos: ["acme/api"],
+    };
     const saveRepos = renderRuns([weekly]);
     expect(screen.queryByText("My PRs")).toBeNull();
     expect(screen.getByText("acme/api")).toBeInTheDocument();
     expect(screen.getByLabelText("Time limit")).toHaveValue(60);
     fireEvent.change(screen.getByLabelText("Time limit"), { target: { value: "90" } });
     expect(saveRepos.mock.calls[0][0][0].timeoutMinutes).toBe(90);
-    // The shared command names a PR, which a repos run does not have.
+    // The command names a PR, which a repos run does not have.
     expect(screen.getByText(/refuses a command with \{pr\}/)).toBeInTheDocument();
+  });
+});
+
+describe("Stop", () => {
+  it("shows Stop while the worker runs the job, and asks it to stop", async () => {
+    render(
+      <ReviewRuns
+        runs={[daily]}
+        jobs={{ "review:daily": { running: true } }}
+        running={null}
+        setRunning={vi.fn()}
+        onRan={vi.fn()}
+        onEdit={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(Stop).toHaveBeenCalledWith("review:daily");
+    expect(await screen.findByText("Asked review:daily to stop.")).toBeInTheDocument();
+  });
+
+  it("hides Stop when the job is not running", () => {
+    renderRuns([daily]);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 });
 

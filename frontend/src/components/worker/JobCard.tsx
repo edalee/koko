@@ -116,6 +116,7 @@ export default function JobCard({
             <RunControls
               jobKey={jobKey}
               last={last}
+              busy={status?.jobs?.[jobKey]?.running}
               done={done}
               running={running}
               setRunning={setRunning}

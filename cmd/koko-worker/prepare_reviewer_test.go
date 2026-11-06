@@ -67,7 +67,7 @@ func TestPrepareReviewer(t *testing.T) {
 	st := &State{}
 	cfg := defaultConfig()
 	cfg.Reviewer.Repo, cfg.Reviewer.Script = "o/reviewer", "review-cli"
-	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "{reviewer} {pr}", "acme"
+	cfg.Reviewer.Command = "{reviewer} {pr}"
 	newEnv := func(test bool) Env {
 		return Env{cfg: cfg, paths: Paths{Reviewer: filepath.Join(root, "clone")}, state: st, test: test,
 			persist: func(change func(*State)) error { change(st); return nil }}

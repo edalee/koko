@@ -1,5 +1,7 @@
 # Plan 030: a reviewer contract for the review worker
 
+> **Superseded by plan 037.** Each run now has its own command, and the worker reads only its exit code. The result file, logs folder, marker, posting, read-only gh and git and `{claude}` are gone.
+
 Status: done in 0.5.7. Plan 031 replaces `reviewer.format` and `reviewer.args` with `reviewer.command` and `reviewer.logs`.
 
 ## Problem

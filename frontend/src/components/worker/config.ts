@@ -15,10 +15,8 @@ export interface ReviewerConfig {
   autoUpdate: boolean;
   script: string;
   path: string;
-  command: string;
-  logs: string;
-  markerPrefix: string;
-  // runs replace the old review job and its mine and team scopes.
+  // runs replace the old review job and its mine and team scopes. Each run
+  // has its own command (plan 037).
   runs: ReviewRun[];
   orgs: string[];
   excludeRepos: string[];
@@ -37,6 +35,8 @@ export interface WorkerConfig {
   timeZone: string;
   calendarId: string;
   jiraSite: string;
+  // commandPath is the PATH the runs' commands get. Empty means the worker's own.
+  commandPath: string;
   reviewer: ReviewerConfig;
   slack: { botToken: string; userId: string };
   focus: { windowStart: string; windowEnd: string; minMinutes: number };
@@ -67,7 +67,8 @@ export interface WorkerStatus {
     commitBranch?: string;
     updated?: string;
   };
-  jobs: Record<string, { lastRun?: RunRecord }>;
+  // running is true while a run of the job holds its lock, scheduled or not.
+  jobs: Record<string, { lastRun?: RunRecord; running?: boolean }>;
 }
 
 export interface CheckResult {
@@ -82,6 +83,7 @@ export const DEFAULTS: WorkerConfig = {
   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   calendarId: "primary",
   jiraSite: "",
+  commandPath: "",
   // No reviewer is set up, so the review run starts off.
   reviewer: {
     source: "managed",
@@ -90,9 +92,6 @@ export const DEFAULTS: WorkerConfig = {
     autoUpdate: true,
     script: "",
     path: "",
-    command: "",
-    logs: "",
-    markerPrefix: "",
     runs: mergeRuns(undefined, undefined),
     orgs: [],
     excludeRepos: [],
@@ -145,7 +144,16 @@ export function merge(raw: string): WorkerConfig {
     reviewer?: Partial<ReviewerConfig> & Parameters<typeof mergeRuns>[0];
   };
   // The old review job and scopes become the runs, and are not saved again.
-  const { mine: _mine, team: _team, ...reviewer } = parsed.reviewer ?? {};
+  // Nor are the shared command, logs folder and marker that plan 037 removed.
+  const {
+    mine: _mine,
+    team: _team,
+    command: _command,
+    logs: _logs,
+    markerPrefix: _marker,
+    ...reviewer
+  } = (parsed.reviewer ?? {}) as Partial<ReviewerConfig> &
+    Parameters<typeof mergeRuns>[0] & { command?: string; logs?: string; markerPrefix?: string };
   const { review: _review, ...jobs } = parsed.jobs ?? {};
   return {
     ...DEFAULTS,
@@ -247,13 +255,15 @@ export function nextSlot(job: JobConfig, zone: string, now = new Date()): string
   return null;
 }
 
-// reviewerSetUp is true if a PRs run can run with these settings. It follows
-// problem() in cmd/koko-worker/config.go.
+// usesReviewer is true if a run's command runs the CLI from the source setting.
+export const usesReviewer = (r: ReviewerConfig) =>
+  r.runs.some((run) => run.command.includes("{reviewer}"));
+
+// reviewerSetUp is true if the source of {reviewer} is set up, or no run uses
+// it. It follows commandProblem() in cmd/koko-worker/config.go.
 export function reviewerSetUp(r: ReviewerConfig): boolean {
-  const command = r.command.trim();
-  if (!command || !/^[a-z0-9-]+$/.test(r.markerPrefix.trim())) return false;
-  // A command without {reviewer} names its own program, so the source is not used.
-  if (!command.includes("{reviewer}")) return true;
+  // Every run names its own program, so the source is not used.
+  if (!usesReviewer(r)) return true;
   if (r.source === "local") return r.path.trim() !== "";
   const script = r.script.trim();
   return (

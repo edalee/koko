@@ -48,7 +48,7 @@ func TestReviewerValidation(t *testing.T) {
 		team := cfg.Reviewer.Team
 		cfg.Reviewer = bad
 		cfg.Reviewer.Team = team
-		cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "{reviewer} {pr}", "acme"
+		cfg.Reviewer.Command = "{reviewer} {pr}"
 		if cfg.Reviewer.problem() == nil || cfg.validate() != nil {
 			t.Errorf("want a reviewer problem, and a valid config, for %+v", bad)
 		}
@@ -74,22 +74,22 @@ func TestProgramProblem(t *testing.T) {
 	if err := os.WriteFile(prog, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := programProblem("A=1 " + prog + " {pr}"); err != nil {
+	if err := programProblem("A=1 "+prog+" {pr}", ""); err != nil {
 		t.Errorf("a full path: %v", err)
 	}
-	if err := programProblem(dir + "/missing {pr}"); err == nil || !strings.Contains(err.Error(), "no reviewer program") {
+	if err := programProblem(dir+"/missing {pr}", ""); err == nil || !strings.Contains(err.Error(), "no reviewer program") {
 		t.Errorf("a missing path: %v", err)
 	}
-	if err := programProblem("sh -c true"); err != nil {
+	if err := programProblem("sh -c true", ""); err != nil {
 		t.Errorf("a name on PATH: %v", err)
 	}
-	if err := programProblem("no-such-reviewer-xyz {pr}"); err == nil || !strings.Contains(err.Error(), "not on the worker's PATH") {
+	if err := programProblem("no-such-reviewer-xyz {pr}", ""); err == nil || !strings.Contains(err.Error(), "not on the PATH for commands") {
 		t.Errorf("a name not on PATH: %v", err)
 	}
-	if err := programProblem("./bin/review {pr}"); err == nil || !strings.Contains(err.Error(), "relative path") {
+	if err := programProblem("./bin/review {pr}", ""); err == nil || !strings.Contains(err.Error(), "relative path") {
 		t.Errorf("a relative path: %v", err)
 	}
-	if err := programProblem(`{claude} -p "review {pr}"`); err != nil {
-		t.Errorf("{claude} is filled in at run time: %v", err)
+	if err := programProblem(`{reviewer} -p "review {pr}"`, ""); err != nil {
+		t.Errorf("{reviewer} is filled in at run time: %v", err)
 	}
 }

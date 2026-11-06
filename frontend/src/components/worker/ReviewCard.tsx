@@ -2,30 +2,33 @@ import { useEffect, useState } from "react";
 import { cn } from "../../lib/utils";
 import RepoList from "../RepoList";
 import Toggle from "../Toggle";
-import { formatWhen, inputClass, reviewerSetUp } from "./config";
+import { formatWhen, inputClass, reviewerSetUp, usesReviewer } from "./config";
 import JobCard, { type CardProps } from "./JobCard";
 import ReviewRuns from "./ReviewRuns";
 import { Block, Choice, Disclosure, Field } from "./ui";
 
-// ReviewCard is the review worker. "Reviewer" is how it runs, and it starts
-// closed once a reviewer is set up. "Which PRs" limits every PRs run. "Runs"
-// holds the runs, each a job with its own schedule and Test and Run now.
+// ReviewCard is the review worker. "Reviewer" is where {reviewer} comes
+// from, and it starts closed once it is set up. "Which PRs" limits every PRs
+// run. "Runs" holds the runs, each a command with its own schedule and Test
+// and Run now.
 export default function ReviewCard(props: CardProps) {
   const { cfg, loaded, status, save, setReviewer, saveReviewer, refreshStatus } = props.api;
   const r = cfg.reviewer;
   const setUp = reviewerSetUp(r);
+  // A new install has no commands yet, so the Reviewer group starts open for it too.
+  const started = setUp && r.runs.some((run) => run.command.trim());
   // The Reviewer group starts open if no reviewer is set up when worker.json loads.
   // That choice is made once, so typing the first repo does not close the group.
   const [open, setOpen] = useState<boolean | null>(null);
-  const shown = open ?? !setUp;
+  const shown = open ?? !started;
   useEffect(() => {
-    if (loaded) setOpen((o) => o ?? !setUp);
+    if (loaded) setOpen((o) => o ?? !started);
   }, [loaded]);
 
   const summary = !setUp
     ? "Not set up"
-    : !r.command.includes("{reviewer}")
-      ? `Runs ${r.command.trim()}`
+    : !usesReviewer(r)
+      ? "Not used: each run names its own program"
       : r.source === "managed"
         ? `Managed clone of ${r.repo}, branch ${r.branch || "main"}`
         : `Local CLI at ${r.path}`;
@@ -38,7 +41,7 @@ export default function ReviewCard(props: CardProps) {
       {...props}
       jobKey="review"
       name="Review worker"
-      about="Runs the reviewer command on a schedule. A PRs run reviews each PR once and posts the review as comments, as you. A repos run runs a tool that changes repos."
+      about="Runs your commands on a schedule. A PRs run runs its command once per PR and commit, such as a reviewer that posts its own review, as you. A repos run runs a tool that changes repos."
       summary={runsSummary}
     >
       <Block title="Settings">
@@ -48,7 +51,7 @@ export default function ReviewCard(props: CardProps) {
             onToggle={() => setOpen(!shown)}
             controls="reviewer-body"
             title={<span className="block text-xs text-white/85 font-medium">Reviewer</span>}
-            summary={shown ? "How the review runs" : summary}
+            summary={shown ? "Where {reviewer} comes from" : summary}
           />
           <div
             id="reviewer-body"
@@ -58,34 +61,10 @@ export default function ReviewCard(props: CardProps) {
             className="space-y-3"
           >
             <p className="text-[10px] text-tertiary leading-relaxed">
-              Any CLI that follows the reviewer contract (plans 030 and 031). It reviews one PR and
-              never posts. The worker posts its comments. If there is nothing to report, it posts
-              LGTM 😃⭐😸.
+              A run's command can start with {"{reviewer}"}, a CLI from a repo the worker keeps up
+              to date, or from a path on this Mac. A command that names its own program does not use
+              it.
             </p>
-            <Field
-              label="Command"
-              htmlFor="reviewer-command"
-              help={
-                <>
-                  {"{reviewer}"} is the CLI set below. {"{pr}"}, {"{repo}"}, {"{url}"} and {"{sha}"}{" "}
-                  are filled in for each PR. {"{claude}"} is a claude that is denied some commands,
-                  such as posting, but that is no guard: a PRs run gets read-only gh and git as
-                  well. A repos run fills in only {"{repo}"}, and gets the real gh and git, so its
-                  tool can push and open PRs. NAME=value words at the start set environment
-                  variables. Each run adds its own arguments.
-                </>
-              }
-            >
-              <input
-                id="reviewer-command"
-                type="text"
-                value={r.command}
-                onChange={(e) => setReviewer({ command: e.target.value })}
-                onBlur={() => save(cfg)}
-                placeholder="{reviewer} {pr}"
-                className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
-              />
-            </Field>
             <Field
               label="Source"
               help="Where {reviewer} comes from. Managed: the worker keeps its own clone, so the branch you have checked out never changes what runs."
@@ -167,41 +146,6 @@ export default function ReviewCard(props: CardProps) {
                 />
               </Field>
             )}
-            <Field
-              label="Logs folder"
-              htmlFor="reviewer-logs"
-              help="Off: the reviewer writes its comments as JSON to $REVIEW_RESULT. A folder: the worker reads the review from the reviewer's logs there instead."
-            >
-              <input
-                id="reviewer-logs"
-                type="text"
-                value={r.logs}
-                onChange={(e) => setReviewer({ logs: e.target.value })}
-                onBlur={() => save(cfg)}
-                placeholder="Off"
-                className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
-              />
-            </Field>
-            <Field
-              label="Marker"
-              htmlFor="reviewer-marker"
-              help={
-                <>
-                  Each comment starts with {"<!-- marker:"}. A PR with a comment behind the marker
-                  counts as reviewed.
-                </>
-              }
-            >
-              <input
-                id="reviewer-marker"
-                type="text"
-                value={r.markerPrefix}
-                onChange={(e) => setReviewer({ markerPrefix: e.target.value })}
-                onBlur={() => save(cfg)}
-                placeholder="acme"
-                className={cn(inputClass, "w-36 font-mono placeholder:text-tertiary")}
-              />
-            </Field>
           </div>
         </div>
 
@@ -238,7 +182,6 @@ export default function ReviewCard(props: CardProps) {
       <Block title="Runs">
         <ReviewRuns
           runs={r.runs}
-          command={r.command}
           jobs={status?.jobs}
           running={props.running}
           setRunning={props.setRunning}

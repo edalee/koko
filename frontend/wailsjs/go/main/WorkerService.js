@@ -10,6 +10,10 @@ export function GetConfig() {
   return window['go']['main']['WorkerService']['GetConfig']();
 }
 
+export function LoginPath() {
+  return window['go']['main']['WorkerService']['LoginPath']();
+}
+
 export function ReadLog(arg1) {
   return window['go']['main']['WorkerService']['ReadLog'](arg1);
 }
@@ -28,4 +32,8 @@ export function SetEnabled(arg1) {
 
 export function Status() {
   return window['go']['main']['WorkerService']['Status']();
+}
+
+export function Stop(arg1) {
+  return window['go']['main']['WorkerService']['Stop'](arg1);
 }

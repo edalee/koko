@@ -1,6 +1,6 @@
-import { FlaskConical, Loader2, Play } from "lucide-react";
+import { FlaskConical, Loader2, Play, Square } from "lucide-react";
 import { useState } from "react";
-import { RunNow } from "../../../wailsjs/go/main/WorkerService";
+import { RunNow, Stop } from "../../../wailsjs/go/main/WorkerService";
 import { cn } from "../../lib/utils";
 import { formatWhen, type RunRecord, STATUS_LABELS } from "./config";
 
@@ -24,10 +24,13 @@ export function LastRun({ last }: { last?: RunRecord }) {
 }
 
 // RunControls is a job's Test and Run now buttons, its last run and its own
-// output. running is shared by every card, so one job runs at a time.
+// output. running is shared by every card, so one job runs at a time. busy
+// is true while the worker runs the job, scheduled or not. Stop shows while
+// the job runs for real, and asks the worker to end it.
 export default function RunControls({
   jobKey,
   last,
+  busy,
   done,
   running,
   setRunning,
@@ -35,12 +38,27 @@ export default function RunControls({
 }: {
   jobKey: string;
   last?: RunRecord;
+  busy?: boolean;
   done: string;
   running: string | null;
   setRunning: (running: string | null) => void;
   onRan: () => void;
 }) {
   const [output, setOutput] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const live = running === jobKey || busy;
+
+  const stop = async () => {
+    setStopping(true);
+    try {
+      setOutput((await Stop(jobKey)).trim());
+    } catch (e) {
+      setOutput(String(e));
+    } finally {
+      setStopping(false);
+      onRan();
+    }
+  };
 
   const run = async (test: boolean) => {
     setRunning(jobKey + (test ? ":test" : ""));
@@ -63,6 +81,22 @@ export default function RunControls({
           <LastRun last={last} />
         </p>
         <div className="flex items-center gap-1 shrink-0">
+          {live && (
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={stop}
+              className="flex items-center gap-1 px-2 py-1 text-[10px] rounded-md border border-error/30 text-error hover:bg-error/10 disabled:opacity-40"
+              title="Stop the run. The tool gets SIGTERM, and the run is recorded as stopped."
+            >
+              {stopping ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Square className="size-3" />
+              )}
+              <span>Stop</span>
+            </button>
+          )}
           <button
             type="button"
             disabled={running !== null}

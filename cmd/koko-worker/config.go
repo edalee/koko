@@ -23,15 +23,13 @@ const (
 // fixedJobs are the jobs every config has. jobNames adds the review runs.
 var fixedJobs = []string{JobStandup, JobFocus, JobSummary}
 
-var markerPrefixRe = regexp.MustCompile(`^[a-z0-9-]+$`)
-
 // runNameRe is the form of a run's name, which is part of its job name and
 // its lock file's name, so it is short too.
 var runNameRe = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 // Run targets.
 const (
-	TargetPRs   = "prs"   // once per PR, as a review with comments
+	TargetPRs   = "prs"   // once per PR and head commit
 	TargetRepos = "repos" // once per repo, in a clean checkout of its default branch
 )
 
@@ -61,19 +59,12 @@ type ReviewerConfig struct {
 	AutoUpdate bool   `json:"autoUpdate"`
 	Script     string `json:"script"` // managed: the reviewer CLI, relative to the clone
 	Path       string `json:"path"`   // local: the reviewer CLI
-	// Command runs the reviewer, for example "{reviewer} {pr}" (plan
-	// 031). See reviewerCommand for how it is split and filled in.
-	Command string `json:"command"`
-	// Logs is the folder the reviewer writes its logs to. Empty means off: the
-	// reviewer writes its result to $REVIEW_RESULT. Set, the worker reads the
-	// review from the logs, in the log format of plan 031.
-	Logs string `json:"logs"`
-	// MarkerPrefix starts the reviewer's comment markers, "<!-- acme:" for
-	// "acme". A PR with a comment behind the marker counts as reviewed.
-	MarkerPrefix string `json:"markerPrefix"`
-	// Runs are the runs of the command, each a job with its own arguments
-	// and schedule. A worker.json without runs gets one, named "daily" (see
-	// fillDefaults).
+	// Command is the command of the run in progress, which forRun sets. Each
+	// run has its own (plan 037). The shared command in an older worker.json
+	// is not read: it ran with a read-only gh, so it may not post.
+	Command string `json:"-"`
+	// Runs are the runs, each a job with its own command and schedule. A
+	// worker.json without runs gets one, named "daily" (see fillDefaults).
 	Runs []ReviewRun `json:"runs"`
 	// Mine and Team are the scopes of the run in progress, which forRun sets.
 	// In worker.json they are the old settings. fillDefaults turns them into
@@ -87,13 +78,14 @@ type ReviewerConfig struct {
 	ExcludeRepos []string `json:"excludeRepos"`
 }
 
-// ReviewRun is one run of the shared command, with Args added, on its own
-// schedule. A PRs run reviews each PR in its scopes once. A repos run runs
-// once per repo in Repos, for a tool that changes repos, such as one that
-// updates dependencies.
+// ReviewRun is one command on its own schedule. A PRs run runs it once per PR
+// in its scopes and head commit. A repos run runs it once per repo in Repos,
+// for a tool that changes repos, such as one that updates dependencies.
 type ReviewRun struct {
 	Name string `json:"name"` // "daily" or "weekly", for example
-	Args string `json:"args"` // words added after the shared command
+	// Command is the whole command, for example "{reviewer} {pr}". See
+	// reviewerCommand for how it is split and filled in.
+	Command string `json:"command"`
 	JobConfig
 	Target string `json:"target"` // TargetPRs or TargetRepos, empty for PRs
 	// Mine is your own open PRs, whoever the team is. PRs runs only.
@@ -123,12 +115,10 @@ func (r ReviewRun) timeout() time.Duration {
 func reviewJob(name string) string { return JobReview + ":" + name }
 
 // forRun is the reviewer settings for run: the shared ones, with the run's
-// arguments and scopes.
+// command and scopes.
 func (r ReviewerConfig) forRun(run ReviewRun) ReviewerConfig {
 	out := r
-	if r.Command != "" && run.Args != "" {
-		out.Command = r.Command + " " + run.Args
-	}
+	out.Command = run.Command
 	out.Mine, out.Team = run.Mine, run.Team
 	return out
 }
@@ -217,10 +207,14 @@ type Config struct {
 	CalendarID string `json:"calendarId"`
 	// JiraSite is the Atlassian site the stand-up and the team summary read
 	// tickets from, such as example.atlassian.net. Empty means neither reads tickets.
-	JiraSite string         `json:"jiraSite"`
-	Reviewer ReviewerConfig `json:"reviewer"`
-	Slack    SlackConfig    `json:"slack"`
-	Focus    FocusConfig    `json:"focus"`
+	JiraSite string `json:"jiraSite"`
+	// CommandPath is the PATH the runs' commands get, such as your login
+	// shell's, so a tool finds node or uv. Empty means the worker's own PATH,
+	// which under launchd is short.
+	CommandPath string         `json:"commandPath"`
+	Reviewer    ReviewerConfig `json:"reviewer"`
+	Slack       SlackConfig    `json:"slack"`
+	Focus       FocusConfig    `json:"focus"`
 	// Lunch decodes over its default, so a file without it keeps lunch on.
 	Lunch LunchConfig `json:"lunch"`
 	// Summary decodes over its default too, so Jira and Prose start on.
@@ -246,7 +240,7 @@ func defaultConfig() Config {
 				Team:      TeamScopeConfig{MaxAgeDays: 4},
 			}},
 		},
-		Focus: FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
+		Focus:   FocusConfig{WindowStart: "09:00", WindowEnd: "17:00", MinMinutes: 30},
 		Lunch:   LunchConfig{Enabled: true, Start: "12:00", End: "13:00"},
 		Summary: SummaryConfig{Jira: true, Prose: true},
 		Jobs: map[string]JobConfig{
@@ -261,15 +255,14 @@ func defaultConfig() Config {
 // Paths the worker uses. All but Cache, Reviewer and RepoRuns sit under
 // ~/Library/Application Support/koko, next to Koko's own files.
 type Paths struct {
-	Config     string // worker.json
-	Dir        string // worker/
-	State      string // worker/state.json
-	Logs       string // worker/logs/
-	Settings   string // worker/claude-settings.json
-	ClaudeWrap string // worker/reviewer-claude.sh
-	Cache      string // ~/.cache/koko-worker/repos, cache clones of the PRs' repos
-	Reviewer   string // ~/.cache/koko-worker/reviewer, the managed reviewer clone
-	RepoRuns   string // ~/.cache/koko-worker/repos-runs, clones every repos run shares, and reviews never use
+	Config   string // worker.json
+	Dir      string // worker/
+	State    string // worker/state.json
+	Logs     string // worker/logs/
+	Settings string // worker/claude-settings.json
+	Cache    string // ~/.cache/koko-worker/repos, cache clones of the PRs' repos
+	Reviewer string // ~/.cache/koko-worker/reviewer, the managed reviewer clone
+	RepoRuns string // ~/.cache/koko-worker/repos-runs, clones every repos run shares, and reviews never use
 }
 
 func workerPaths() Paths {
@@ -278,15 +271,14 @@ func workerPaths() Paths {
 	koko := filepath.Join(configDir, "koko")
 	dir := filepath.Join(koko, "worker")
 	return Paths{
-		Config:     filepath.Join(koko, "worker.json"),
-		Dir:        dir,
-		State:      filepath.Join(dir, "state.json"),
-		Logs:       filepath.Join(dir, "logs"),
-		Settings:   filepath.Join(dir, "claude-settings.json"),
-		ClaudeWrap: filepath.Join(dir, "reviewer-claude.sh"),
-		Cache:      filepath.Join(home, ".cache", "koko-worker", "repos"),
-		Reviewer:   filepath.Join(home, ".cache", "koko-worker", "reviewer"),
-		RepoRuns:   filepath.Join(home, ".cache", "koko-worker", "repos-runs"),
+		Config:   filepath.Join(koko, "worker.json"),
+		Dir:      dir,
+		State:    filepath.Join(dir, "state.json"),
+		Logs:     filepath.Join(dir, "logs"),
+		Settings: filepath.Join(dir, "claude-settings.json"),
+		Cache:    filepath.Join(home, ".cache", "koko-worker", "repos"),
+		Reviewer: filepath.Join(home, ".cache", "koko-worker", "reviewer"),
+		RepoRuns: filepath.Join(home, ".cache", "koko-worker", "repos-runs"),
 	}
 }
 
@@ -343,9 +335,7 @@ func (c *Config) fillDefaults() {
 	if r.Branch == "" {
 		r.Branch = d.Branch
 	}
-	r.Command = strings.TrimSpace(r.Command)
-	r.Logs = expandHome(strings.TrimSpace(r.Logs))
-	r.MarkerPrefix = strings.TrimSpace(r.MarkerPrefix)
+	c.CommandPath = strings.TrimSpace(c.CommandPath)
 	if r.Script == "" {
 		r.Script = d.Script
 	}
@@ -393,7 +383,7 @@ func (c *Config) fillDefaults() {
 	for i := range r.Runs {
 		run := &r.Runs[i]
 		run.Name = strings.TrimSpace(run.Name)
-		run.Args = strings.TrimSpace(run.Args)
+		run.Command = strings.TrimSpace(run.Command)
 		run.Target = strings.TrimSpace(run.Target)
 		if run.Target == "" {
 			run.Target = TargetPRs
@@ -492,8 +482,8 @@ func (c Config) resolveJob(job string) (string, error) {
 var prOnlyPlaceholders = []string{"{pr}", "{url}", "{sha}"}
 
 // runProblem is what is wrong with run's settings, or nil. A bad name or
-// target fails only this run, not every job. A repos run needs no marker or
-// scopes, but needs repos and a command without a PR in it.
+// target fails only this run, not every job. A repos run needs no scopes,
+// but needs repos and a command without a PR in it.
 func (c Config) runProblem(run ReviewRun) error {
 	if !runNameRe.MatchString(run.Name) {
 		return fmt.Errorf("run %q, want a name of up to 32 lowercase letters, digits and dashes", run.Name)
@@ -600,12 +590,6 @@ func (r ReviewerConfig) problem() error {
 	if err := r.commandProblem(); err != nil {
 		return err
 	}
-	if r.MarkerPrefix == "" {
-		return fmt.Errorf("no marker prefix is set")
-	}
-	if !markerPrefixRe.MatchString(r.MarkerPrefix) {
-		return fmt.Errorf("marker prefix %q, want letters, digits and dashes", r.MarkerPrefix)
-	}
 	if org, team, ok := strings.Cut(r.Team.Team, "/"); r.Team.Enabled && (!ok || org == "" || team == "") {
 		return fmt.Errorf("review team %q, want org/team-slug", r.Team.Team)
 	}
@@ -648,7 +632,10 @@ func (s SummaryConfig) problem() error {
 // Every run needs these. Only PRs runs need the rest of problem.
 func (r ReviewerConfig) commandProblem() error {
 	if r.Command == "" {
-		return fmt.Errorf("no reviewer command is set")
+		return fmt.Errorf("the run has no command. Set one that does its own work, posting included")
+	}
+	if strings.Contains(r.Command, "{claude}") {
+		return fmt.Errorf("the run's command uses {claude}, which is gone. Remove it, and let the tool run claude itself")
 	}
 	if _, _, err := splitEnv(r.Command); err != nil {
 		return err

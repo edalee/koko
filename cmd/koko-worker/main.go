@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -59,6 +60,8 @@ func main() {
 		err = install(paths, len(os.Args) > 2 && os.Args[2] == "--if-idle")
 	case "uninstall":
 		err = uninstall(paths)
+	case "stop":
+		err = cmdStop(paths, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -78,6 +81,7 @@ func usage() {
                                          nothing in a repos run.
                                          --date runs as if it were 07:00 that day
   koko-worker check [name]               check connections: slack, github, claude, jira, calendar, reviewer, summary, wake
+  koko-worker stop <job>                 stop a running job, scheduled or run now
   koko-worker status                     JSON status for the Koko app
   koko-worker install [--if-idle]        switch the launchd agent on. --if-idle skips it while a job runs
   koko-worker uninstall                  switch the launchd agent off
@@ -100,12 +104,9 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 	st := loadState(paths.State)
 	env := Env{
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
-		claude:      claudeRunner{settingsPath: paths.Settings},
-		send:        dmSender(cfg.Slack),
-		post:        postComment,
-		findComment: findComment,
-		prHead:      prHead,
-		online:      online,
+		claude: claudeRunner{settingsPath: paths.Settings},
+		send:   dmSender(cfg.Slack),
+		online: online,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
@@ -115,19 +116,25 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 			fmt.Println(printMessage(msg))
 			return nil
 		}
-		// A test run prints every comment, whatever is already on the PR.
-		env.findComment = func(context.Context, string, int, string) (string, bool, error) { return "", false, nil }
-		env.prHead = func(context.Context, string) (string, string, error) { return "OPEN", "", nil }
-		env.post = func(_ context.Context, prURL, body string) (string, error) {
-			fmt.Printf("── Comment for %s (not posted) ──\n%s\n\n", prURL, body)
-			return "", nil
-		}
 		env.persist = func(func(*State)) error { return nil }
 	}
 	return env
 }
 
+// runJob runs job, scheduled or now. `koko-worker stop` ends it early: its
+// context ends, as on a timeout, so the tool's process group gets SIGTERM.
+// A stopped run is a stopError, so the scheduler records it as failed and
+// does not try the slot again.
 func runJob(ctx context.Context, env Env, job, onlyURL string) error {
+	ctx, end := watchStop(ctx, env.paths, job)
+	err := startJob(ctx, env, job, onlyURL)
+	if end() {
+		return stopError{fmt.Errorf("%s stopped from Koko", job)}
+	}
+	return err
+}
+
+func startJob(ctx context.Context, env Env, job, onlyURL string) error {
 	switch job {
 	case JobStandup:
 		return runStandup(ctx, env)
@@ -443,6 +450,74 @@ func stopDetachedRuns(paths Paths) {
 	}
 }
 
+// stopPath is the file `koko-worker stop` writes to ask a running job to stop.
+func stopPath(paths Paths, job string) string { return filepath.Join(paths.Dir, job+".stop") }
+
+// stopWatchInterval is how often a running job looks for its stop file.
+var stopWatchInterval = 2 * time.Second
+
+// watchStop gives a context that ends when someone asks job to stop. The
+// returned function ends the watch and says whether a stop was asked for. A
+// stop file left from an earlier run is removed first, so it never stops
+// this one.
+func watchStop(ctx context.Context, paths Paths, job string) (context.Context, func() bool) {
+	path := stopPath(paths, job)
+	_ = os.Remove(path)
+	ctx, cancel := context.WithCancel(ctx)
+	var asked atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(stopWatchInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if _, err := os.Stat(path); err == nil {
+					_ = os.Remove(path)
+					log.Printf("%s: stopping, as asked from Koko", job)
+					asked.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, func() bool {
+		close(done)
+		cancel()
+		return asked.Load()
+	}
+}
+
+// cmdStop asks a running job to stop, through its stop file. The job may run
+// in the scheduler, in its own process or as a Run now. It fails if the job
+// is not running, which is when nobody holds its lock.
+func cmdStop(paths Paths, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("stop needs a job: standup, focus, summary, review or review:<run>")
+	}
+	cfg, err := loadConfig(paths.Config)
+	if err != nil {
+		return err
+	}
+	job, err := cfg.resolveJob(args[0])
+	if err != nil {
+		return err
+	}
+	if lockFree(jobLockPath(paths, job)) {
+		return fmt.Errorf("%s is not running", job)
+	}
+	if err := os.WriteFile(stopPath(paths, job), nil, 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("Asked %s to stop. It stops its tool, then records the run as stopped.\n", job)
+	return nil
+}
+
 // lastLogPrune is when serveTick last pruned old review logs. Once a day is
 // enough, and a restart prunes at once.
 var lastLogPrune time.Time
@@ -550,6 +625,8 @@ type jobStatus struct {
 	Enabled bool       `json:"enabled"`
 	Times   []string   `json:"times"`
 	LastRun *RunRecord `json:"lastRun,omitempty"`
+	// Running is true while a run of the job holds its lock, scheduled or not.
+	Running bool `json:"running,omitempty"`
 }
 
 func cmdStatus(paths Paths) error {
@@ -571,9 +648,14 @@ func cmdStatus(paths Paths) error {
 	if !st.WakeBooked.IsZero() {
 		out["wakeBooked"] = st.WakeBooked
 	}
-	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths), "command": cfg.Reviewer.Command}
-	if !cfg.Reviewer.usesReviewer() {
-		reviewer["source"], reviewer["cli"] = "command", commandProgram(cfg.Reviewer.Command)
+	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths)}
+	usesReviewer := false
+	for _, run := range cfg.Reviewer.Runs {
+		usesReviewer = usesReviewer || cfg.Reviewer.forRun(run).usesReviewer()
+	}
+	if !usesReviewer {
+		// Every run names its own program, so the source is not used.
+		reviewer["source"], reviewer["cli"] = "command", ""
 	} else if cfg.Reviewer.Source == SourceManaged {
 		reviewer["repo"], reviewer["branch"] = cfg.Reviewer.Repo, cfg.Reviewer.Branch
 		if st.ReviewerCommit != "" {
@@ -585,7 +667,7 @@ func cmdStatus(paths Paths) error {
 	jobs := map[string]jobStatus{}
 	for _, job := range cfg.jobNames() {
 		jc, _ := cfg.job(job)
-		js := jobStatus{Enabled: jc.Enabled, Times: jc.Times}
+		js := jobStatus{Enabled: jc.Enabled, Times: jc.Times, Running: !lockFree(jobLockPath(paths, job))}
 		for _, r := range st.Runs {
 			if r.Job == job && (js.LastRun == nil || r.At.After(js.LastRun.At)) {
 				rec := r

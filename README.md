@@ -141,15 +141,16 @@ It needs these connections. Settings > Worker checks each one and says how to fi
 - **Slack**: a bot token (`xoxb-`) with the `chat:write` scope, and your Slack member ID. These are apart from Koko's Slack bot.
 - **GitHub**: the `gh` CLI, signed in.
 - **Claude Code**: `claude` on the PATH, with the claude.ai Google Calendar connector. The stand-up's Jira check also needs the Atlassian connector.
-- **Reviewer**: any program that follows the reviewer contract in `docs/plans/030-reviewer-contract.md` and `031-generic-reviewer.md`. Set it in Settings > Worker > Review worker:
-  - **Command**, for example `{reviewer} {pr}`. `{reviewer}` is the CLI from a managed clone of a repo, kept up to date before each run, or from a local path.
-  - **Logs**, off by default. With logs off, the reviewer writes its comments as JSON to `$REVIEW_RESULT`.
-  - **Marker**, the prefix of the comment markers, `<!-- marker:`.
-  - **Orgs**, the orgs and accounts whose PRs are reviewed. Empty means every org.
-  - **Excluded repos**, `owner/repo` names that are never reviewed.
+- **Review worker runs**: each run is a command on its own schedule (`docs/plans/037-run-commands.md`). The worker reads only its exit code: 0 is done, 2 is nothing to do, anything else failed. The tool does its own work, posting included. Set them in Settings > Worker > Review worker:
+  - **Command**, per run, for example `{reviewer} {url}`. `{reviewer}` is the CLI from a managed clone of a repo, kept up to date before each run, or from a local path.
+  - **Works on**: a PRs run runs once per PR and head commit, and a repos run once per repo.
+  - **Orgs**, the orgs and accounts whose PRs are run on. Empty means every org.
+  - **Excluded repos**, `owner/repo` names that are never run on.
 
-  In a PRs run the reviewer never posts: its gh and git are read-only, and the worker posts its comments. A repos run gets the real gh and git, so its tool can push and open PRs.
+  Commands get the real gh and git. If a tool needs programs such as node or uv, set Settings > Worker > General > Commands > PATH, or press "Use my shell's PATH".
 - **Mac wake** (optional): a sudoers rule, so the worker can book wakes with `pmset`. The wake check shows the line to add with `sudo visudo -f /etc/sudoers.d/koko-worker`.
+
+A job's card shows Stop while the job runs. `koko-worker stop <job>` does the same from a terminal.
 
 The switch in Settings > Worker installs and removes the launchd agent `com.koko.worker`. You can also run `koko-worker install` and `koko-worker uninstall`.
 
@@ -251,7 +252,7 @@ cmd/koko-worker/         Scheduled jobs (own Go module, launchd agent)
   scheduler.go           Due slots, catch-up, retries, state.json
   jobs.go                Stand-up, focus time and review jobs
   summary.go             The team summary job
-  review_contract.go     The reviewer command and result file
+  review_contract.go     The run command, its environment and PATH
   reviewer.go            The reviewer: managed clone or local path
   claude.go              Headless `claude -p` runner with allowlists
   calendar.go            Calendar events and the focus gap finder
@@ -272,7 +273,7 @@ frontend/src/
   test/                  Vitest tests
 
 docs/
-  plans/                 Implementation plans (001-036)
+  plans/                 Implementation plans (001-037)
   architecture/          ADRs and the design system
   references/            Setup guides
 ```

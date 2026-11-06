@@ -13,7 +13,7 @@ describe("merge", () => {
     expect(cfg.reviewer.runs).toEqual([
       {
         name: "daily",
-        args: "",
+        command: "",
         enabled: true,
         times: ["11:00"],
         days: ["mon", "tue", "wed", "thu", "fri"],
@@ -38,7 +38,7 @@ describe("merge", () => {
           runs: [
             {
               name: "weekly",
-              args: "--update-deps",
+              command: "acme --update-deps {repo}",
               times: ["08:00"],
               target: "repos",
               repos: ["acme/api"],
@@ -52,7 +52,7 @@ describe("merge", () => {
     expect(cfg.reviewer.runs).toHaveLength(1);
     const [run] = cfg.reviewer.runs;
     expect(run.name).toBe("weekly");
-    expect(run.args).toBe("--update-deps");
+    expect(run.command).toBe("acme --update-deps {repo}");
     expect(run.target).toBe("repos");
     expect(run.repos).toEqual(["acme/api"]);
     expect(run.enabled).toBe(false);
@@ -62,10 +62,29 @@ describe("merge", () => {
     expect(run.team.repos).toEqual([]);
   });
 
-  it("leaves an empty command empty", () => {
-    const cfg = merge(JSON.stringify({ reviewer: { command: "", logs: "" } }));
-    expect(cfg.reviewer.command).toBe("");
-    expect(cfg.reviewer.markerPrefix).toBe("");
+  it("drops the shared command, logs folder and marker, and gives runs no command", () => {
+    const cfg = merge(
+      JSON.stringify({
+        reviewer: {
+          command: "acme {pr}",
+          logs: "~/logs",
+          markerPrefix: "acme",
+          runs: [{ name: "daily", args: "--all" }],
+        },
+      }),
+    );
+    expect("command" in cfg.reviewer).toBe(false);
+    expect("logs" in cfg.reviewer).toBe(false);
+    expect("markerPrefix" in cfg.reviewer).toBe(false);
+    expect(cfg.reviewer.runs[0].command).toBe("");
+    expect("args" in cfg.reviewer.runs[0]).toBe(false);
+  });
+
+  it("keeps the PATH for commands, empty by default", () => {
+    expect(merge("{}").commandPath).toBe("");
+    expect(merge(JSON.stringify({ commandPath: "/opt/bin:/usr/bin" })).commandPath).toBe(
+      "/opt/bin:/usr/bin",
+    );
   });
 
   it("keeps the time zone, calendar and Jira site", () => {
@@ -83,7 +102,7 @@ describe("merge", () => {
 
   it("names no reviewer, team or Jira site on a new install", () => {
     const cfg = merge("{}");
-    expect(cfg.reviewer.command).toBe("");
+    expect(cfg.reviewer.runs[0].command).toBe("");
     expect(cfg.reviewer.repo).toBe("");
     expect(cfg.reviewer.runs).toHaveLength(1);
     expect(cfg.reviewer.runs[0].team).toEqual({

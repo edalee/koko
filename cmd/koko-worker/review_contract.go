@@ -1,66 +1,25 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-// The reviewer contract (plans 030 and 031) lets the review worker run any
-// reviewer:
+// The command contract (plans 031 and 037) lets a run call any tool:
 //
-//   - The worker runs Reviewer.Command in a clone of the PR's repo, checked
-//     out at the PR head. reviewerCommand fills in its placeholders.
-//   - The environment carries REVIEW_RESULT (where to write the result),
-//     REVIEW_PR, REVIEW_REPO, REVIEW_PR_URL and REVIEW_SHA. REVIEW_CLAUDE is
-//     a claude wrapper with posting turned off.
-//   - Exit code 0 means done, 2 means nothing to review (the PR is closed,
-//     a draft, already reviewed, or held by another run), anything else failed.
-//   - With no Reviewer.Logs, the reviewer writes resultFile to REVIEW_RESULT.
+//   - A PRs run runs its command in a clone of the PR's repo, checked out at
+//     the PR head. A repos run runs it in a clean checkout of the repo's
+//     default branch. reviewerCommand fills in the placeholders.
+//   - The environment carries REVIEW_PR, REVIEW_REPO, REVIEW_PR_URL,
+//     REVIEW_SHA and RUN_KIND (prs or repos). PATH is CommandPath, if set.
+//   - Exit code 0 means done, 2 means nothing to do (the PR is closed, a
+//     draft, already reviewed, or held by another run), anything else failed.
 //
-// The reviewer never posts. The worker posts each comment as written.
-
-// reviewComment is one PR comment for the worker to post.
-type reviewComment struct {
-	Pass    string `json:"pass"`    // "review", "docs", "comments" or the reviewer's own name
-	Verdict string `json:"verdict"` // lgtm, mergeable, follow-ups or not-mergeable
-	Body    string `json:"body"`    // Markdown, starting with the marker line
-}
-
-// resultFile is the file a reviewer with no Reviewer.Logs writes. A reviewed
-// PR gets at least one comment: a clean review is an LGTM comment.
-type resultFile struct {
-	Status   string          `json:"status"` // reviewed, skipped or failed
-	Reason   string          `json:"reason"` // why it skipped or failed
-	Comments []reviewComment `json:"comments"`
-}
-
-// Verdicts in the contract.
-const (
-	contractLGTM         = "lgtm"
-	contractMergeable    = "mergeable"
-	contractFollowUps    = "follow-ups"
-	contractNotMergeable = "not-mergeable"
-)
-
-// internalVerdict maps a contract verdict to the worker's own, and says
-// whether it is an LGTM. An LGTM counts as ready to approve.
-func internalVerdict(v string) (verdict string, lgtm bool) {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case contractLGTM:
-		return verdictReady, true
-	case contractMergeable:
-		return verdictReady, false
-	case contractFollowUps:
-		return verdictFollowUps, false
-	case contractNotMergeable:
-		return verdictNotMergeable, false
-	}
-	return "", false
-}
+// The tool does its own work, posting included. The worker reads only the
+// exit code.
 
 // splitCommand splits a command into words on spaces, tabs and newlines. Single or
 // double quotes keep a word with spaces together, and are dropped. Nothing
@@ -116,16 +75,16 @@ func splitEnv(command string) (env, words []string, err error) {
 	return env, words, nil
 }
 
-// reviewerCommand is the program to run for one PR, its arguments and the
-// environment the command sets. It fills in {reviewer} (the CLI from the
-// source setting), {claude} (the wrapper), {pr}, {repo}, {url} and {sha}. A
-// "~" at the start of the program means your home folder.
-func reviewerCommand(command, cli, claude string, p SearchPR, sha string) (env []string, prog string, args []string, err error) {
+// reviewerCommand is the program to run, its arguments and the environment
+// the command sets. It fills in {reviewer} (the CLI from the source setting),
+// {pr}, {repo}, {url} and {sha}. A "~" at the start of the program means your
+// home folder.
+func reviewerCommand(command, cli string, p SearchPR, sha string) (env []string, prog string, args []string, err error) {
 	env, words, err := splitEnv(command)
 	if err != nil {
 		return nil, "", nil, err
 	}
-	r := strings.NewReplacer("{reviewer}", cli, "{claude}", claude,
+	r := strings.NewReplacer("{reviewer}", cli,
 		"{pr}", fmt.Sprint(p.Number), "{repo}", p.repo(), "{url}", p.URL, "{sha}", sha)
 	for i := range env {
 		env[i] = r.Replace(env[i])
@@ -146,77 +105,39 @@ func commandProgram(command string) string {
 	return expandHome(words[0])
 }
 
-// readResult reads the reviewer's result file into an outcome. A
-// "skipped" status is reviewSkippedError, like exit code 2. A "failed" status,
-// a missing file or one the worker cannot read is an error.
-func readResult(path string) (reviewOutcome, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return reviewOutcome{}, fmt.Errorf("the reviewer exited 0 but wrote no result file")
-	}
-	if err != nil {
-		return reviewOutcome{}, err
-	}
-	var res resultFile
-	if err := json.Unmarshal(data, &res); err != nil {
-		return reviewOutcome{}, fmt.Errorf("the reviewer's result file is not valid JSON: %v", err)
-	}
-	switch res.Status {
-	case "skipped":
-		return reviewOutcome{}, reviewSkippedError{fmt.Errorf("%s", strings.TrimSpace(res.Reason))}
-	case "failed":
-		return reviewOutcome{}, fmt.Errorf("the reviewer failed: %s", truncate(strings.TrimSpace(res.Reason), 300))
-	case "reviewed":
-	default:
-		return reviewOutcome{}, fmt.Errorf("the reviewer's result has status %q, want reviewed, skipped or failed", res.Status)
-	}
-	out := reviewOutcome{verdicts: map[string]string{}}
-	for _, c := range res.Comments {
-		v, lgtm := internalVerdict(c.Verdict)
-		if c.Pass != "" && v != "" {
-			out.verdicts[c.Pass] = v
-		}
-		out.comments = append(out.comments, reviewComment{Pass: c.Pass, Verdict: c.Verdict, Body: strings.TrimSpace(c.Body)})
-		if lgtm {
-			out.lgtmPasses++
+// commandEnv is the environment of a run's command: base, with PATH set to
+// path if path is not empty, then the command's own NAME=value words, then
+// extra. exec keeps the last of a name, so extra wins.
+func commandEnv(base []string, path string, cmdEnv []string, extra ...string) []string {
+	out := make([]string, 0, len(base)+len(cmdEnv)+len(extra)+1)
+	for _, kv := range base {
+		if path == "" || !strings.HasPrefix(kv, "PATH=") {
+			out = append(out, kv)
 		}
 	}
-	return out, nil
+	if path != "" {
+		out = append(out, "PATH="+path)
+	}
+	return append(append(out, cmdEnv...), extra...)
 }
 
-// lgtmLine finds the log format's clean-review verdict, "> **LGTM!**", in a draft.
-var lgtmLine = regexp.MustCompile(`(?im)^>\s*\*\*\s*LGTM!?\s*\*\*`)
-
-// isLGTMDraft is true for a clean-review comment in the log format.
-func isLGTMDraft(body string) bool { return lgtmLine.MatchString(body) }
-
-// lgtmOnHead is true when the PR has a code review comment behind prefix that
-// is an LGTM for the head commit. A reviewer in the log format then skips the
-// code review, as it was already clean at this commit.
-func lgtmOnHead(ctx context.Context, repo string, number int, prefix, sha string) (bool, error) {
-	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
-		"--jq", `.[] | .body | gsub("\n"; "\\n")`)
-	if err != nil {
-		return false, err
+// findProgram is the file prog names. A bare name is looked up on path, else
+// on the worker's own PATH. A name with a slash is used as it is.
+func findProgram(prog, path string) (string, error) {
+	if strings.Contains(prog, "/") {
+		return prog, nil
 	}
-	short := sha[:min(7, len(sha))]
-	for _, line := range strings.Split(string(out), "\n") {
-		body := strings.ReplaceAll(line, `\n`, "\n")
-		if hasHeadMarker(body, prefix, short) && isLGTMDraft(body) {
-			return true, nil
+	if path == "" {
+		path = os.Getenv("PATH")
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		file := filepath.Join(dir, prog)
+		if executable(file) {
+			return file, nil
 		}
 	}
-	return false, nil
-}
-
-// hasHeadMarker is true when a line of body is the code review marker for
-// the short commit ID. The marker may sit on any line.
-func hasHeadMarker(body, prefix, short string) bool {
-	for _, l := range strings.Split(body, "\n") {
-		l = strings.TrimSpace(l)
-		if strings.HasPrefix(l, "<!-- "+prefix+":review") && strings.Contains(l, "sha="+short) {
-			return true
-		}
-	}
-	return false
+	return "", fmt.Errorf("%s is not on the PATH for commands. Set it in Settings > Worker > General, or use the full path", prog)
 }

@@ -13,6 +13,7 @@ import { DEFAULTS, daysLabel, merge, nextSlot, reviewerSetUp } from "../componen
 vi.mock("../../wailsjs/go/main/WorkerService", () => ({
   Check: vi.fn().mockResolvedValue("[]"),
   GetConfig: vi.fn(),
+  LoginPath: vi.fn().mockResolvedValue("/opt/homebrew/bin:/usr/bin"),
   ReadLog: vi.fn().mockResolvedValue(""),
   RunNow: vi.fn(),
   SaveConfig: vi.fn().mockResolvedValue(undefined),
@@ -37,10 +38,14 @@ const full = () =>
       reviewer: {
         repo: "acme/reviewer",
         script: "review",
-        command: "{reviewer} {pr}",
-        markerPrefix: "acme",
         orgs: ["acme"],
-        team: { enabled: true, maxAgeDays: 4, team: "acme/platform", repos: ["acme/api"] },
+        runs: [
+          {
+            name: "daily",
+            command: "{reviewer} {pr}",
+            team: { enabled: true, maxAgeDays: 4, team: "acme/platform", repos: ["acme/api"] },
+          },
+        ],
       },
     }),
   );
@@ -84,6 +89,14 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     expect(mockRunNow).toHaveBeenCalledWith("focus", false);
   });
 
+  it("fills the PATH for commands from your shell, and saves it", async () => {
+    await renderLoaded();
+    expect(screen.getByLabelText("PATH")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Use my shell's PATH" }));
+    await waitFor(() => expect(lastSaved().commandPath).toBe("/opt/homebrew/bin:/usr/bin"));
+    expect(screen.getByLabelText("PATH")).toHaveValue("/opt/homebrew/bin:/usr/bin");
+  });
+
   it("shows on or off and the days on a closed card", async () => {
     await renderLoaded();
     const review = screen.getByRole("region", { name: "Review worker" });
@@ -100,10 +113,13 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     expect(
       within(review).getByText("Managed clone of acme/reviewer, branch main"),
     ).toBeInTheDocument();
-    expect(within(review).queryByRole("textbox", { name: "Command" })).toBeNull();
+    expect(within(review).queryByRole("textbox", { name: "Repo" })).toBeNull();
     fireEvent.click(within(review).getByRole("button", { name: /Reviewer/, expanded: false }));
+    expect(within(review).getByRole("textbox", { name: "Repo" })).toHaveValue("acme/reviewer");
+    // The command is the run's own, and the logs folder and marker are gone (plan 037).
     expect(within(review).getByRole("textbox", { name: "Command" })).toHaveValue("{reviewer} {pr}");
-    expect(within(review).getByRole("textbox", { name: "Marker" })).toHaveValue("acme");
+    expect(within(review).queryByRole("textbox", { name: "Marker" })).toBeNull();
+    expect(within(review).queryByRole("textbox", { name: "Logs folder" })).toBeNull();
 
     expect(within(review).getByText("Which PRs")).toBeInTheDocument();
     for (const label of ["Orgs", "Excluded repos"]) {
@@ -121,7 +137,7 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     mockGetConfig.mockResolvedValue("{}");
     render(<WorkerSettings />);
     const review = openCard("Review worker");
-    expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+    expect(within(review).getByRole("textbox", { name: "Repo" })).toBeInTheDocument();
   });
 
   // The open group is decided once, at load. A click that sets the reviewer up
@@ -132,11 +148,11 @@ describe("WorkerSettings layout (plan 035 part 2)", () => {
     cfg.reviewer.path = "~/bin/review";
     await renderLoaded(cfg);
     const review = openCard("Review worker");
-    expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+    expect(within(review).getByRole("textbox", { name: "Repo" })).toBeInTheDocument();
 
     fireEvent.click(within(review).getByRole("button", { name: "Local path" }));
     expect(lastSaved().reviewer.source).toBe("local");
-    expect(within(review).getByRole("textbox", { name: "Command" })).toBeInTheDocument();
+    expect(within(review).getByRole("textbox", { name: "Path" })).toBeInTheDocument();
   });
 
   it("shows the team box with Team PRs off, for the stand-up", async () => {
@@ -276,28 +292,25 @@ describe("the master switch", () => {
 });
 
 describe("reviewerSetUp", () => {
+  const withCommand = (command: string) => [{ ...DEFAULTS.reviewer.runs[0], command }];
   const ready = {
     ...DEFAULTS.reviewer,
-    command: "{reviewer} {pr}",
-    markerPrefix: "acme",
+    runs: withCommand("{reviewer} {url}"),
     repo: "acme/reviewer",
     script: "review",
   };
 
   it("follows the worker's reviewer rules", () => {
     expect(reviewerSetUp(ready)).toBe(true);
-    expect(reviewerSetUp({ ...ready, command: "" })).toBe(false);
-    expect(reviewerSetUp({ ...ready, markerPrefix: "" })).toBe(false);
-    expect(reviewerSetUp({ ...ready, markerPrefix: "Acme!" })).toBe(false);
     expect(reviewerSetUp({ ...ready, repo: "reviewer" })).toBe(false);
     expect(reviewerSetUp({ ...ready, script: "" })).toBe(false);
     expect(reviewerSetUp({ ...ready, script: "../bin/sh" })).toBe(false);
     expect(reviewerSetUp({ ...ready, source: "local", path: "" })).toBe(false);
     expect(reviewerSetUp({ ...ready, source: "local", path: "~/bin/review" })).toBe(true);
-    // A command without {reviewer} needs no source.
-    expect(reviewerSetUp({ ...ready, command: "acme-review {pr}", repo: "", script: "" })).toBe(
-      true,
-    );
+    // Runs without {reviewer} need no source.
+    expect(
+      reviewerSetUp({ ...ready, runs: withCommand("acme-review {pr}"), repo: "", script: "" }),
+    ).toBe(true);
   });
 });
 

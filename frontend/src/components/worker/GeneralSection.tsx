@@ -1,6 +1,6 @@
 import { Check, CircleAlert, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { Check as CheckConnections } from "../../../wailsjs/go/main/WorkerService";
+import { Check as CheckConnections, LoginPath } from "../../../wailsjs/go/main/WorkerService";
 import { cn } from "../../lib/utils";
 import Toggle from "../Toggle";
 import { type CheckResult, CONNECTION_NAMES, formatWhen, inputClass } from "./config";
@@ -8,13 +8,28 @@ import { Field, Group } from "./ui";
 import type { WorkerConfigApi } from "./useWorkerConfig";
 
 // GeneralSection holds the settings that no one job card owns: the master switch,
-// Slack, the time zone, calendar and Jira site, lunch, and the connection checks.
+// Slack, the time zone, calendar and Jira site, lunch, the PATH for commands,
+// and the connection checks.
 export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
   const { cfg, setCfg, status, error, setError, save, saveField, switching, setEnabled } = api;
   const { lunchDraft, setLunchDraft, lunchError, saveLunchTimes, toggleLunch } = api;
   const [showToken, setShowToken] = useState(false);
   const [checks, setChecks] = useState<CheckResult[] | null>(null);
   const [checking, setChecking] = useState(false);
+
+  const [readingPath, setReadingPath] = useState(false);
+
+  // fillShellPath fills the PATH for commands from your login shell, and saves it.
+  const fillShellPath = async () => {
+    setReadingPath(true);
+    try {
+      await save({ ...cfg, commandPath: await LoginPath() });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setReadingPath(false);
+    }
+  };
 
   const handleCheck = async () => {
     setChecking(true);
@@ -180,6 +195,36 @@ export default function GeneralSection({ api }: { api: WorkerConfigApi }) {
             {cfg.lunch.enabled && lunchError && (
               <p className="text-[10px] text-error">{lunchError} It is not saved yet.</p>
             )}
+          </Field>
+        </Group>
+
+        <Group title="Commands">
+          <Field
+            label="PATH"
+            htmlFor="worker-command-path"
+            help="The PATH the review worker's runs get, so a tool finds programs such as node or uv. Empty means the worker's own short PATH."
+          >
+            <div className="flex items-center gap-2">
+              <input
+                id="worker-command-path"
+                type="text"
+                value={cfg.commandPath}
+                onChange={(e) => setCfg({ ...cfg, commandPath: e.target.value })}
+                onBlur={() => save(cfg)}
+                placeholder="The worker's own PATH"
+                className={cn(inputClass, "flex-1 min-w-0 font-mono placeholder:text-tertiary")}
+              />
+              <button
+                type="button"
+                onClick={fillShellPath}
+                disabled={readingPath}
+                className="flex items-center gap-1 px-2 py-1 text-[10px] rounded-md border border-white/[0.08] hover:bg-white/[0.06] shrink-0 disabled:opacity-50"
+                title="Fill in the PATH of your login shell"
+              >
+                {readingPath && <Loader2 className="size-3 animate-spin" />}
+                <span className="text-white">Use my shell's PATH</span>
+              </button>
+            </div>
           </Field>
         </Group>
       </fieldset>

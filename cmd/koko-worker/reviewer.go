@@ -33,7 +33,7 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 		return "", fmt.Errorf("review: %w. Fix it in Settings > Worker > Review worker", err)
 	}
 	if !r.usesReviewer() {
-		return "", programProblem(r.Command)
+		return "", programProblem(r.Command, env.cfg.CommandPath)
 	}
 	cli := env.cfg.reviewerCLI(env.paths)
 	if r.Source == SourceLocal {
@@ -107,12 +107,13 @@ func prepareReviewer(ctx context.Context, env Env) (string, error) {
 }
 
 // programProblem says why a command's program cannot run, or nil. A bare
-// name is looked up on the worker's PATH, which under launchd is short.
-func programProblem(command string) error {
+// name is looked up on path, the PATH for commands, else on the worker's
+// PATH, which under launchd is short.
+func programProblem(command, path string) error {
 	prog := commandProgram(command)
 	switch {
 	case strings.Contains(prog, "{"):
-		return nil // a placeholder, such as {claude}, filled in at run time
+		return nil // a placeholder, filled in at run time
 	case strings.Contains(prog, "/") && !filepath.IsAbs(prog):
 		// The reviewer runs in the PR's clone, so a relative path would
 		// point somewhere else at run time than here.
@@ -124,8 +125,8 @@ func programProblem(command string) error {
 		}
 		return nil
 	}
-	if _, err := exec.LookPath(prog); err != nil {
-		return fmt.Errorf("review: the reviewer program %s is not on the worker's PATH. Use its full path", prog)
+	if _, err := findProgram(prog, path); err != nil {
+		return fmt.Errorf("review: %w", err)
 	}
 	return nil
 }

@@ -1,5 +1,5 @@
-// Mirrors ReviewRun and its scopes in cmd/koko-worker/config.go: one run of
-// the reviewer command, on its own days and times.
+// Mirrors ReviewRun and its scopes in cmd/koko-worker/config.go: one command,
+// on its own days and times.
 export interface ScopeConfig {
   enabled: boolean;
   maxAgeDays: number;
@@ -12,7 +12,8 @@ export interface TeamScopeConfig extends ScopeConfig {
 
 export interface ReviewRun {
   name: string;
-  args: string;
+  // command is the whole command. The worker reads only its exit code.
+  command: string;
   enabled: boolean;
   times: string[];
   days: string[];
@@ -50,7 +51,7 @@ export type RawRun = Partial<Omit<ReviewRun, "mine" | "team" | "repos">> & {
 function withDefaults(r: RawRun): ReviewRun {
   return {
     name: r.name ?? "",
-    args: r.args ?? "",
+    command: r.command ?? "",
     enabled: r.enabled ?? false,
     times: r.times?.filter(Boolean).length ? r.times : LEGACY_TIMES,
     days: r.days?.length ? r.days : WEEKDAYS,
@@ -108,10 +109,21 @@ export function runsProblem(runs: ReviewRun[]): string | null {
 
 // prOnlyIn lists the PR placeholders in a repos run's command, which make
 // the worker refuse to run it.
-export function prOnlyIn(command: string, run: ReviewRun): string[] {
+export function prOnlyIn(run: ReviewRun): string[] {
   if (run.target !== "repos") return [];
-  const full = `${command} ${run.args}`;
-  return PR_ONLY.filter((p) => full.includes(p));
+  return PR_ONLY.filter((p) => run.command.includes(p));
+}
+
+// commandProblem says why the worker will refuse a run's command, or null.
+// It follows commandProblem() in cmd/koko-worker/config.go.
+export function commandProblem(run: ReviewRun): string | null {
+  if (!run.command.trim()) return "Set a command. It does its own work, posting included.";
+  if (run.command.includes("{claude}"))
+    return "{claude} is gone. Remove it, and let the tool run claude itself.";
+  const blocked = prOnlyIn(run);
+  if (blocked.length > 0)
+    return `A repos run has no PR, so the worker refuses a command with ${blocked.join(", ")}.`;
+  return null;
 }
 
 // standupRun is the run the stand-up takes its team from, as in the worker:
