@@ -4,6 +4,8 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [0.5.17] - 2026-11-06
+
 ### Added
 - **Copy for Logseq**: the terminal's right-click menu copies the selection as Logseq blocks. Each paragraph, heading, code block and table is a block, nested lists become child blocks, numbered items keep their numbers, and task items become TODO or DONE
 - **PATH for commands**: Settings > Worker > General sets the PATH the review worker's commands get, so a tool finds programs such as node or uv. "Use my shell's PATH" fills it from your login shell (plan 037)
