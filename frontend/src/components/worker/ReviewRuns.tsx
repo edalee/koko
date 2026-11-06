@@ -6,18 +6,17 @@ import Toggle from "../Toggle";
 import { inputClass, type RunRecord } from "./config";
 import JobSchedule from "./JobSchedule";
 import RunControls from "./RunControls";
-import { newRun, prOnlyIn, type ReviewRun } from "./runs";
+import { commandProblem, newRun, type ReviewRun } from "./runs";
 import { Choice, Field } from "./ui";
 
 const days = (value: string) => Number.parseInt(value, 10) || 0;
 
-// ReviewRuns edits the runs of the reviewer command. Each run is the job
-// "review:<name>", with its own arguments, days and times, its PR scopes or
-// its repos, and its own Test and Run now. onEdit keeps a change without
-// saving it, for text as you type. onSave saves the runs.
+// ReviewRuns edits the runs. Each run is the job "review:<name>", with its
+// own command, days and times, its PR scopes or its repos, and its own Test
+// and Run now. onEdit keeps a change without saving it, for text as you
+// type. onSave saves the runs.
 export default function ReviewRuns({
   runs,
-  command,
   jobs,
   running,
   setRunning,
@@ -26,7 +25,6 @@ export default function ReviewRuns({
   onSave,
 }: {
   runs: ReviewRun[];
-  command: string;
   jobs?: Record<string, { lastRun?: RunRecord }>;
   running: string | null;
   setRunning: (running: string | null) => void;
@@ -43,9 +41,9 @@ export default function ReviewRuns({
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-2">
         <p className="text-[10px] text-tertiary leading-relaxed">
-          Each run adds its own arguments to the command, on its own days and times. A PRs run
-          reviews each PR once. A repos run runs once per repo, in a clean checkout of its default
-          branch, for a tool that changes repos.
+          Each run is a command on its own days and times. A PRs run runs it once per PR and head
+          commit. A repos run runs it once per repo, in a clean checkout of its default branch. The
+          worker reads only the exit code: 0 is done, 2 is nothing to do, anything else failed.
         </p>
         <button
           type="button"
@@ -60,7 +58,7 @@ export default function ReviewRuns({
 
       {runs.map((run, i) => {
         const job = `review:${run.name}`;
-        const blocked = prOnlyIn(command, run);
+        const problem = commandProblem(run);
         return (
           <section
             // The name alone can repeat while a second run is renamed.
@@ -70,15 +68,7 @@ export default function ReviewRuns({
           >
             <div className="flex items-center gap-2">
               <NameInput name={run.name} onSave={(name) => save(i, { name })} />
-              <input
-                type="text"
-                aria-label="Extra arguments"
-                value={run.args}
-                onChange={(e) => edit(i, { args: e.target.value })}
-                onBlur={() => onSave(runs)}
-                placeholder="Extra arguments, for example --update-deps"
-                className={cn(inputClass, "flex-1 min-w-0 font-mono placeholder:text-tertiary")}
-              />
+              <span className="flex-1" />
               <Toggle
                 id={`run-${i}`}
                 label={`Run ${run.name} on`}
@@ -95,6 +85,30 @@ export default function ReviewRuns({
                 <Trash2 className="size-3" />
               </button>
             </div>
+
+            <Field
+              label="Command"
+              htmlFor={`run-${i}-command`}
+              help={
+                <>
+                  The tool does its own work, posting included. {"{reviewer}"} is the CLI set under
+                  Reviewer. A PRs run fills in {"{pr}"}, {"{repo}"}, {"{url}"} and {"{sha}"}. A
+                  repos run fills in only {"{repo}"}. NAME=value words at the start set environment
+                  variables.
+                </>
+              }
+            >
+              <input
+                id={`run-${i}-command`}
+                type="text"
+                value={run.command}
+                onChange={(e) => edit(i, { command: e.target.value })}
+                onBlur={() => onSave(runs)}
+                placeholder={run.target === "prs" ? "{reviewer} {url}" : "{reviewer} {repo}"}
+                className={cn(inputClass, "w-full font-mono placeholder:text-tertiary")}
+              />
+              {problem && <p className="text-[10px] text-warning">{problem}</p>}
+            </Field>
 
             <JobSchedule
               jobKey={job}
@@ -229,11 +243,6 @@ export default function ReviewRuns({
                     <span>minutes per repo</span>
                   </div>
                 </Field>
-                {blocked.length > 0 && (
-                  <p className="text-[10px] text-warning">
-                    {`A repos run has no PR, so the worker refuses a command with ${blocked.join(", ")}.`}
-                  </p>
-                )}
               </>
             )}
 
@@ -244,7 +253,7 @@ export default function ReviewRuns({
               last={jobs?.[job]?.lastRun}
               done={
                 run.target === "prs"
-                  ? "Done. The reviews are on the PRs."
+                  ? "Done. The command ran for each PR that was due."
                   : "Done. Check your Slack DMs."
               }
               running={running}

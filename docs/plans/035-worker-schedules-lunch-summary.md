@@ -50,6 +50,8 @@ Koko stays generic. No code, default, example or help text names a reviewer tool
 
 ## 3. Several runs of the reviewer command
 
+> **Changed by plan 037.** Each run has its own `command` in place of the shared command and its `args`. PRs runs post nothing themselves: the command does, and the worker reads only its exit code. `{claude}` is gone.
+
 `reviewer.runs` is a list. Each run has:
 
 | Field | Meaning |

@@ -98,27 +98,39 @@ func runCheck(ctx context.Context, cfg Config, paths Paths, name string) CheckRe
 		}
 
 	case "reviewer":
-		// Every run uses the same reviewer source and program, so the check
-		// tests them once. A problem in any run, such as a bad name or
-		// target, fails the check.
+		// Each run has its own command. A problem in any run, such as a bad
+		// name or a program not on the PATH for commands, fails the check.
+		// The runs share the reviewer source, so the check tests it once, if
+		// a run uses {reviewer}.
 		rv := cfg.Reviewer
 		var runErr error
+		var programs []string
+		usesReviewer := false
 		for _, run := range cfg.Reviewer.Runs {
-			if err := cfg.runProblem(run); err != nil && runErr == nil {
+			if err := cfg.runProblem(run); err != nil {
 				runErr = fmt.Errorf("%s run: %w", run.Name, err)
+				break
 			}
+			if rv.forRun(run).usesReviewer() {
+				usesReviewer = true
+				continue
+			}
+			if err := programProblem(run.Command, cfg.CommandPath); err != nil {
+				runErr = fmt.Errorf("%s run: %s", run.Name, strings.TrimPrefix(err.Error(), "review: "))
+				break
+			}
+			programs = append(programs, run.Name+" runs "+commandProgram(run.Command))
 		}
 		cli := cfg.reviewerCLI(workerPaths())
 		_, cloneErr := os.Stat(filepath.Join(workerPaths().Reviewer, ".git"))
 		switch {
 		case runErr != nil:
 			r.Detail = runErr.Error()
-			r.Fix = "Fix the reviewer settings in Settings > Worker > Review worker."
-		case !rv.usesReviewer():
-			r.OK, r.Detail = true, "runs "+commandProgram(rv.Command)
-			if err := programProblem(rv.Command); err != nil {
-				r.OK, r.Detail = false, strings.TrimPrefix(err.Error(), "review: ")
-				r.Fix = "Give the reviewer program's full path in the command."
+			r.Fix = "Fix the run in Settings > Worker > Review worker, or the PATH for commands in General."
+		case !usesReviewer:
+			r.OK, r.Detail = true, strings.Join(programs, ", ")
+			if len(programs) == 0 {
+				r.Detail = "no runs"
 			}
 		case rv.Source == SourceLocal:
 			r.OK, r.Detail = rv.Path != "" && executable(cli), "local reviewer at "+cli

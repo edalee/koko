@@ -413,7 +413,7 @@
 
 ## ADR-034: The reviewer stays read-only, and the worker posts
 - **Date:** 2026-09-30
-- **Status:** Accepted. Amended on 2026-10-01 and 2026-10-05, see the end of this ADR. Since 2026-10-08 the reviewer and its arguments are a setting (ADR-040). The guards below still apply
+- **Status:** Superseded by ADR-043. The read-only gh and git, the claude wrapper and the worker's posting are gone. The cache clones and the time limits still apply
 - **Decision:** The review job calls the reviewer CLI as `<reviewer> <number>` with its own arguments and never passes `-c`. Extra guards stop the reviewer's Claude from posting to GitHub. The worker's own Go code posts the review, as the 2026-10-01 amendment says.
 - **Rationale:**
   - The review runs in a cache clone under `~/.cache/koko-worker/repos`, at the PR head. Your working clones are never touched.
@@ -497,7 +497,7 @@
 
 ## ADR-039: A reviewer contract for the review worker
 - **Date:** 2026-10-08
-- **Status:** Accepted. Amended by ADR-040: `reviewer.command` and `reviewer.logs` replace `reviewer.args` and `reviewer.format`
+- **Status:** Superseded by ADR-043. The worker reads only the exit code, so the result file, the verdicts and the marker are gone
 - **Decision:** The review worker runs any reviewer CLI that follows a small contract, not only one. The worker fills in `reviewer.args` and passes `REVIEW_RESULT`, `REVIEW_PR`, `REVIEW_REPO`, `REVIEW_PR_URL`, `REVIEW_SHA` and `REVIEW_CLAUDE`. The reviewer exits 0, or 2 for nothing to review, and writes its comments as JSON to `REVIEW_RESULT`. It never posts. The worker posts each comment as written.
 - **Rationale:**
   - Two reviewer changes, LGTM drafts and skipping a code review already clean at the head commit, broke a worker that read the reviewer's private logs. A contract keeps the reviewer's internals out of the worker.
@@ -510,7 +510,7 @@
 
 ## ADR-040: The reviewer is one command and an optional log folder
 - **Date:** 2026-10-08
-- **Status:** Accepted
+- **Status:** Superseded by ADR-043. Each run has its own command. The log folder and `{claude}` are gone. The way a command is split and filled in still applies
 - **Decision:** `reviewer.command` and `reviewer.logs` replace `reviewer.format` and `reviewer.args`. The command is split on spaces, with quotes, and runs without a shell. Leading `NAME=value` words set environment variables. `{reviewer}` is the CLI from the source setting, and `{claude}` is the wrapper that cannot post. An empty log folder means the result file. No code names one reviewer CLI or org, and a new install has no reviewer until you set one.
 - **Rationale:**
   - One command says everything about how a reviewer runs. A reviewer on the PATH needs no source at all.
@@ -547,3 +547,21 @@
   - A break that runs out while Koko is hidden is never seen, so it waits.
 - **Files:** `activity.go`, `idle_darwin.go`, `idle_other.go`, `frontend/src/lib/breaks.ts`, `frontend/src/hooks/useSafeWorking.ts`
 - **Plan:** `docs/plans/033-idle-aware-breaks.md`
+
+## ADR-043: Each run is a command, judged by its exit code
+- **Date:** 2026-11-06
+- **Status:** Accepted (supersedes ADR-034, ADR-039 and ADR-040)
+- **Decision:** Each run of the review worker has its own command. The worker runs it on a schedule and reads only its exit code: 0 is done, 2 is nothing to do, anything else failed. The tool does its own work, posting included. A PRs run runs the command once per PR and head commit. A done commit is not run again, and a failed one is.
+- **Rationale:**
+  - The worker read the reviewer's output: a result file, or its logs in one fixed layout. When the reviewer changed its comment format, every review failed with "a pass wrote a PR comment the worker could not read".
+  - A reviewer that posts one comment and edits it on the same commit needs no posting, marker, verdict or LGTM logic in the worker. The reviewer also decides when a PR needs no review, and exits 2.
+  - The read-only gh and git and the claude wrapper existed only so the worker could post. They are gone, so a PRs run gets the real gh and git, as a repos run does.
+  - A shared command with arguments per run could not call two programs. One command per run can.
+  - `commandPath`, the PATH for commands, lets a tool find node, uv or gcloud. launchd's PATH is short. Koko fills it from your login shell, started with a clean environment.
+- **Consequences:**
+  - The shared command does not carry over, because it ran with a read-only gh and may not post. Each run needs a new command, and a run without one fails and says so.
+  - A failed record from before this change does not block a new run at the same commit.
+  - Test on a PRs run prints the command for one PR and runs nothing, because the command may post. Run now runs it for real.
+  - The stand-up shows each PR as reviewed, failed or not yet, with no verdict.
+- **Files:** `cmd/koko-worker/jobs.go`, `cmd/koko-worker/review_contract.go`, `cmd/koko-worker/config.go`, `cmd/koko-worker/repos_run.go`, `worker_service.go`, `frontend/src/components/worker/ReviewRuns.tsx`, `frontend/src/components/worker/GeneralSection.tsx`
+- **Plan:** `docs/plans/037-run-commands.md`

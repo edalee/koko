@@ -93,29 +93,20 @@ func loadState(path string) State {
 	return st
 }
 
-// ReviewResult is the reviewer's outcome for one commit of one PR.
+// ReviewResult is how the run's command ended for one commit of one PR.
+// Failed is empty for exit 0.
 type ReviewResult struct {
-	URL      string            `json:"url"`
-	Title    string            `json:"title"`
-	Repo     string            `json:"repo"`
-	Number   int               `json:"number"`
-	SHA      string            `json:"sha"`
-	Mine     bool              `json:"mine"`
-	At       time.Time         `json:"at"`
-	Verdicts map[string]string `json:"verdicts,omitempty"` // pass -> verdictReady, verdictFollowUps or verdictNotMergeable
-	Failed   string            `json:"failed,omitempty"`
-	Comments []string          `json:"comments,omitempty"` // URLs of the PR comments posted
-	LGTM     bool              `json:"lgtm,omitempty"`     // no pass had anything to say
-	Pinged   bool              `json:"pinged,omitempty"`   // the one Slack line about the review went out
-	// Unposted are comments not yet posted. The next review run posts them.
-	Unposted []string `json:"unposted,omitempty"`
-	// PostTries counts failed tries to post. At maxPostTries the review
-	// counts as failed, and its unposted comments are dropped.
-	PostTries int `json:"postTries,omitempty"`
-	// Report and Posted belong to the old stand-up thread. Pruning still
-	// removes report files that old results point to.
+	URL    string    `json:"url"`
+	Title  string    `json:"title"`
+	Repo   string    `json:"repo"`
+	Number int       `json:"number"`
+	SHA    string    `json:"sha"`
+	Mine   bool      `json:"mine"`
+	At     time.Time `json:"at"`
+	Failed string    `json:"failed,omitempty"`
+	// Report belongs to the old stand-up thread. Pruning still removes
+	// report files that old results point to.
 	Report string `json:"report,omitempty"`
-	Posted bool   `json:"posted,omitempty"`
 }
 
 func timeKey(job, clock string) string { return job + "@" + clock }

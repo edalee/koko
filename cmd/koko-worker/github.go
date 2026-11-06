@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -187,54 +186,6 @@ func reviewRequests(ctx context.Context) ([]SearchPR, error) {
 	return prs, err
 }
 
-// postComment adds body as a comment on the PR, through your gh auth, and
-// returns the comment's URL. It runs the real gh, not the reviewer's read-only one.
-func postComment(ctx context.Context, prURL, body string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "gh", "pr", "comment", prURL, "--body-file", "-")
-	cmd.Stdin = strings.NewReader(body)
-	out, err := cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("gh pr comment: %s", truncate(strings.TrimSpace(string(ee.Stderr)), 300))
-		}
-		return "", fmt.Errorf("gh: %w", err)
-	}
-	return lastLines(strings.TrimSpace(string(out)), 1), nil
-}
-
-// findComment looks on the PR for a comment whose first line is line, and
-// returns its URL.
-func findComment(ctx context.Context, repo string, number int, line string) (string, bool, error) {
-	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
-		"--jq", `.[] | {url: .html_url, first: (.body | split("\n") | .[0])}`)
-	if err != nil {
-		return "", false, err
-	}
-	dec := json.NewDecoder(bytes.NewReader(out))
-	for {
-		var c struct{ URL, First string }
-		if err := dec.Decode(&c); err != nil {
-			break
-		}
-		if c.First == line {
-			return c.URL, true, nil
-		}
-	}
-	return "", false, nil
-}
-
-// prHead returns the PR's state (OPEN, MERGED or CLOSED) and head commit.
-func prHead(ctx context.Context, prURL string) (string, string, error) {
-	var d struct {
-		State      string `json:"state"`
-		HeadRefOid string `json:"headRefOid"`
-	}
-	err := ghJSON(ctx, &d, "pr", "view", prURL, "--json", "state,headRefOid")
-	return d.State, d.HeadRefOid, err
-}
-
 // repoPRs is every open, non-draft PR in the repos, by anyone.
 func repoPRs(ctx context.Context, repos []string) ([]SearchPR, error) {
 	if len(repos) == 0 {
@@ -276,19 +227,6 @@ func teamMembers(ctx context.Context, team string) (map[string]bool, error) {
 		return nil, fmt.Errorf("team %s has no members, or you cannot see them", team)
 	}
 	return members, nil
-}
-
-// hasReviewComment is true if the PR already carries a comment behind the
-// reviewer's marker "<!-- prefix:", for example from a teammate who ran the
-// reviewer and posted its findings. prefix is checked to be [a-z0-9-] in
-// ReviewerConfig.problem, so it is safe inside the jq filter.
-func hasReviewComment(ctx context.Context, repo string, number int, prefix string) (bool, error) {
-	out, err := gh(ctx, "api", "--paginate", fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
-		"--jq", `.[] | select(.body | contains("<!-- `+prefix+`:")) | .id`)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(out)) != "", nil
 }
 
 func slackLink(url, text string) string {

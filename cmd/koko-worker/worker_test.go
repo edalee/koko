@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -156,8 +154,9 @@ func TestEventTimesKeepOtherZones(t *testing.T) {
 func testConfig() Config {
 	cfg := defaultConfig()
 	cfg.Enabled = true
-	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "acme-review {pr}", "acme"
+	cfg.Reviewer.Command = "acme-review {pr}"
 	cfg.Reviewer.Team = TeamScopeConfig{Enabled: true, MaxAgeDays: 4, Team: "acme/platform"}
+	cfg.Reviewer.Runs[0].Command = cfg.Reviewer.Command
 	cfg.Reviewer.Runs[0].Enabled = true
 	cfg.Reviewer.Runs[0].Team = cfg.Reviewer.Team
 	return cfg
@@ -570,15 +569,6 @@ func TestSudoersRuleIsNarrow(t *testing.T) {
 	}
 }
 
-func TestLogKey(t *testing.T) {
-	if got := logKey("acme/api", 28); got != "acme_api_28" {
-		t.Errorf("got %q", got)
-	}
-	if got := logKey("acme/data-service", 5); got != "acme_data_service_5" {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestManualSlots(t *testing.T) {
 	cfg := testConfig()
 	// A stand-up run by hand at 06:55 covers the 07:00 stand-up.
@@ -737,53 +727,6 @@ func TestCatchUpAfterSleepStillWorks(t *testing.T) {
 	}
 }
 
-func TestReadOnlyShims(t *testing.T) {
-	dir := t.TempDir()
-	realDir := dir + "/real"
-	if err := os.MkdirAll(realDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// Fake gh and git that only say they ran.
-	for _, name := range []string{"gh", "git"} {
-		if err := os.WriteFile(realDir+"/"+name, []byte("#!/bin/bash\necho ran\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("PATH", realDir+":/usr/bin:/bin")
-	shims, err := readOnlyShims(dir + "/shims")
-	if err != nil {
-		t.Fatal(err)
-	}
-	run := func(name string, args ...string) bool {
-		out, err := exec.Command(shims+"/"+name, args...).CombinedOutput()
-		return err == nil && strings.TrimSpace(string(out)) == "ran"
-	}
-	allowed := [][]string{
-		{"gh", "pr", "view", "28"}, {"gh", "pr", "diff", "28"}, {"gh", "pr", "checkout", "28"},
-		{"gh", "api", "repos/o/r/pulls/28/comments", "--jq", ".[].body"}, {"gh", "repo", "clone", "o/r"},
-		{"gh", "run", "view", "123"}, {"gh", "auth", "status"},
-		{"git", "log", "--oneline"}, {"git", "-C", ".", "diff", "main"}, {"git", "-c", "x=y", "show"},
-	}
-	refused := [][]string{
-		{"gh", "pr", "comment", "28", "-b", "x"}, {"gh", "pr", "review", "28", "--approve"}, {"gh", "pr", "merge", "28"},
-		{"gh", "api", "-X", "PATCH", "repos/o/r/issues/comments/1"}, {"gh", "api", "--method=POST", "x"},
-		{"gh", "api", "repos/o/r/issues/28/comments", "-f", "body=x"}, {"gh", "api", "x", "--input", "f"},
-		{"gh", "workflow", "run", "deploy"}, {"gh", "repo", "delete", "o/r"}, {"gh", "auth", "token"},
-		{"gh", "secret", "list"}, {"gh", "issue", "create"},
-		{"git", "push"}, {"git", "-C", ".", "push", "origin"}, {"git", "-c", "a=b", "push"},
-	}
-	for _, a := range allowed {
-		if !run(a[0], a[1:]...) {
-			t.Errorf("refused, want allowed: %v", a)
-		}
-	}
-	for _, r := range refused {
-		if run(r[0], r[1:]...) {
-			t.Errorf("allowed, want refused: %v", r)
-		}
-	}
-}
-
 func TestBuildBlocks(t *testing.T) {
 	long := strings.Repeat("a line of text for slack\n", 300) // about 7,500 characters
 	msgs := buildBlocks([]string{"*Header*", "*Today*\n• No meetings", long})
@@ -816,171 +759,6 @@ func TestBuildBlocks(t *testing.T) {
 		if len(m) > 50 {
 			t.Errorf("message with %d blocks", len(m))
 		}
-	}
-}
-
-func TestOverallVerdictByPass(t *testing.T) {
-	for _, c := range []struct {
-		in   map[string]string
-		want string
-	}{
-		{map[string]string{"review": verdictReady, "docs": verdictFollowUps, "comments": verdictFollowUps}, verdictReady},
-		{map[string]string{"review": verdictFollowUps, "docs": verdictReady}, verdictFollowUps},
-		{map[string]string{"review": verdictReady, "comments": verdictNotMergeable}, verdictNotMergeable},
-		{nil, ""},
-	} {
-		if got := overallVerdict(c.in); got != c.want {
-			t.Errorf("overallVerdict(%v) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
-// fakePostEnv posts every body but "fails", saves results in st and records
-// DMs. The PR is open at commit "abc" unless head says otherwise.
-type fakePostEnv struct {
-	st       *State
-	posted   []string
-	dms      []string
-	onGitHub map[string]string
-	head     string
-	offline  bool
-}
-
-func (f *fakePostEnv) env() Env {
-	return Env{
-		post: func(_ context.Context, _, body string) (string, error) {
-			if body == "fails" {
-				return "", fmt.Errorf("network")
-			}
-			f.posted = append(f.posted, body)
-			return "https://github.com/o/r/pull/1#" + firstLine(body), nil
-		},
-		findComment: func(_ context.Context, _ string, _ int, line string) (string, bool, error) {
-			url, ok := f.onGitHub[line]
-			return url, ok, nil
-		},
-		prHead: func(context.Context, string) (string, string, error) {
-			if f.head != "" {
-				return "OPEN", f.head, nil
-			}
-			return "OPEN", "abc", nil
-		},
-		online:  func(context.Context) bool { return !f.offline },
-		send:    func(_ context.Context, m Message) error { f.dms = append(f.dms, m.Sections...); return nil },
-		persist: func(change func(*State)) error { change(f.st); return nil },
-	}
-}
-
-func TestPostPending(t *testing.T) {
-	const key = "o/r#1@abc"
-	ctx := context.Background()
-	newFake := func() *fakePostEnv {
-		return &fakePostEnv{st: &State{Results: map[string]ReviewResult{}, Reviewed: map[string]time.Time{key: time.Now()}}}
-	}
-	r := ReviewResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc"}
-
-	// A failed post stops the loop, keeps the rest and counts one try.
-	f := newFake()
-	r.Unposted = []string{"a", "fails", "b"}
-	if gaveUp, err := postPending(ctx, f.env(), key, r); err != nil || gaveUp != "" {
-		t.Fatal(gaveUp, err)
-	}
-	got := f.st.Results[key]
-	if strings.Join(f.posted, ",") != "a" || strings.Join(got.Unposted, ",") != "fails,b" || got.PostTries != 1 {
-		t.Errorf("after one failure: posted %v, result %+v", f.posted, got)
-	}
-
-	// Offline, a failed post does not count a try.
-	f.offline = true
-	var offline offlineError
-	if _, err := postPending(ctx, f.env(), key, got); !errors.As(err, &offline) || f.st.Results[key].PostTries != 1 {
-		t.Errorf("offline: err %v, tries %d", err, f.st.Results[key].PostTries)
-	}
-	f.offline = false
-
-	// The last try fails the review, drops the rest and sends a DM.
-	got.PostTries = maxPostTries - 1
-	gaveUp, err := postPending(ctx, f.env(), key, got)
-	if got = f.st.Results[key]; err != nil || gaveUp == "" || got.Failed == "" || len(got.Unposted) != 0 || len(f.dms) != 1 {
-		t.Errorf("after the last try: gaveUp %q, err %v, result %+v, dms %v", gaveUp, err, got, f.dms)
-	}
-
-	// A comment already on the PR, from a post that timed out or a --pr run
-	// at the same commit, is not posted twice.
-	f = newFake()
-	r.Unposted = []string{"<!-- acme:review n=1 sha=abc -->\nbody", "b"}
-	f.onGitHub = map[string]string{"<!-- acme:review n=1 sha=abc -->": "https://github.com/o/r/pull/1#old"}
-	if _, err := postPending(ctx, f.env(), key, r); err != nil {
-		t.Fatal(err)
-	}
-	if got = f.st.Results[key]; strings.Join(f.posted, ",") != "b" || len(got.Comments) != 2 || got.Comments[0] != "https://github.com/o/r/pull/1#old" {
-		t.Errorf("retry: posted %v, comments %v", f.posted, got.Comments)
-	}
-
-	// A retry on a PR with new commits posts nothing and frees it for a new review.
-	f = newFake()
-	f.head = "def"
-	r.Unposted = []string{"a"}
-	if _, err := postPending(ctx, f.env(), key, r); err != nil {
-		t.Fatal(err)
-	}
-	if got = f.st.Results[key]; len(f.posted) != 0 || got.Failed == "" || len(f.st.Reviewed) != 0 || len(f.dms) != 0 {
-		t.Errorf("changed PR: posted %v, result %+v, reviewed %v, dms %v", f.posted, got, f.st.Reviewed, f.dms)
-	}
-
-	// The same, with part of the review already posted: a DM says how to
-	// review it again, because the posted marker blocks a fresh review.
-	f = newFake()
-	f.head = "def"
-	r.Comments = []string{"https://github.com/o/r/pull/1#first"}
-	if _, err := postPending(ctx, f.env(), key, r); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.dms) != 1 || !strings.Contains(f.dms[0], "Run now") {
-		t.Errorf("partly posted: dms %v", f.dms)
-	}
-}
-
-func TestPostRefusedForGood(t *testing.T) {
-	const key = "o/r#1@abc"
-	f := &fakePostEnv{st: &State{Results: map[string]ReviewResult{}, Reviewed: map[string]time.Time{}}}
-	env := f.env()
-	env.post = func(context.Context, string, string) (string, error) {
-		return "", fmt.Errorf("gh pr comment: GraphQL: Repository was archived so is read-only and unable to create comment because issue is locked (addComment)")
-	}
-	r := ReviewResult{URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}}
-	gaveUp, err := postPending(context.Background(), env, key, r)
-	got := f.st.Results[key]
-	if err != nil || gaveUp == "" || got.PostTries != 1 || len(got.Unposted) != 0 || len(f.dms) != 1 || !strings.Contains(f.dms[0], "refuses comments") {
-		t.Errorf("gaveUp %q, err %v, result %+v, dms %q", gaveUp, err, got, f.dms)
-	}
-	if refusedForGood(fmt.Errorf("gh: connection reset by peer")) {
-		t.Error("a network error is not permanent")
-	}
-}
-
-func TestReviewPingOnce(t *testing.T) {
-	const key = "o/r#1@abc"
-	ctx := context.Background()
-	f := &fakePostEnv{st: &State{Results: map[string]ReviewResult{}, Reviewed: map[string]time.Time{}}}
-	r := ReviewResult{URL: "https://github.com/o/r/pull/1", Title: "Fix it", Repo: "o/r", Number: 1, SHA: "abc",
-		Verdicts: map[string]string{"review": verdictFollowUps}, Unposted: []string{"a", "b"}}
-	if _, err := postPending(ctx, f.env(), key, r); err != nil {
-		t.Fatal(err)
-	}
-	want := "Review worker reviewed <https://github.com/o/r/pull/1|r#1> Fix it: mergeable with follow-ups (<https://github.com/o/r/pull/1#a|review>)"
-	if len(f.dms) != 1 || f.dms[0] != want || !f.st.Results[key].Pinged {
-		t.Fatalf("dms %q, pinged %v", f.dms, f.st.Results[key].Pinged)
-	}
-	// A later call with nothing left to post sends nothing more.
-	if _, err := postPending(ctx, f.env(), key, f.st.Results[key]); err != nil || len(f.dms) != 1 {
-		t.Errorf("second call: err %v, dms %q", err, f.dms)
-	}
-	// An LGTM says so.
-	lg := r
-	lg.LGTM, lg.Verdicts, lg.Comments = true, nil, []string{"https://github.com/o/r/pull/1#c"}
-	if got := reviewPing(lg); !strings.Contains(got, ": LGTM (") {
-		t.Errorf("lgtm ping: %q", got)
 	}
 }
 
@@ -1018,27 +796,23 @@ func TestReviewSectionListsOnlyTheTeam(t *testing.T) {
 	}
 }
 
-func TestStandupStatusForPostingStates(t *testing.T) {
+func TestStandupStatus(t *testing.T) {
 	p := SearchPR{URL: "https://github.com/o/r/pull/1", Number: 1}
 	p.Repository.NameWithOwner = "o/r"
 	status := func(r ReviewResult) (string, map[string]int) {
 		st := &State{Results: map[string]ReviewResult{"o/r#1@abc": r}}
 		tally := &reviewTally{loaded: true}
 		counts := map[string]int{}
-		// prDetail is not reached for these states, or fails harmlessly offline.
 		return tally.status(context.Background(), Env{state: st}, p, counts), counts
 	}
-	base := ReviewResult{Repo: "o/r", Number: 1, SHA: "abc", Verdicts: map[string]string{"review": verdictReady}}
-
-	unposted := base
-	unposted.Unposted = []string{"a"}
-	if s, c := status(unposted); s != "reviewed, not posted yet" || c["waiting"] != 1 || c["reviewed"] != 0 {
-		t.Errorf("unposted: %q %v", s, c)
+	failed := ReviewResult{Repo: "o/r", Number: 1, SHA: "abc", Failed: "exit status 1: boom"}
+	if s, c := status(failed); s != "the review worker's run failed on it" || c["failed"] != 1 {
+		t.Errorf("failed: %q %v", s, c)
 	}
-	partial := base
-	partial.Failed, partial.Comments = "could not post the review: boom", []string{"https://github.com/o/r/pull/1#c1"}
-	if s, _ := status(partial); !strings.HasPrefix(s, "the review worker posted part of its review") {
-		t.Errorf("partial: %q", s)
+	// prDetail fails harmlessly offline, so the commit is not compared.
+	done := ReviewResult{Repo: "o/r", Number: 1, SHA: "abc"}
+	if s, c := status(done); !strings.HasPrefix(s, "reviewed") || c["reviewed"] != 1 {
+		t.Errorf("done: %q %v", s, c)
 	}
 }
 
@@ -1059,27 +833,6 @@ func TestStandupStatusForSkippedRepos(t *testing.T) {
 	env.cfg.Reviewer.ExcludeRepos, env.cfg.Reviewer.Orgs = nil, []string{"acme"}
 	if s := tally.status(context.Background(), env, p, map[string]int{}); s != "skipped: not in the review orgs" {
 		t.Errorf("outside the orgs: %q", s)
-	}
-	// An unposted review is never posted in a skipped repo, so it is skipped too.
-	env.state.Results["o/r#1@abc"] = ReviewResult{Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}}
-	if s := tally.status(context.Background(), env, p, map[string]int{}); s != "skipped: not in the review orgs" {
-		t.Errorf("unposted in a skipped repo: %q", s)
-	}
-}
-
-func TestPostUnpostedSkipsSkippedRepos(t *testing.T) {
-	f := &fakePostEnv{st: &State{Results: map[string]ReviewResult{
-		"o/r#1@abc": {URL: "https://github.com/o/r/pull/1", Repo: "o/r", Number: 1, SHA: "abc", Unposted: []string{"a"}},
-	}, Reviewed: map[string]time.Time{}}}
-	env := f.env()
-	env.state, env.cfg = f.st, testConfig()
-	env.cfg.Reviewer.ExcludeRepos = []string{"O/R"}
-	if _, err := postUnposted(context.Background(), env); err != nil || len(f.posted) != 0 {
-		t.Errorf("excluded repo: err %v, posted %q", err, f.posted)
-	}
-	env.cfg.Reviewer.ExcludeRepos = nil
-	if _, err := postUnposted(context.Background(), env); err != nil || len(f.posted) != 1 {
-		t.Errorf("included repo: err %v, posted %q", err, f.posted)
 	}
 }
 
@@ -1111,18 +864,25 @@ func TestReviewScope(t *testing.T) {
 	}
 }
 
-func TestOneReviewPerPR(t *testing.T) {
+func TestOneRunPerCommit(t *testing.T) {
 	st := loadState("/nonexistent")
-	st.Reviewed[reviewKey("o/r", 12, "aaa")] = monday(9, 0)
-	st.Results[reviewKey("o/r", 12, "aaa")] = ReviewResult{Repo: "o/r", Number: 12, SHA: "aaa", At: monday(9, 0)}
-	st.Results[reviewKey("o/r", 12, "bbb")] = ReviewResult{Repo: "o/r", Number: 12, SHA: "bbb", At: monday(12, 0)}
-	if !reviewedBefore(&st, "o/r", 12) {
-		t.Error("a new commit must not bring a second review")
+	done, failed, old := reviewKey("o/r", 12, "aaa"), reviewKey("o/r", 12, "bbb"), reviewKey("o/r", 12, "ccc")
+	st.Reviewed[done] = monday(9, 0)
+	st.Results[done] = ReviewResult{Repo: "o/r", Number: 12, SHA: "aaa", At: monday(9, 0)}
+	st.Results[failed] = ReviewResult{Repo: "o/r", Number: 12, SHA: "bbb", At: monday(12, 0), Failed: "boom"}
+	// Before plan 037, a failure was in Reviewed too.
+	st.Reviewed[old] = monday(13, 0)
+	st.Results[old] = ReviewResult{Repo: "o/r", Number: 12, SHA: "ccc", At: monday(13, 0), Failed: "unreadable comment"}
+	if !doneAt(&st, done) {
+		t.Error("a commit done must not run again")
 	}
-	if reviewedBefore(&st, "o/r", 1) || reviewedBefore(&st, "o/r2", 12) {
-		t.Error("other PRs count as reviewed")
+	if doneAt(&st, failed) || doneAt(&st, old) {
+		t.Error("a failed commit must run again")
 	}
-	if r, ok := latestResult(&st, "o/r", 12); !ok || r.SHA != "bbb" {
+	if doneAt(&st, reviewKey("o/r", 12, "ddd")) || doneAt(&st, reviewKey("o/r2", 12, "aaa")) {
+		t.Error("a new commit or another PR counts as done")
+	}
+	if r, ok := latestResult(&st, "o/r", 12); !ok || r.SHA != "ccc" {
 		t.Errorf("latest = %+v", r)
 	}
 }

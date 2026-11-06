@@ -6,6 +6,14 @@ All notable changes to Koko are documented here. Format follows [Keep a Changelo
 
 ### Added
 - **Copy for Logseq**: the terminal's right-click menu copies the selection as Logseq blocks. Each paragraph, heading, code block and table is a block, nested lists become child blocks, numbered items keep their numbers, and task items become TODO or DONE
+- **PATH for commands**: Settings > Worker > General sets the PATH the review worker's commands get, so a tool finds programs such as node or uv. "Use my shell's PATH" fills it from your login shell (plan 037)
+
+### Changed
+- **Review worker runs**: each run has its own command, and the worker reads only its exit code: 0 is done, 2 is nothing to do, anything else failed. The tool does its own work, posting included. A PRs run runs once per PR and head commit, so a new commit runs again. Test on a PRs run shows the command and runs nothing (plan 037)
+- **Stand-up**: a PR shows as reviewed, failed or not yet, with no verdict
+
+### Removed
+- **Reviewer contract**: the result file (`$REVIEW_RESULT`), the logs folder, the marker, the worker's own comments and LGTM, the read-only gh and git, and `{claude}`. After you update, give each run a command in Settings > Worker > Review worker, because the old shared command does not carry over. It ran with a read-only gh, so it may not post
 
 ### Fixed
 - **Update notice**: Koko compares each part of a version as a number. Before, it compared versions as text, so 0.5.9 looked newer than 0.5.10, and an older copy missed new releases

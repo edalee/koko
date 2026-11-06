@@ -1,5 +1,7 @@
 # Plan 031: a reviewer that is not tied to one CLI
 
+> **Superseded by plan 037.** Each run now has its own command, and the worker reads only its exit code. The result file, logs folder, marker, posting, read-only gh and git and `{claude}` are gone.
+
 ## Problem
 
 Plan 030 added a reviewer contract, but the review worker still assumed one reviewer CLI:

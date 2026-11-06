@@ -16,11 +16,11 @@ import (
 )
 
 // twoRuns is testConfig with the daily PRs run and a weekly repos run on
-// Monday at 08:00, with its own arguments.
+// Monday at 08:00, with its own command.
 func twoRuns() Config {
 	cfg := testConfig()
 	cfg.Reviewer.Runs = append(cfg.Reviewer.Runs, ReviewRun{
-		Name: "weekly", Args: "--update-deps", Target: TargetRepos,
+		Name: "weekly", Command: "acme-review --update-deps {repo}", Target: TargetRepos,
 		JobConfig: JobConfig{Enabled: true, Times: []string{"08:00"}, Days: []string{"mon"}},
 		Repos:     []string{"acme/api", "acme/web"},
 	})
@@ -28,7 +28,7 @@ func twoRuns() Config {
 }
 
 func TestOldConfigBecomesOneDailyRun(t *testing.T) {
-	cfg := loadTestConfig(t, `{"reviewer": {"command": "{reviewer} {pr}", "markerPrefix": "acme",
+	cfg := loadTestConfig(t, `{"reviewer": {
 	    "mine": {"enabled": true, "maxAgeDays": 7}, "team": {"enabled": true, "maxAgeDays": 2, "team": "acme/platform"}},
 	  "jobs": {"review": {"enabled": true, "times": ["10:00", "15:00"], "days": ["mon", "thu"]}}}`)
 	if len(cfg.Reviewer.Runs) != 1 {
@@ -60,8 +60,8 @@ func TestOldConfigBecomesOneDailyRun(t *testing.T) {
 
 func TestBadRunNames(t *testing.T) {
 	for runs, jobs := range map[string]string{
-		`[{"name": "Weekly Run"}]`:                   "standup focus summary",
-		`[{"name": ""}]`:                             "standup focus summary",
+		`[{"name": "Weekly Run"}]`:                      "standup focus summary",
+		`[{"name": ""}]`:                                "standup focus summary",
 		`[{"name": "` + strings.Repeat("a", 33) + `"}]`: "standup focus summary",
 		// The first of two runs with one name keeps its job, and both fail.
 		`[{"name": "daily"}, {"name": "daily"}]`: "standup focus summary review:daily",
@@ -131,7 +131,7 @@ func TestTwoRunsKeepTheirOwnSchedule(t *testing.T) {
 func TestRunSettings(t *testing.T) {
 	cfg := twoRuns()
 	daily, weekly := cfg.Reviewer.Runs[0], cfg.Reviewer.Runs[1]
-	if rv := cfg.Reviewer.forRun(weekly); rv.Command != "acme-review {pr} --update-deps" {
+	if rv := cfg.Reviewer.forRun(weekly); rv.Command != "acme-review --update-deps {repo}" {
 		t.Errorf("command %q", rv.Command)
 	}
 	if daily.timeout() != reviewTimeout || weekly.timeout() != time.Hour {
@@ -144,23 +144,21 @@ func TestRunSettings(t *testing.T) {
 	if err := cfg.runProblem(daily); err != nil {
 		t.Errorf("daily: %v", err)
 	}
-	// The shared command names a PR, which a repos run does not have.
-	if err := cfg.runProblem(weekly); err == nil || !strings.Contains(err.Error(), "{pr}") {
-		t.Errorf("repos run with {pr}: %v", err)
+	if err := cfg.runProblem(weekly); err != nil {
+		t.Errorf("weekly: %v", err)
 	}
-	for _, command := range []string{"acme {url}", "acme --at {sha}"} {
-		cfg.Reviewer.Command = command
-		if cfg.runProblem(weekly) == nil {
-			t.Errorf("%q: want an error", command)
+	// A command that names a PR, which a repos run does not have.
+	for _, command := range []string{"acme {pr}", "acme {url}", "acme --at {sha}"} {
+		bad := weekly
+		bad.Command = command
+		if err := cfg.runProblem(bad); err == nil || !strings.Contains(err.Error(), "cannot use") {
+			t.Errorf("%q: %v", command, err)
 		}
 	}
-	// A repos run needs no marker, but needs repos.
-	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = "acme {repo}", ""
-	if err := cfg.runProblem(weekly); err != nil {
-		t.Errorf("repos run: %v", err)
-	}
+	// Every run needs its own command.
+	daily.Command = ""
 	if cfg.runProblem(daily) == nil {
-		t.Error("a PRs run without a marker: want an error")
+		t.Error("a PRs run without a command: want an error")
 	}
 	for _, repos := range [][]string{nil, {"api"}} {
 		weekly.Repos = repos
@@ -210,7 +208,7 @@ func reposEnv(t *testing.T, script string) (Env, *[]string, map[string]string) {
 	var dms []string
 	env := Env{
 		cfg:   cfg,
-		paths: Paths{Dir: tmp, Logs: filepath.Join(tmp, "logs"), ClaudeWrap: filepath.Join(tmp, "claude.sh")},
+		paths: Paths{Dir: tmp, Logs: filepath.Join(tmp, "logs")},
 		send: func(_ context.Context, m Message) error {
 			dms = append(dms, m.Sections...)
 			return nil
@@ -277,7 +275,7 @@ func TestReposRunTestRunsNothing(t *testing.T) {
 	if err := runRepos(context.Background(), env, run); err != nil {
 		t.Fatal(err)
 	}
-	if len(dirs) != 0 || len(*dms) != 1 || !strings.Contains((*dms)[0], "• acme/api: "+filepath.Join(filepath.Dir(env.paths.ClaudeWrap), "tool")+" --update-deps acme/api") {
+	if len(dirs) != 0 || len(*dms) != 1 || !strings.Contains((*dms)[0], "• acme/api: "+filepath.Join(env.paths.Dir, "tool")+" --update-deps acme/api") {
 		t.Errorf("checkouts %v, dms %q", dirs, *dms)
 	}
 }
@@ -356,7 +354,7 @@ func TestRunCommandPicksTheRun(t *testing.T) {
 	ctx := context.Background()
 	for _, job := range []string{"review", "review:weekly"} {
 		err := cmdRun(ctx, paths, []string{job})
-		if err == nil || !strings.Contains(err.Error(), "no reviewer command") {
+		if err == nil || !strings.Contains(err.Error(), "has no command") {
 			t.Errorf("%s: %v", job, err)
 		}
 	}
@@ -399,7 +397,7 @@ func newScheduledRepos(t *testing.T) *scheduledRepos {
 	sr.paths = Paths{
 		Config: filepath.Join(tmp, "worker.json"), Dir: tmp, State: filepath.Join(tmp, "state.json"),
 		Logs: filepath.Join(tmp, "logs"), Settings: filepath.Join(tmp, "claude-settings.json"),
-		ClaudeWrap: filepath.Join(tmp, "claude.sh"), Cache: filepath.Join(tmp, "repos"),
+		Cache:    filepath.Join(tmp, "repos"),
 		Reviewer: filepath.Join(tmp, "reviewer"), RepoRuns: filepath.Join(tmp, "repos-runs"),
 	}
 	prog := filepath.Join(tmp, "tool")
@@ -408,9 +406,8 @@ func newScheduledRepos(t *testing.T) *scheduledRepos {
 	}
 	cfg := defaultConfig()
 	cfg.Enabled, cfg.TimeZone = true, "UTC"
-	cfg.Reviewer.Command, cfg.Reviewer.MarkerPrefix = prog+" {repo}", "acme"
 	cfg.Reviewer.Runs = []ReviewRun{{
-		Name: "weekly", Target: TargetRepos, Repos: []string{"acme/api", "acme/web"},
+		Name: "weekly", Command: prog + " {repo}", Target: TargetRepos, Repos: []string{"acme/api", "acme/web"},
 		JobConfig: JobConfig{Enabled: true, Times: []string{now.Add(-time.Minute).Format("15:04")}, Days: slices.Clone(dayNames)},
 	}}
 	for _, job := range fixedJobs {
@@ -702,7 +699,7 @@ func TestRepoRunsStartInTheirOwnProcess(t *testing.T) {
 	dir := t.TempDir()
 	paths := Paths{Dir: dir, State: filepath.Join(dir, "state.json"), Logs: filepath.Join(dir, "logs")}
 	cfg := twoRuns()
-	cfg.Reviewer.Command = "" // a PRs run that did run would fail, and record it
+	cfg.Reviewer.Runs[0].Command = "" // a PRs run that did run would fail, and record it
 	var started []string
 	release := make(chan struct{})
 	oldStart, oldDetached := startRun, detached
@@ -752,7 +749,7 @@ func TestPRsRunsGoBeforeRepoRunsInATick(t *testing.T) {
 	dir := t.TempDir()
 	paths := Paths{Dir: dir, State: filepath.Join(dir, "state.json"), Logs: filepath.Join(dir, "logs")}
 	cfg := twoRuns()
-	cfg.Reviewer.Command = ""
+	cfg.Reviewer.Runs[0].Command = ""
 	// The repos run comes first in the config.
 	cfg.Reviewer.Runs = []ReviewRun{cfg.Reviewer.Runs[1], cfg.Reviewer.Runs[0]}
 	oldStart, oldDetached := startRun, detached

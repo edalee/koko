@@ -5,6 +5,8 @@ export function Check(arg1:string):Promise<string>;
 
 export function GetConfig():Promise<string>;
 
+export function LoginPath():Promise<string>;
+
 export function ReadLog(arg1:number):Promise<string>;
 
 export function RunNow(arg1:string,arg2:boolean):Promise<string>;

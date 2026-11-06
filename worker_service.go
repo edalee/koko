@@ -258,6 +258,49 @@ func runNowLimit(workerJSON, job string) time.Duration {
 	return runNowMinimum
 }
 
+// LoginPath returns the PATH of your login shell, for the worker's PATH for
+// commands (plan 037). The shell starts with only HOME, USER, LOGNAME and
+// SHELL, so nothing from the shell that opened Koko leaks in. Repeated
+// folders and folders that do not exist are dropped.
+func (w *WorkerService) LoginPath() (string, error) {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/zsh"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	// The markers keep the PATH apart from anything the shell's startup files print.
+	cmd := exec.CommandContext(ctx, shell, "-l", "-i", "-c", `printf '\n<<PATH>>%s<<END>>\n' "$PATH"`)
+	cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "USER=" + os.Getenv("USER"), "LOGNAME=" + os.Getenv("LOGNAME"), "SHELL=" + shell}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("could not read your shell's PATH: %w", err)
+	}
+	return cleanPath(string(out))
+}
+
+// cleanPath takes the PATH between the markers in out, and keeps each
+// folder that exists, once, in order.
+func cleanPath(out string) (string, error) {
+	_, rest, ok := strings.Cut(out, "<<PATH>>")
+	path, _, ok2 := strings.Cut(rest, "<<END>>")
+	if !ok || !ok2 {
+		return "", fmt.Errorf("could not read your shell's PATH")
+	}
+	seen := map[string]bool{}
+	var dirs []string
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			dirs = append(dirs, dir)
+		}
+	}
+	return strings.Join(dirs, string(os.PathListSeparator)), nil
+}
+
 // ReadLog returns the end of the worker's log.
 func (w *WorkerService) ReadLog(lines int) (string, error) {
 	configDir, _ := os.UserConfigDir()

@@ -29,3 +29,15 @@ func TestRunNowLimit(t *testing.T) {
 		t.Errorf("bad JSON: %s", got)
 	}
 }
+
+func TestCleanPath(t *testing.T) {
+	dir := t.TempDir()
+	out := "Welcome!\n\n<<PATH>>" + dir + ":/usr/bin:" + dir + "::/no/such/dir:/bin<<END>>\n"
+	got, err := cleanPath(out)
+	if want := dir + ":/usr/bin:/bin"; err != nil || got != want {
+		t.Errorf("cleanPath = %q, %v, want %q", got, err, want)
+	}
+	if _, err := cleanPath("no markers"); err == nil {
+		t.Error("want an error without the markers")
+	}
+}

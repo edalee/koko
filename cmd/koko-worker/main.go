@@ -100,12 +100,9 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 	st := loadState(paths.State)
 	env := Env{
 		cfg: cfg, paths: paths, state: &st, test: test, now: time.Now(),
-		claude:      claudeRunner{settingsPath: paths.Settings},
-		send:        dmSender(cfg.Slack),
-		post:        postComment,
-		findComment: findComment,
-		prHead:      prHead,
-		online:      online,
+		claude: claudeRunner{settingsPath: paths.Settings},
+		send:   dmSender(cfg.Slack),
+		online: online,
 		persist: func(change func(*State)) error {
 			return updateState(paths.State, change)
 		},
@@ -114,13 +111,6 @@ func newEnv(cfg Config, paths Paths, test bool) Env {
 		env.send = func(_ context.Context, msg Message) error {
 			fmt.Println(printMessage(msg))
 			return nil
-		}
-		// A test run prints every comment, whatever is already on the PR.
-		env.findComment = func(context.Context, string, int, string) (string, bool, error) { return "", false, nil }
-		env.prHead = func(context.Context, string) (string, string, error) { return "OPEN", "", nil }
-		env.post = func(_ context.Context, prURL, body string) (string, error) {
-			fmt.Printf("── Comment for %s (not posted) ──\n%s\n\n", prURL, body)
-			return "", nil
 		}
 		env.persist = func(func(*State)) error { return nil }
 	}
@@ -571,9 +561,14 @@ func cmdStatus(paths Paths) error {
 	if !st.WakeBooked.IsZero() {
 		out["wakeBooked"] = st.WakeBooked
 	}
-	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths), "command": cfg.Reviewer.Command}
-	if !cfg.Reviewer.usesReviewer() {
-		reviewer["source"], reviewer["cli"] = "command", commandProgram(cfg.Reviewer.Command)
+	reviewer := map[string]any{"source": cfg.Reviewer.Source, "cli": cfg.reviewerCLI(paths)}
+	usesReviewer := false
+	for _, run := range cfg.Reviewer.Runs {
+		usesReviewer = usesReviewer || cfg.Reviewer.forRun(run).usesReviewer()
+	}
+	if !usesReviewer {
+		// Every run names its own program, so the source is not used.
+		reviewer["source"], reviewer["cli"] = "command", ""
 	} else if cfg.Reviewer.Source == SourceManaged {
 		reviewer["repo"], reviewer["branch"] = cfg.Reviewer.Repo, cfg.Reviewer.Branch
 		if st.ReviewerCommit != "" {

@@ -16,18 +16,16 @@ import (
 	"time"
 )
 
-// A repos run (plan 035) runs the shared command, with the run's arguments,
-// once per repo, for a tool that changes repos, such as one that updates
-// dependencies. It has no markers, review records or comments:
+// A repos run (plan 035) runs its command once per repo, for a tool that
+// changes repos, such as one that updates dependencies. It has no review
+// records:
 //
 //   - The command runs in a clone of the repo that only repos runs use, reset
-//     to the newest commit of the default branch, with no hooks. {reviewer},
-//     {claude} and {repo} are filled in. {pr}, {url} and {sha} name a PR, so
+//     to the newest commit of the default branch, with no hooks. {reviewer}
+//     and {repo} are filled in. {pr}, {url} and {sha} name a PR, so
 //     runProblem refuses them.
-//   - The environment carries REVIEW_REPO and RUN_KIND=repos. gh and git are
-//     not the read-only stand-ins of a review, so the tool can push and open
-//     PRs, which is its job. {claude} is the review wrapper, which denies some
-//     commands, such as git push, but is not a guard.
+//   - The environment carries REVIEW_REPO and RUN_KIND=repos, and the PATH
+//     for commands. The tool can push and open PRs, which is its job.
 //   - Exit code 0 means done, 2 means nothing to do, anything else failed.
 //
 // Repos run one after another. A scheduled run saves each repo's outcome for
@@ -266,7 +264,7 @@ func stopReason(env Env, job string) string {
 func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 	job := reviewJob(run.Name)
 	if !env.test {
-		// The managed reviewer clone and the wrapper are shared with review runs.
+		// The managed reviewer clone is shared with PRs runs.
 		unlock, err := takeLock(filepath.Join(env.paths.Dir, "reviewer.lock"), env.noWait)
 		if err != nil {
 			return err
@@ -291,9 +289,6 @@ func runRepos(ctx context.Context, env Env, run ReviewRun) error {
 		}
 		fmt.Fprintf(&b, "Each repo may take up to %s. Nothing runs in a test.", env.runTimeout())
 		return env.notify(ctx, b.String())
-	}
-	if err := os.WriteFile(env.paths.ClaudeWrap, []byte(claudeWrapper), 0o700); err != nil {
-		return err
 	}
 	scheduled := env.scheduled && !env.slot.IsZero()
 	save := func(repo string, rec RepoRecord) error {
@@ -418,7 +413,7 @@ func outcomeLine(outcomes []repoOutcome) string {
 func repoCommand(env Env, cli, repo string) (cmdEnv []string, prog string, args []string, err error) {
 	var p SearchPR
 	p.Repository.NameWithOwner = repo
-	return reviewerCommand(env.cfg.Reviewer.Command, cli, env.paths.ClaudeWrap, p, "")
+	return reviewerCommand(env.cfg.Reviewer.Command, cli, p, "")
 }
 
 // runInRepo runs the command for repo in its checkout dir. The output goes to
@@ -426,6 +421,9 @@ func repoCommand(env Env, cli, repo string) (cmdEnv []string, prog string, args 
 func runInRepo(ctx context.Context, env Env, cli, repo, dir string) repoOutcome {
 	o := repoOutcome{repo: repo, status: repoFailed}
 	cmdEnv, prog, args, err := repoCommand(env, cli, repo)
+	if err == nil {
+		prog, err = findProgram(prog, env.cfg.CommandPath)
+	}
 	if err != nil {
 		o.why = err.Error()
 		return o
@@ -444,7 +442,7 @@ func runInRepo(ctx context.Context, env Env, cli, repo, dir string) repoOutcome 
 	defer cancel()
 	cmd := groupCommand(ctx, prog, args...)
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), cmdEnv...), "REVIEW_REPO="+repo, "RUN_KIND=repos")
+	cmd.Env = commandEnv(os.Environ(), env.cfg.CommandPath, cmdEnv, "REVIEW_REPO="+repo, "RUN_KIND=repos")
 	cmd.Stdout, cmd.Stderr = out, out
 	err = cmd.Run()
 
