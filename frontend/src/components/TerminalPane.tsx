@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ReplayBuffer, Resize, Write } from "../../wailsjs/go/main/TerminalManager";
 import { BrowserOpenURL, EventsOn } from "../../wailsjs/runtime/runtime";
+import { toLogseq } from "../lib/logseq";
 import "@xterm/xterm/css/xterm.css";
 
 /**
@@ -110,6 +111,15 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
     if (!term?.hasSelection() || !serialize) return;
     const html = serialize.serializeAsHTML({ onlySelection: true });
     navigator.clipboard.writeText(htmlToMarkdown(html));
+  }, []);
+
+  // Logseq keeps notes as an outline, so each paragraph becomes a block.
+  const copyForLogseq = useCallback(() => {
+    const term = termRef.current;
+    const serialize = serializeRef.current;
+    if (!term?.hasSelection() || !serialize) return;
+    const html = serialize.serializeAsHTML({ onlySelection: true });
+    navigator.clipboard.writeText(toLogseq(htmlToMarkdown(html)));
   }, []);
 
   // Web-search the selection in the OS default browser. BrowserOpenURL hands
@@ -529,6 +539,10 @@ export default function TerminalPane({ sessionId, active, onExit, onReload }: Te
             copyAsMarkdown();
             setCtxMenu(null);
           }}
+          onCopyLogseq={() => {
+            copyForLogseq();
+            setCtxMenu(null);
+          }}
           onPaste={async () => {
             const text = await navigator.clipboard.readText();
             if (text && termRef.current) Write(sessionIdRef.current, utf8ToBase64(text));
@@ -574,6 +588,7 @@ interface CtxMenuProps {
   hasSelection: boolean;
   onCopy: () => void;
   onCopyMarkdown: () => void;
+  onCopyLogseq: () => void;
   onPaste: () => void;
   onSearchWeb: () => void;
   onSelectAll: () => void;
@@ -588,6 +603,7 @@ function ContextMenu({
   hasSelection,
   onCopy,
   onCopyMarkdown,
+  onCopyLogseq,
   onPaste,
   onSearchWeb,
   onSelectAll,
@@ -604,6 +620,7 @@ function ContextMenu({
   }[] = [
     { label: "Copy", shortcut: "⌘C", action: onCopy, disabled: !hasSelection },
     { label: "Copy as Markdown", shortcut: "⇧⌘C", action: onCopyMarkdown, disabled: !hasSelection },
+    { label: "Copy for Logseq", action: onCopyLogseq, disabled: !hasSelection },
     { label: "Paste", shortcut: "⌘V", action: onPaste },
     // `label` doubles as the React key, so separators need distinct ones.
     { label: "sep-clipboard", action: () => {}, separator: true },
